@@ -17,3 +17,199 @@
 .maplibregl-ctrl-group button {
   filter: invert(0.8);
 }
+
+/* ── Toolbar ── */
+
+.map-toolbar {
+  position: absolute;
+  top: 10px;
+  left: 10px;
+  right: 60px;
+  display: flex;
+  align-items: center;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 4px;
+  gap: 2px;
+  z-index: 10;
+}
+
+.toolbar-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 14px;
+  transition: all 0.15s;
+  line-height: 1;
+}
+
+.toolbar-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.toolbar-btn.active {
+  background: var(--accent);
+  color: var(--bg-surface);
+}
+
+.toolbar-btn.danger:hover {
+  background: var(--danger);
+  color: white;
+}
+
+.toolbar-btn.save:hover {
+  background: var(--success);
+  color: var(--bg-surface);
+}
+
+.toolbar-divider {
+  width: 1px;
+  height: 20px;
+  background: var(--border);
+  margin: 0 4px;
+  flex-shrink: 0;
+}
+
+.toolbar-spacer {
+  flex: 1;
+}
+
+/* ── Search ── */
+
+.search-panel {
+  position: absolute;
+  top: 52px;
+  left: 10px;
+  width: 320px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 10;
+  overflow: hidden;
+}
+
+.search-input-row {
+  display: flex;
+  padding: 8px;
+  gap: 6px;
+}
+
+.search-input {
+  flex: 1;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.search-input:focus {
+  border-color: var(--accent);
+}
+
+.search-input::placeholder {
+  color: var(--text-muted);
+}
+
+.search-go {
+  background: var(--accent);
+  color: var(--bg-surface);
+  border: none;
+  padding: 6px 12px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.search-go:hover {
+  background: var(--accent-hover);
+}
+
+.search-results {
+  border-top: 1px solid var(--border);
+  max-height: 240px;
+  overflow-y: auto;
+}
+
+.search-result {
+  padding: 8px 12px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  transition: background 0.1s;
+  line-height: 1.4;
+}
+
+.search-result:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+/* ── Basemap switcher ── */
+
+.basemap-panel {
+  position: absolute;
+  top: 52px;
+  right: 60px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  z-index: 10;
+  padding: 4px;
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+}
+
+.basemap-option {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  padding: 8px 16px;
+  border-radius: 6px;
+  font-size: 13px;
+  font-family: inherit;
+  cursor: pointer;
+  text-align: left;
+  transition: all 0.15s;
+}
+
+.basemap-option:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.basemap-option.active {
+  background: var(--accent);
+  color: var(--bg-surface);
+  font-weight: 600;
+}
+
+/* ── Measurement overlay ── */
+
+.measurement-overlay {
+  position: absolute;
+  bottom: 40px;
+  left: 50%;
+  transform: translateX(-50%);
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 16px;
+  border-radius: 20px;
+  font-size: 12px;
+  font-weight: 600;
+  z-index: 10;
+  white-space: nowrap;
+  pointer-events: none;
+}

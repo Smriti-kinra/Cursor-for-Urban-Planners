@@ -6,7 +6,7 @@ from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 
 from database import init_db
-from routers import files, chat, artifacts
+from routers import files, chat, artifacts, reports
 
 
 @asynccontextmanager
@@ -28,6 +28,7 @@ app.add_middleware(
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
+app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 
 
 @app.get("/health")

@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "mapState": {
+    "center": [
+      72.87198202249999,
+      27.564747864469624
+    ],
+    "zoom": 7.447485394622463,
+    "bearing": 0,
+    "pitch": 0
+  },
+  "layers": [
+    {
+      "name": "india-composite",
+      "filePath": "/Users/Utkarsh/Desktop/Projects/Cursor for Urban Planners/maps/Country/india-composite.geojson",
+      "visible": true,
+      "color": "#e6194b"
+    },
+    {
+      "name": "india-land-simplified",
+      "filePath": "/Users/Utkarsh/Desktop/Projects/Cursor for Urban Planners/maps/Country/india-land-simplified.geojson",
+      "visible": true,
+      "color": "#3cb44b"
+    }
+  ],
+  "drawnFeatures": [],
+  "conversations": [],
+  "activeConversationId": null,
+  "basemap": "street"
+}

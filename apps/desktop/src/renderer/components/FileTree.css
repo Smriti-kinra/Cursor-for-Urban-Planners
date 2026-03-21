@@ -49,3 +49,12 @@
 .tree-item.file .tree-name {
   color: var(--text-secondary);
 }
+
+.tree-item.geojson .tree-name {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.tree-item.geojson .tree-icon {
+  color: var(--accent);
+}

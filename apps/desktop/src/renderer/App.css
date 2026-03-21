@@ -11,9 +11,8 @@
   --accent-hover: #74c7ec;
   --success: #a6e3a1;
   --danger: #f38ba8;
+  --warning: #f9e2af;
   --titlebar-height: 38px;
-  --panel-width: 260px;
-  --right-panel-width: 340px;
 }
 
 * {
@@ -30,6 +29,17 @@ body {
   height: 100vh;
 }
 
+body.resizing *,
+body.resizing .map-container,
+body.resizing iframe {
+  pointer-events: none !important;
+  user-select: none !important;
+}
+
+body.resizing .resize-handle {
+  pointer-events: auto !important;
+}
+
 #root {
   height: 100vh;
 }
@@ -40,7 +50,7 @@ body {
   height: 100vh;
 }
 
-/* ---- Title bar ---- */
+/* ── Title bar ── */
 
 .titlebar {
   height: var(--titlebar-height);
@@ -82,7 +92,7 @@ body {
   color: var(--bg-surface);
 }
 
-/* ---- Layout ---- */
+/* ── Layout ── */
 
 .layout {
   display: flex;
@@ -94,11 +104,11 @@ body {
   display: flex;
   flex-direction: column;
   background: var(--bg-secondary);
+  flex-shrink: 0;
 }
 
 .left-panel {
-  width: var(--panel-width);
-  min-width: 200px;
+  min-width: 180px;
   border-right: 1px solid var(--border);
 }
 
@@ -106,29 +116,37 @@ body {
   flex: 1;
   position: relative;
   overflow: hidden;
+  min-width: 300px;
 }
 
 .right-panel {
-  width: var(--right-panel-width);
   min-width: 280px;
   border-left: 1px solid var(--border);
 }
 
-.panel-header {
-  padding: 10px 16px;
-  font-size: 11px;
-  font-weight: 700;
-  text-transform: uppercase;
-  letter-spacing: 0.05em;
-  color: var(--text-muted);
-  border-bottom: 1px solid var(--border);
+/* ── Resize handles ── */
+
+.resize-handle {
+  width: 5px;
+  cursor: col-resize;
+  background: transparent;
+  flex-shrink: 0;
+  position: relative;
+  z-index: 20;
+  transition: background 0.15s;
 }
 
-/* ---- Right panel tabs ---- */
+.resize-handle:hover,
+.resize-handle:active {
+  background: var(--accent);
+}
+
+/* ── Tabs ── */
 
 .tab-bar {
   display: flex;
   border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
 }
 
 .tab {
@@ -142,6 +160,10 @@ body {
   cursor: pointer;
   border-bottom: 2px solid transparent;
   transition: all 0.15s;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
 }
 
 .tab:hover {
@@ -152,4 +174,23 @@ body {
 .tab.active {
   color: var(--accent);
   border-bottom-color: var(--accent);
+}
+
+.tab-badge {
+  background: var(--accent);
+  color: var(--bg-surface);
+  font-size: 10px;
+  font-weight: 700;
+  padding: 1px 6px;
+  border-radius: 10px;
+}
+
+.panel-header {
+  padding: 10px 16px;
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  border-bottom: 1px solid var(--border);
 }

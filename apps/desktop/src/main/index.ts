@@ -110,6 +110,15 @@ ipcMain.handle('read-file', async (_event, filePath: string) => {
   }
 })
 
+ipcMain.handle('write-file', async (_event, filePath: string, content: string) => {
+  try {
+    fs.writeFileSync(filePath, content, 'utf-8')
+    return true
+  } catch {
+    return false
+  }
+})
+
 // --- App lifecycle ---
 
 app.whenReady().then(async () => {
