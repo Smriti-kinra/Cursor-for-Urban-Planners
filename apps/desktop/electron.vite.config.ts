@@ -15,6 +15,14 @@ export default defineConfig({
         '@': resolve('src/renderer')
       }
     },
-    plugins: [react()]
+    plugins: [react()],
+    optimizeDeps: {
+      esbuildOptions: {
+        target: 'es2022',
+      },
+    },
+    build: {
+      target: 'es2022',
+    },
   }
 })

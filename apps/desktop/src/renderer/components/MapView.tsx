@@ -20,13 +20,13 @@ interface MapViewProps {
   drawMode: string | null
   initialState: MapViewState
   drawnFeatures: any[]
-  mapAction: MapAction | null
+  mapActions: MapAction[]
   onMapMove: (state: MapViewState) => void
   onBasemapChange: (basemap: string) => void
   onDrawModeChange: (mode: string | null) => void
   onDrawChange: (features: any[]) => void
   onSaveDrawing: () => void
-  onActionHandled: () => void
+  onActionsProcessed: () => void
 }
 
 const DRAW_MODES = [
@@ -42,22 +42,26 @@ export default function MapView({
   drawMode,
   initialState,
   drawnFeatures,
-  mapAction,
+  mapActions,
   onMapMove,
   onBasemapChange,
   onDrawModeChange,
   onDrawChange,
   onSaveDrawing,
-  onActionHandled,
+  onActionsProcessed,
 }: MapViewProps) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const drawRef = useRef<TerraDraw | null>(null)
-  const mapReadyRef = useRef(false)
   const onDrawChangeRef = useRef(onDrawChange)
   onDrawChangeRef.current = onDrawChange
   const ownLayerIds = useRef(new Set<string>())
+  const initBasemapRef = useRef(basemap)
+  const aiMarkersRef = useRef<maplibregl.Marker[]>([])
+  const aiShapeCounterRef = useRef(0)
+  const aiShapeIdsRef = useRef<Set<string>>(new Set())
 
+  const [mapReady, setMapReady] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
   const [searchResults, setSearchResults] = useState<any[]>([])
   const [showSearch, setShowSearch] = useState(false)
@@ -68,22 +72,14 @@ export default function MapView({
     points: number
   } | null>(null)
 
-  const ensureBasemapBottom = useCallback((map: maplibregl.Map) => {
-    const styleLayers = map.getStyle()?.layers
-    if (!styleLayers || styleLayers.length === 0) return
-    if (styleLayers[0]?.id === 'basemap') return
-    const nonBasemapFirst = styleLayers.find((l) => l.id !== 'basemap')
-    if (nonBasemapFirst && map.getLayer('basemap')) {
-      map.moveLayer('basemap', nonBasemapFirst.id)
-    }
-  }, [])
-
   // ── Initialize map ──
 
   useEffect(() => {
     if (!containerRef.current || mapRef.current) return
 
-    const { tiles, attribution } = BASEMAPS[basemap] || BASEMAPS.street
+    const { tiles, attribution } = BASEMAPS[initBasemapRef.current] || BASEMAPS.street
+
+    console.log('[MapView] Creating map with basemap:', initBasemapRef.current)
 
     const map = new maplibregl.Map({
       container: containerRef.current,
@@ -117,47 +113,15 @@ export default function MapView({
     mapRef.current = map
 
     map.on('load', () => {
-      mapReadyRef.current = true
+      console.log('[MapView] Map loaded. Style layers:', map.getStyle().layers.map((l) => l.id))
 
       try {
-        if (drawRef.current) return
-
         const draw = new TerraDraw({
-          adapter: new TerraDrawMapLibreGLAdapter({
-            map,
-            coordinatePrecision: 9,
-          }),
+          adapter: new TerraDrawMapLibreGLAdapter({ map }),
           modes: [
-            new TerraDrawPolygonMode({
-              styles: {
-                fillColor: '#3b82f6',
-                fillOpacity: 0.25,
-                outlineColor: '#2563eb',
-                outlineWidth: 2,
-                closingPointColor: '#2563eb',
-                closingPointOutlineColor: '#ffffff',
-                closingPointOutlineWidth: 2,
-                closingPointWidth: 6,
-              },
-            }),
-            new TerraDrawLineStringMode({
-              styles: {
-                lineStringColor: '#ef4444',
-                lineStringWidth: 3,
-                closingPointColor: '#ef4444',
-                closingPointOutlineColor: '#ffffff',
-                closingPointOutlineWidth: 2,
-                closingPointWidth: 6,
-              },
-            }),
-            new TerraDrawPointMode({
-              styles: {
-                pointColor: '#f59e0b',
-                pointOutlineColor: '#ffffff',
-                pointOutlineWidth: 2,
-                pointWidth: 8,
-              },
-            }),
+            new TerraDrawPolygonMode(),
+            new TerraDrawLineStringMode(),
+            new TerraDrawPointMode(),
             new TerraDrawSelectMode({
               flags: {
                 polygon: {
@@ -180,6 +144,7 @@ export default function MapView({
         })
 
         draw.start()
+        console.log('[MapView] TerraDraw started successfully')
 
         draw.on('change', () => {
           const snapshot = draw.getSnapshot()
@@ -187,14 +152,22 @@ export default function MapView({
         })
 
         drawRef.current = draw
-        ensureBasemapBottom(map)
       } catch (err) {
-        console.error('Failed to initialize TerraDraw:', err)
+        console.error('[MapView] TerraDraw init FAILED:', err)
       }
+
+      console.log(
+        '[MapView] After TerraDraw, style layers:',
+        map.getStyle().layers.map((l) => l.id),
+      )
+
+      setMapReady(true)
     })
 
     return () => {
-      mapReadyRef.current = false
+      setMapReady(false)
+      for (const m of aiMarkersRef.current) m.remove()
+      aiMarkersRef.current = []
       if (drawRef.current) {
         drawRef.current.stop()
         drawRef.current = null
@@ -204,121 +177,118 @@ export default function MapView({
     }
   }, []) // eslint-disable-line react-hooks/exhaustive-deps
 
-  // ── Sync GeoJSON layers (only touches our own layer-* sources) ──
-
-  const syncLayers = useCallback(
-    (map: maplibregl.Map) => {
-      const style = map.getStyle()
-      if (!style) return
-
-      const desiredIds = new Set(layers.map((l) => l.id))
-
-      for (const id of ownLayerIds.current) {
-        if (!desiredIds.has(id)) {
-          for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
-            if (map.getLayer(`${id}${suffix}`)) map.removeLayer(`${id}${suffix}`)
-          }
-          if (map.getSource(id)) map.removeSource(id)
-          ownLayerIds.current.delete(id)
-        }
-      }
-
-      for (const layer of layers) {
-        if (!map.getSource(layer.id)) {
-          map.addSource(layer.id, { type: 'geojson', data: layer.data })
-          ownLayerIds.current.add(layer.id)
-
-          map.addLayer({
-            id: `${layer.id}-fill`,
-            type: 'fill',
-            source: layer.id,
-            filter: [
-              'any',
-              ['==', ['geometry-type'], 'Polygon'],
-              ['==', ['geometry-type'], 'MultiPolygon'],
-            ],
-            paint: { 'fill-color': layer.color, 'fill-opacity': 0.3 },
-            layout: { visibility: layer.visible ? 'visible' : 'none' },
-          })
-
-          map.addLayer({
-            id: `${layer.id}-outline`,
-            type: 'line',
-            source: layer.id,
-            filter: [
-              'any',
-              ['==', ['geometry-type'], 'Polygon'],
-              ['==', ['geometry-type'], 'MultiPolygon'],
-            ],
-            paint: { 'line-color': layer.color, 'line-width': 2 },
-            layout: { visibility: layer.visible ? 'visible' : 'none' },
-          })
-
-          map.addLayer({
-            id: `${layer.id}-line`,
-            type: 'line',
-            source: layer.id,
-            filter: [
-              'any',
-              ['==', ['geometry-type'], 'LineString'],
-              ['==', ['geometry-type'], 'MultiLineString'],
-            ],
-            paint: { 'line-color': layer.color, 'line-width': 2 },
-            layout: { visibility: layer.visible ? 'visible' : 'none' },
-          })
-
-          map.addLayer({
-            id: `${layer.id}-circle`,
-            type: 'circle',
-            source: layer.id,
-            filter: [
-              'any',
-              ['==', ['geometry-type'], 'Point'],
-              ['==', ['geometry-type'], 'MultiPoint'],
-            ],
-            paint: {
-              'circle-color': layer.color,
-              'circle-radius': 6,
-              'circle-stroke-color': '#ffffff',
-              'circle-stroke-width': 1.5,
-            },
-            layout: { visibility: layer.visible ? 'visible' : 'none' },
-          })
-
-          try {
-            const bbox = turf.bbox(layer.data) as [number, number, number, number]
-            if (bbox.every((v) => isFinite(v))) {
-              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
-            }
-          } catch {
-            /* ignore invalid bbox */
-          }
-        } else {
-          const vis = layer.visible ? 'visible' : 'none'
-          for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
-            if (map.getLayer(`${layer.id}${suffix}`)) {
-              map.setLayoutProperty(`${layer.id}${suffix}`, 'visibility', vis)
-            }
-          }
-        }
-      }
-
-      ensureBasemapBottom(map)
-    },
-    [layers, ensureBasemapBottom],
-  )
+  // ── Sync GeoJSON layers ──
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !mapReadyRef.current) return
-    syncLayers(map)
-  }, [layers, syncLayers])
+    if (!map || !mapReady) return
+
+    console.log('[MapView] syncLayers running, count:', layers.length)
+
+    const desiredIds = new Set(layers.map((l) => l.id))
+
+    for (const id of ownLayerIds.current) {
+      if (!desiredIds.has(id)) {
+        for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
+          if (map.getLayer(`${id}${suffix}`)) map.removeLayer(`${id}${suffix}`)
+        }
+        if (map.getSource(id)) map.removeSource(id)
+        ownLayerIds.current.delete(id)
+      }
+    }
+
+    for (const layer of layers) {
+      if (!map.getSource(layer.id)) {
+        console.log('[MapView] Adding layer source:', layer.id, layer.name)
+        map.addSource(layer.id, { type: 'geojson', data: layer.data })
+        ownLayerIds.current.add(layer.id)
+
+        map.addLayer({
+          id: `${layer.id}-fill`,
+          type: 'fill',
+          source: layer.id,
+          filter: [
+            'any',
+            ['==', ['geometry-type'], 'Polygon'],
+            ['==', ['geometry-type'], 'MultiPolygon'],
+          ],
+          paint: { 'fill-color': layer.color, 'fill-opacity': 0.3 },
+          layout: { visibility: layer.visible ? 'visible' : 'none' },
+        })
+
+        map.addLayer({
+          id: `${layer.id}-outline`,
+          type: 'line',
+          source: layer.id,
+          filter: [
+            'any',
+            ['==', ['geometry-type'], 'Polygon'],
+            ['==', ['geometry-type'], 'MultiPolygon'],
+          ],
+          paint: { 'line-color': layer.color, 'line-width': 2 },
+          layout: { visibility: layer.visible ? 'visible' : 'none' },
+        })
+
+        map.addLayer({
+          id: `${layer.id}-line`,
+          type: 'line',
+          source: layer.id,
+          filter: [
+            'any',
+            ['==', ['geometry-type'], 'LineString'],
+            ['==', ['geometry-type'], 'MultiLineString'],
+          ],
+          paint: { 'line-color': layer.color, 'line-width': 2 },
+          layout: { visibility: layer.visible ? 'visible' : 'none' },
+        })
+
+        map.addLayer({
+          id: `${layer.id}-circle`,
+          type: 'circle',
+          source: layer.id,
+          filter: [
+            'any',
+            ['==', ['geometry-type'], 'Point'],
+            ['==', ['geometry-type'], 'MultiPoint'],
+          ],
+          paint: {
+            'circle-color': layer.color,
+            'circle-radius': 6,
+            'circle-stroke-color': '#ffffff',
+            'circle-stroke-width': 1.5,
+          },
+          layout: { visibility: layer.visible ? 'visible' : 'none' },
+        })
+
+        console.log('[MapView] Layer added. All layers now:', map.getStyle().layers.map((l) => l.id))
+
+        try {
+          const bbox = turf.bbox(layer.data) as [number, number, number, number]
+          if (bbox.every((v) => isFinite(v))) {
+            map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
+          }
+        } catch {
+          /* ignore invalid bbox */
+        }
+      } else {
+        const vis = layer.visible ? 'visible' : 'none'
+        for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
+          if (map.getLayer(`${layer.id}${suffix}`)) {
+            map.setLayoutProperty(`${layer.id}${suffix}`, 'visibility', vis)
+          }
+        }
+      }
+    }
+  }, [layers, mapReady])
 
   // ── Basemap switching ──
 
   useEffect(() => {
     const map = mapRef.current
-    if (!map || !mapReadyRef.current) return
+    if (!map || !mapReady) return
+    if (basemap === initBasemapRef.current && map.getSource('basemap')) return
+
+    console.log('[MapView] Switching basemap to:', basemap)
 
     const { tiles, attribution } = BASEMAPS[basemap] || BASEMAPS.street
 
@@ -333,19 +303,31 @@ export default function MapView({
     } as any)
 
     map.addLayer({ id: 'basemap', type: 'raster', source: 'basemap', minzoom: 0, maxzoom: 19 })
-    ensureBasemapBottom(map)
-  }, [basemap, ensureBasemapBottom])
+
+    const styleLayers = map.getStyle()?.layers
+    if (styleLayers && styleLayers.length > 1 && styleLayers[styleLayers.length - 1]?.id === 'basemap') {
+      const firstNonBasemap = styleLayers.find((l) => l.id !== 'basemap')
+      if (firstNonBasemap) {
+        map.moveLayer('basemap', firstNonBasemap.id)
+      }
+    }
+
+    initBasemapRef.current = basemap
+    console.log('[MapView] Basemap switched. Layers:', map.getStyle().layers.map((l) => l.id))
+  }, [basemap, mapReady])
 
   // ── Draw mode ──
 
   useEffect(() => {
-    if (!drawRef.current) return
+    if (!drawRef.current || !mapReady) return
+    const mode = drawMode || 'static'
     try {
-      drawRef.current.setMode(drawMode || 'static')
+      drawRef.current.setMode(mode)
+      console.log('[MapView] Draw mode set to:', mode)
     } catch (err) {
-      console.error('TerraDraw setMode failed:', drawMode, err)
+      console.error('[MapView] setMode FAILED for:', mode, err)
     }
-  }, [drawMode])
+  }, [drawMode, mapReady])
 
   // ── Measurement ──
 
@@ -373,79 +355,264 @@ export default function MapView({
     setMeasurement({ area, length, points })
   }, [drawnFeatures])
 
-  // ── Map actions (fly_to, highlight, set_view) ──
+  // ── Map actions (all AI-driven actions) ──
 
   useEffect(() => {
-    if (!mapAction || !mapRef.current) return
+    if (mapActions.length === 0 || !mapRef.current || !mapReady) return
     const map = mapRef.current
 
-    if (mapAction.type === 'fly_to') {
-      map.flyTo({
-        center: [mapAction.payload.lng, mapAction.payload.lat],
-        zoom: mapAction.payload.zoom || 15,
-        duration: 2000,
-      })
-    } else if (mapAction.type === 'set_view') {
-      map.jumpTo({
-        center: mapAction.payload.center,
-        zoom: mapAction.payload.zoom,
-        bearing: mapAction.payload.bearing || 0,
-        pitch: mapAction.payload.pitch || 0,
-      })
-    } else if (mapAction.type === 'highlight_features') {
-      const { layer_name, property_name, property_value } = mapAction.payload
-      const target = layers.find((l) => l.name.toLowerCase() === layer_name?.toLowerCase())
-      if (target) {
-        const filtered = (target.data.features || []).filter(
-          (f: any) => String(f.properties?.[property_name]) === String(property_value),
-        )
-        if (filtered.length > 0) {
-          const hlId = 'highlight-temp'
-          if (map.getSource(hlId)) {
-            if (map.getLayer(`${hlId}-fill`)) map.removeLayer(`${hlId}-fill`)
-            if (map.getLayer(`${hlId}-line`)) map.removeLayer(`${hlId}-line`)
-            map.removeSource(hlId)
-          }
-          map.addSource(hlId, {
-            type: 'geojson',
-            data: { type: 'FeatureCollection', features: filtered },
+    for (const action of mapActions) {
+      const { type, payload } = action
+
+      switch (type) {
+        case 'fly_to':
+          map.flyTo({
+            center: [payload.lng, payload.lat],
+            zoom: payload.zoom || 15,
+            duration: 2000,
           })
-          map.addLayer({
-            id: `${hlId}-fill`,
-            type: 'fill',
-            source: hlId,
-            paint: { 'fill-color': '#ffff00', 'fill-opacity': 0.5 },
+          break
+
+        case 'fit_bounds':
+          map.fitBounds(
+            [
+              [payload.west, payload.south],
+              [payload.east, payload.north],
+            ],
+            { padding: 60, duration: 1500 },
+          )
+          break
+
+        case 'set_view':
+          map.jumpTo({
+            center: payload.center,
+            zoom: payload.zoom,
+            bearing: payload.bearing || 0,
+            pitch: payload.pitch || 0,
           })
-          map.addLayer({
-            id: `${hlId}-line`,
-            type: 'line',
-            source: hlId,
-            paint: { 'line-color': '#ffff00', 'line-width': 3 },
-          })
-          try {
-            const bbox = turf.bbox({
-              type: 'FeatureCollection',
-              features: filtered,
-            }) as [number, number, number, number]
-            if (bbox.every((v) => isFinite(v))) {
-              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
-            }
-          } catch {
-            /* ignore */
-          }
-          setTimeout(() => {
-            if (!mapRef.current) return
-            const m = mapRef.current
-            if (m.getLayer(`${hlId}-fill`)) m.removeLayer(`${hlId}-fill`)
-            if (m.getLayer(`${hlId}-line`)) m.removeLayer(`${hlId}-line`)
-            if (m.getSource(hlId)) m.removeSource(hlId)
-          }, 10000)
+          break
+
+        case 'add_marker': {
+          const el = document.createElement('div')
+          el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${payload.color || '#e6194b'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;`
+          const marker = new maplibregl.Marker({ element: el })
+            .setLngLat([payload.lng, payload.lat])
+            .setPopup(
+              new maplibregl.Popup({ offset: 10 }).setHTML(
+                `<div style="font:13px/1.4 system-ui;max-width:200px"><b>${payload.label || ''}</b></div>`,
+              ),
+            )
+            .addTo(map)
+          aiMarkersRef.current.push(marker)
+          break
         }
+
+        case 'add_markers': {
+          for (const m of payload.markers || []) {
+            const el = document.createElement('div')
+            el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${m.color || '#e6194b'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;`
+            const marker = new maplibregl.Marker({ element: el })
+              .setLngLat([m.lng, m.lat])
+              .setPopup(
+                new maplibregl.Popup({ offset: 10 }).setHTML(
+                  `<div style="font:13px/1.4 system-ui;max-width:200px"><b>${m.label || ''}</b></div>`,
+                ),
+              )
+              .addTo(map)
+            aiMarkersRef.current.push(marker)
+          }
+          break
+        }
+
+        case 'clear_markers':
+          for (const m of aiMarkersRef.current) m.remove()
+          aiMarkersRef.current = []
+          break
+
+        case 'draw_line': {
+          const lineId = `ai-line-${aiShapeCounterRef.current++}`
+          map.addSource(lineId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: { type: 'LineString', coordinates: payload.coordinates },
+              properties: { label: payload.label || '' },
+            },
+          })
+          map.addLayer({
+            id: lineId,
+            type: 'line',
+            source: lineId,
+            paint: {
+              'line-color': payload.color || '#ef4444',
+              'line-width': payload.width || 3,
+            },
+          })
+          aiShapeIdsRef.current.add(lineId)
+          break
+        }
+
+        case 'draw_polygon': {
+          const polyId = `ai-poly-${aiShapeCounterRef.current++}`
+          const rawCoords = payload.coordinates || []
+          const ring =
+            rawCoords.length >= 3 &&
+            (rawCoords[0][0] !== rawCoords[rawCoords.length - 1][0] ||
+              rawCoords[0][1] !== rawCoords[rawCoords.length - 1][1])
+              ? [...rawCoords, rawCoords[0]]
+              : rawCoords
+          map.addSource(polyId, {
+            type: 'geojson',
+            data: {
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [ring] },
+              properties: { label: payload.label || '' },
+            },
+          })
+          map.addLayer({
+            id: `${polyId}-fill`,
+            type: 'fill',
+            source: polyId,
+            paint: {
+              'fill-color': payload.color || '#3b82f6',
+              'fill-opacity': payload.opacity ?? 0.3,
+            },
+          })
+          map.addLayer({
+            id: `${polyId}-outline`,
+            type: 'line',
+            source: polyId,
+            paint: { 'line-color': payload.color || '#3b82f6', 'line-width': 2 },
+          })
+          aiShapeIdsRef.current.add(polyId)
+          aiShapeIdsRef.current.add(`${polyId}-fill`)
+          aiShapeIdsRef.current.add(`${polyId}-outline`)
+          break
+        }
+
+        case 'draw_circle': {
+          const circleId = `ai-circle-${aiShapeCounterRef.current++}`
+          const circle = turf.circle(
+            [payload.center_lng, payload.center_lat],
+            payload.radius_km,
+            { units: 'kilometers', steps: 64 },
+          )
+          map.addSource(circleId, { type: 'geojson', data: circle })
+          map.addLayer({
+            id: `${circleId}-fill`,
+            type: 'fill',
+            source: circleId,
+            paint: {
+              'fill-color': payload.color || '#8b5cf6',
+              'fill-opacity': 0.2,
+            },
+          })
+          map.addLayer({
+            id: `${circleId}-outline`,
+            type: 'line',
+            source: circleId,
+            paint: {
+              'line-color': payload.color || '#8b5cf6',
+              'line-width': 2,
+              'line-dasharray': [4, 2],
+            },
+          })
+          aiShapeIdsRef.current.add(circleId)
+          aiShapeIdsRef.current.add(`${circleId}-fill`)
+          aiShapeIdsRef.current.add(`${circleId}-outline`)
+          break
+        }
+
+        case 'highlight_features': {
+          const { layer_name, property_name, property_value } = payload
+          const target = layers.find(
+            (l) => l.name.toLowerCase() === layer_name?.toLowerCase(),
+          )
+          if (target) {
+            const filtered = (target.data.features || []).filter(
+              (f: any) =>
+                String(f.properties?.[property_name]) === String(property_value),
+            )
+            if (filtered.length > 0) {
+              const hlId = 'highlight-temp'
+              if (map.getSource(hlId)) {
+                if (map.getLayer(`${hlId}-fill`)) map.removeLayer(`${hlId}-fill`)
+                if (map.getLayer(`${hlId}-line`)) map.removeLayer(`${hlId}-line`)
+                map.removeSource(hlId)
+              }
+              map.addSource(hlId, {
+                type: 'geojson',
+                data: { type: 'FeatureCollection', features: filtered },
+              })
+              map.addLayer({
+                id: `${hlId}-fill`,
+                type: 'fill',
+                source: hlId,
+                paint: { 'fill-color': '#ffff00', 'fill-opacity': 0.5 },
+              })
+              map.addLayer({
+                id: `${hlId}-line`,
+                type: 'line',
+                source: hlId,
+                paint: { 'line-color': '#ffff00', 'line-width': 3 },
+              })
+              try {
+                const bbox = turf.bbox({
+                  type: 'FeatureCollection',
+                  features: filtered,
+                }) as [number, number, number, number]
+                if (bbox.every((v) => isFinite(v))) {
+                  map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
+                }
+              } catch {
+                /* ignore */
+              }
+              setTimeout(() => {
+                if (!mapRef.current) return
+                const m = mapRef.current
+                if (m.getLayer(`${hlId}-fill`)) m.removeLayer(`${hlId}-fill`)
+                if (m.getLayer(`${hlId}-line`)) m.removeLayer(`${hlId}-line`)
+                if (m.getSource(hlId)) m.removeSource(hlId)
+              }, 10000)
+            }
+          }
+          break
+        }
+
+        case 'set_layer_style': {
+          const { layer_name, fill_color, line_color, opacity } = payload
+          const target = layers.find(
+            (l) => l.name.toLowerCase() === layer_name?.toLowerCase(),
+          )
+          if (target) {
+            const lid = target.id
+            if (fill_color && map.getLayer(`${lid}-fill`))
+              map.setPaintProperty(`${lid}-fill`, 'fill-color', fill_color)
+            if (opacity !== undefined && map.getLayer(`${lid}-fill`))
+              map.setPaintProperty(`${lid}-fill`, 'fill-opacity', opacity)
+            if ((line_color || fill_color) && map.getLayer(`${lid}-outline`))
+              map.setPaintProperty(
+                `${lid}-outline`,
+                'line-color',
+                line_color || fill_color,
+              )
+            if ((line_color || fill_color) && map.getLayer(`${lid}-line`))
+              map.setPaintProperty(
+                `${lid}-line`,
+                'line-color',
+                line_color || fill_color,
+              )
+          }
+          break
+        }
+
+        default:
+          break
       }
     }
 
-    onActionHandled()
-  }, [mapAction]) // eslint-disable-line react-hooks/exhaustive-deps
+    onActionsProcessed()
+  }, [mapActions, mapReady, layers]) // eslint-disable-line react-hooks/exhaustive-deps
 
   // ── Geocoding search ──
 

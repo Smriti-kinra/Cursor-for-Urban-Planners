@@ -38,7 +38,7 @@ function App() {
   const [drawnFeatures, setDrawnFeatures] = useState<any[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
-  const [mapAction, setMapAction] = useState<MapAction | null>(null)
+  const [mapActions, setMapActions] = useState<MapAction[]>([])
 
   const colorIndexRef = useRef(0)
   const isLoadingRef = useRef(false)
@@ -153,6 +153,55 @@ function App() {
     addLayer(fileName.replace('.geojson', ''), filePath)
   }, [workspacePath, drawnFeatures, addLayer])
 
+  // ── Map action handler (intercepts layer ops, queues the rest) ──
+
+  const handleMapAction = useCallback((action: MapAction) => {
+    if (action.type === 'add_geojson') {
+      const { geojson, name, color } = action.payload
+      const data =
+        geojson?.type === 'FeatureCollection'
+          ? geojson
+          : geojson?.type === 'Feature'
+            ? { type: 'FeatureCollection', features: [geojson] }
+            : { type: 'FeatureCollection', features: [] }
+      const layerColor = color || LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
+      colorIndexRef.current++
+      setLayers((prev) => [
+        ...prev,
+        {
+          id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+          name: name || 'AI Layer',
+          filePath: '',
+          visible: true,
+          data,
+          color: layerColor,
+        },
+      ])
+      setActiveLeftTab('layers')
+      return
+    }
+    if (action.type === 'toggle_layer') {
+      setLayers((prev) =>
+        prev.map((l) =>
+          l.name.toLowerCase() === action.payload.layer_name?.toLowerCase()
+            ? { ...l, visible: !!action.payload.visible }
+            : l,
+        ),
+      )
+      return
+    }
+    if (action.type === 'remove_layer') {
+      setLayers((prev) =>
+        prev.filter(
+          (l) => l.name.toLowerCase() !== action.payload.layer_name?.toLowerCase(),
+        ),
+      )
+      return
+    }
+    if (action.type === 'refresh_artifacts') return
+    setMapActions((prev) => [...prev, action])
+  }, [])
+
   // ── Map context for AI ──
 
   const mapContext: MapContext = useMemo(
@@ -175,9 +224,16 @@ function App() {
               Object.keys(f.properties || {}),
             ) as string[],
           ),
-        ],
+        ].slice(0, 20),
+        visible: l.visible,
       })),
-      drawnFeatureCount: drawnFeatures.length,
+      drawnFeatures: drawnFeatures.slice(0, 10).map((f: any) => ({
+        type: f.geometry?.type || 'unknown',
+        coordinates_summary:
+          f.geometry?.type === 'Point'
+            ? `[${f.geometry.coordinates.map((c: number) => c.toFixed(4)).join(', ')}]`
+            : `${f.geometry?.coordinates?.length || 0} coords`,
+      })),
       basemap,
     }),
     [mapViewState, layers, drawnFeatures, basemap],
@@ -263,7 +319,7 @@ function App() {
       const data: ProjectData = JSON.parse(content)
       if (data.mapState) {
         setMapViewState(data.mapState)
-        setMapAction({ type: 'set_view', payload: data.mapState })
+        setMapActions([{ type: 'set_view', payload: data.mapState }])
       }
       if (data.basemap) setBasemap(data.basemap)
       if (data.drawnFeatures) setDrawnFeatures(data.drawnFeatures)
@@ -382,13 +438,13 @@ function App() {
             drawMode={drawMode}
             initialState={mapViewState}
             drawnFeatures={drawnFeatures}
-            mapAction={mapAction}
+            mapActions={mapActions}
             onMapMove={setMapViewState}
             onBasemapChange={setBasemap}
             onDrawModeChange={setDrawMode}
             onDrawChange={setDrawnFeatures}
             onSaveDrawing={handleSaveDrawing}
-            onActionHandled={() => setMapAction(null)}
+            onActionsProcessed={() => setMapActions([])}
           />
         </main>
 
@@ -420,7 +476,7 @@ function App() {
               onDeleteConversation={handleDeleteConversation}
               onMessagesChange={handleConversationMessagesChange}
               mapContext={mapContext}
-              onMapAction={setMapAction}
+              onMapAction={handleMapAction}
             />
           ) : (
             <ArtifactsPanel />

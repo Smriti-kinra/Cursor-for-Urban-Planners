@@ -56,8 +56,12 @@ export interface MapContext {
     featureCount: number
     geometryTypes: string[]
     properties: string[]
+    visible: boolean
   }>
-  drawnFeatureCount: number
+  drawnFeatures: Array<{
+    type: string
+    coordinates_summary: string
+  }>
   basemap: string
 }
 
