@@ -1,0 +1,21 @@
+appId: com.cursor-urban.desktop
+productName: Cursor for Urban Planners
+directories:
+  buildResources: build
+  output: release
+files:
+  - out/**/*
+mac:
+  target:
+    - dmg
+    - zip
+  category: public.app-category.developer-tools
+win:
+  target:
+    - nsis
+    - portable
+extraResources:
+  - from: ../../packages/backend/dist/
+    to: backend
+    filter:
+      - "**/*"

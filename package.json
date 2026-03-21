@@ -1,0 +1,18 @@
+{
+  "name": "cursor-urban-planners",
+  "private": true,
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild", "electron-winstaller"]
+  },
+  "scripts": {
+    "dev": "concurrently -k -n backend,desktop -c blue,green \"pnpm run dev:backend\" \"sleep 2 && pnpm run dev:desktop\"",
+    "dev:desktop": "pnpm --filter @cursor-urban/desktop dev",
+    "dev:backend": "cd packages/backend && python -m uvicorn main:app --reload --port 8765",
+    "build": "pnpm --filter @cursor-urban/desktop build",
+    "build:backend": "cd packages/backend && source .buildenv/bin/activate && pyinstaller backend.spec --noconfirm",
+    "package": "pnpm run build:backend && pnpm --filter @cursor-urban/desktop package"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

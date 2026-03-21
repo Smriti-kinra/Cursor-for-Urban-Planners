@@ -1,0 +1,13 @@
+node_modules/
+out/
+dist/
+release/
+build/
+.buildenv/
+*.db
+__pycache__/
+*.pyc
+*.pyo
+*.spec.bak
+.DS_Store
+.env
