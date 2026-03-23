@@ -7,7 +7,7 @@ Provides weather and air quality data from Open-Meteo (free, no API key required
 from __future__ import annotations
 
 import httpx
-from google.genai import types
+from llm.base import ToolDeclaration
 
 WMO_WEATHER_CODES = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -24,28 +24,28 @@ class WeatherServer:
     description = "Weather and air quality data from Open-Meteo"
     tool_names = {"get_weather", "get_air_quality"}
 
-    def get_declarations(self) -> list[types.FunctionDeclaration]:
+    def get_declarations(self) -> list[ToolDeclaration]:
         return [
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="get_weather",
                 description="Get current weather and 7-day forecast for a location",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "lat": {"type": "NUMBER", "description": "Latitude"},
-                        "lng": {"type": "NUMBER", "description": "Longitude"},
+                        "lat": {"type": "number", "description": "Latitude"},
+                        "lng": {"type": "number", "description": "Longitude"},
                     },
                     "required": ["lat", "lng"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="get_air_quality",
                 description="Get current air quality data (AQI, PM2.5, PM10, NO2, O3) for a location",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "lat": {"type": "NUMBER", "description": "Latitude"},
-                        "lng": {"type": "NUMBER", "description": "Longitude"},
+                        "lat": {"type": "number", "description": "Latitude"},
+                        "lng": {"type": "number", "description": "Longitude"},
                     },
                     "required": ["lat", "lng"],
                 },

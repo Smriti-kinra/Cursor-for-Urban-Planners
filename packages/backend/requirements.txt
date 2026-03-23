@@ -2,7 +2,7 @@ fastapi
 uvicorn[standard]
 websockets
 pydantic
-google-genai
+openai
 python-dotenv
 duckduckgo-search
 httpx

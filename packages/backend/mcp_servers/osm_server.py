@@ -8,16 +8,16 @@ Supports amenity search, land-use queries, building footprints, road networks, e
 from __future__ import annotations
 
 import httpx
-from google.genai import types
+from llm.base import ToolDeclaration
 
 
 class OSMServer:
     description = "OpenStreetMap Overpass API for querying real-world features"
     tool_names = {"osm_search", "osm_reverse_geocode", "osm_route_overview"}
 
-    def get_declarations(self) -> list[types.FunctionDeclaration]:
+    def get_declarations(self) -> list[ToolDeclaration]:
         return [
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="osm_search",
                 description=(
                     "Search OpenStreetMap for features near a location. "
@@ -26,50 +26,50 @@ class OSMServer:
                     "infrastructure (bus_stop, railway, highway), buildings, land use."
                 ),
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "feature_type": {
-                            "type": "STRING",
+                            "type": "string",
                             "description": "OSM tag key: amenity, building, highway, leisure, natural, shop, tourism, landuse, railway, waterway, public_transport",
                         },
                         "feature_value": {
-                            "type": "STRING",
+                            "type": "string",
                             "description": "OSM tag value, e.g. hospital, school, park, residential, bus_stop",
                         },
-                        "lat": {"type": "NUMBER", "description": "Center latitude"},
-                        "lng": {"type": "NUMBER", "description": "Center longitude"},
-                        "radius_meters": {"type": "NUMBER", "description": "Search radius in meters (default 1000, max 5000)"},
+                        "lat": {"type": "number", "description": "Center latitude"},
+                        "lng": {"type": "number", "description": "Center longitude"},
+                        "radius_meters": {"type": "number", "description": "Search radius in meters (default 1000, max 5000)"},
                     },
                     "required": ["feature_type", "feature_value", "lat", "lng"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="osm_reverse_geocode",
                 description="Get address and place details from coordinates",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "lat": {"type": "NUMBER", "description": "Latitude"},
-                        "lng": {"type": "NUMBER", "description": "Longitude"},
+                        "lat": {"type": "number", "description": "Latitude"},
+                        "lng": {"type": "number", "description": "Longitude"},
                     },
                     "required": ["lat", "lng"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="osm_route_overview",
                 description=(
                     "Get a driving/walking route overview between two points using OSRM. "
                     "Returns distance, duration, and route geometry."
                 ),
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "start_lat": {"type": "NUMBER"},
-                        "start_lng": {"type": "NUMBER"},
-                        "end_lat": {"type": "NUMBER"},
-                        "end_lng": {"type": "NUMBER"},
+                        "start_lat": {"type": "number"},
+                        "start_lng": {"type": "number"},
+                        "end_lat": {"type": "number"},
+                        "end_lng": {"type": "number"},
                         "mode": {
-                            "type": "STRING",
+                            "type": "string",
                             "description": "Travel mode: driving (default), walking, cycling",
                         },
                     },

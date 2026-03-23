@@ -1,9 +1,8 @@
 from fastapi import APIRouter
 from pydantic import BaseModel
-from google import genai
-from google.genai import types
 import json
-import os
+
+from llm import get_provider
 
 router = APIRouter()
 
@@ -44,11 +43,11 @@ Be specific, professional, and reference the actual data discussed. If map layer
 
 @router.post("/generate", response_model=ReportResponse)
 async def generate_report(request: ReportRequest):
-    api_key = os.environ.get("GEMINI_API_KEY", "")
-    if not api_key:
-        return ReportResponse(markdown="# Error\n\nGEMINI_API_KEY is not set. Add it to packages/backend/.env")
-
-    client = genai.Client(api_key=api_key)
+    provider = get_provider()
+    if not provider:
+        return ReportResponse(
+            markdown="# Error\n\nLLM provider not configured. Make sure Ollama is running and check packages/backend/.env"
+        )
 
     context_parts = []
     if request.map_context:
@@ -68,13 +67,10 @@ async def generate_report(request: ReportRequest):
     full_prompt = REPORT_PROMPT + "\n\n---\n\n" + "\n\n".join(context_parts)
 
     try:
-        response = client.models.generate_content(
-            model="gemini-2.5-flash",
-            contents=full_prompt,
-            config=types.GenerateContentConfig(
-                system_instruction="You are a professional urban planning report writer. Generate well-structured, data-driven reports.",
-            ),
+        text = await provider.generate_text(
+            prompt=full_prompt,
+            system="You are a professional urban planning report writer. Generate well-structured, data-driven reports.",
         )
-        return ReportResponse(markdown=response.text or "# Error\n\nNo content generated.")
+        return ReportResponse(markdown=text or "# Error\n\nNo content generated.")
     except Exception as e:
         return ReportResponse(markdown=f"# Error\n\n{str(e)}")

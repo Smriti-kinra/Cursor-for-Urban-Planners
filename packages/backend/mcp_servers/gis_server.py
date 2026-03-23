@@ -11,8 +11,7 @@ Uses Shapely for geometry operations (no external API needed).
 from __future__ import annotations
 
 import math
-import json
-from google.genai import types
+from llm.base import ToolDeclaration
 
 try:
     from shapely.geometry import shape, mapping, Point, MultiPoint
@@ -34,9 +33,9 @@ class GISServer:
         "gis_union",
     }
 
-    def get_declarations(self) -> list[types.FunctionDeclaration]:
+    def get_declarations(self) -> list[ToolDeclaration]:
         return [
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_buffer",
                 description=(
                     "Create a buffer zone around a point or geometry. "
@@ -44,101 +43,101 @@ class GISServer:
                     "Useful for proximity analysis (e.g. 500m buffer around a school)."
                 ),
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "lat": {"type": "NUMBER", "description": "Center latitude (for point buffer)"},
-                        "lng": {"type": "NUMBER", "description": "Center longitude (for point buffer)"},
-                        "radius_meters": {"type": "NUMBER", "description": "Buffer radius in meters"},
-                        "geojson": {"type": "OBJECT", "description": "Optional: GeoJSON geometry to buffer instead of a point"},
+                        "lat": {"type": "number", "description": "Center latitude (for point buffer)"},
+                        "lng": {"type": "number", "description": "Center longitude (for point buffer)"},
+                        "radius_meters": {"type": "number", "description": "Buffer radius in meters"},
+                        "geojson": {"type": "object", "description": "Optional: GeoJSON geometry to buffer instead of a point"},
                     },
                     "required": ["radius_meters"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_centroid",
                 description="Calculate the centroid (center point) of a GeoJSON geometry",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "geojson": {"type": "OBJECT", "description": "A GeoJSON Feature or geometry"},
+                        "geojson": {"type": "object", "description": "A GeoJSON Feature or geometry"},
                     },
                     "required": ["geojson"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_area",
                 description="Calculate area and perimeter of a polygon in m², hectares, km²",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "polygon": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "Array of [longitude, latitude] coordinate pairs",
-                            "items": {"type": "ARRAY", "items": {"type": "NUMBER"}},
+                            "items": {"type": "array", "items": {"type": "number"}},
                         },
                     },
                     "required": ["polygon"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_convex_hull",
                 description="Calculate the convex hull of a set of points. Returns GeoJSON polygon.",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "points": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "Array of [longitude, latitude] pairs",
-                            "items": {"type": "ARRAY", "items": {"type": "NUMBER"}},
+                            "items": {"type": "array", "items": {"type": "number"}},
                         },
                     },
                     "required": ["points"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_point_in_polygon",
                 description="Check if a point is inside a polygon",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
-                        "point_lat": {"type": "NUMBER"},
-                        "point_lng": {"type": "NUMBER"},
+                        "point_lat": {"type": "number"},
+                        "point_lng": {"type": "number"},
                         "polygon": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "Polygon coordinates as [[lng,lat], ...]",
-                            "items": {"type": "ARRAY", "items": {"type": "NUMBER"}},
+                            "items": {"type": "array", "items": {"type": "number"}},
                         },
                     },
                     "required": ["point_lat", "point_lng", "polygon"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_bounding_box",
                 description="Get the bounding box of a set of coordinates",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "coordinates": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "Array of [longitude, latitude] pairs",
-                            "items": {"type": "ARRAY", "items": {"type": "NUMBER"}},
+                            "items": {"type": "array", "items": {"type": "number"}},
                         },
                     },
                     "required": ["coordinates"],
                 },
             ),
-            types.FunctionDeclaration(
+            ToolDeclaration(
                 name="gis_union",
                 description="Merge multiple polygons into a single geometry (dissolve boundaries)",
                 parameters={
-                    "type": "OBJECT",
+                    "type": "object",
                     "properties": {
                         "polygons": {
-                            "type": "ARRAY",
+                            "type": "array",
                             "description": "Array of polygon coordinate arrays",
                             "items": {
-                                "type": "ARRAY",
-                                "items": {"type": "ARRAY", "items": {"type": "NUMBER"}},
+                                "type": "array",
+                                "items": {"type": "array", "items": {"type": "number"}},
                             },
                         },
                     },

@@ -2,7 +2,7 @@
 MCP (Model Context Protocol) Manager
 
 Manages tool servers that provide additional capabilities to the AI.
-Each server exposes tools as Gemini-compatible function declarations and
+Each server exposes tools as provider-agnostic ToolDeclarations and
 handles execution of those tools.
 
 Servers implemented:
@@ -13,9 +13,8 @@ Servers implemented:
 
 from __future__ import annotations
 
-import json
 from typing import Any
-from google.genai import types
+from llm.base import ToolDeclaration
 
 from .osm_server import OSMServer
 from .weather_server import WeatherServer
@@ -34,12 +33,12 @@ class MCPManager:
         self.servers["weather"] = WeatherServer()
         self.servers["gis"] = GISServer()
 
-    def get_tool_declarations(self) -> list[types.Tool]:
-        """Collect Gemini function declarations from all registered servers."""
-        declarations = []
+    def get_tool_declarations(self) -> list[ToolDeclaration]:
+        """Collect tool declarations from all registered servers."""
+        declarations: list[ToolDeclaration] = []
         for server in self.servers.values():
             declarations.extend(server.get_declarations())
-        return [types.Tool(function_declarations=declarations)]
+        return declarations
 
     def owns_tool(self, tool_name: str) -> bool:
         for server in self.servers.values():
