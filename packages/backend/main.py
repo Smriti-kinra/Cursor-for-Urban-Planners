@@ -41,3 +41,9 @@ async def list_mcp_servers():
     from mcp_servers import MCPManager
     mgr = MCPManager()
     return {"servers": mgr.list_servers()}
+
+
+@app.get("/api/usage")
+async def usage_stats():
+    from llm.usage import get_usage_summary
+    return get_usage_summary()

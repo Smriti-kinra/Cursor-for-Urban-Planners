@@ -1,0 +1,92 @@
+.bookmark-panel {
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  overflow: auto;
+  flex: 1;
+  min-height: 0;
+}
+
+.bookmark-add {
+  display: flex;
+  gap: 6px;
+}
+
+.bookmark-input {
+  flex: 1;
+  padding: 6px 8px;
+  border: 1px solid var(--border, #333);
+  border-radius: 4px;
+  background: var(--input-bg, #1a1a1a);
+  color: inherit;
+  font-size: 12px;
+}
+
+.bookmark-save-btn {
+  padding: 6px 10px;
+  border-radius: 4px;
+  border: none;
+  background: #2563eb;
+  color: white;
+  cursor: pointer;
+  font-size: 12px;
+}
+
+.bookmark-save-btn:hover {
+  background: #1d4ed8;
+}
+
+.bookmark-empty {
+  font-size: 12px;
+  opacity: 0.7;
+  margin: 0;
+}
+
+.bookmark-list {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.bookmark-item {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 4px 0;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.bookmark-go {
+  flex: 1;
+  text-align: left;
+  background: none;
+  border: none;
+  color: #60a5fa;
+  cursor: pointer;
+  padding: 4px 0;
+  font-size: 13px;
+}
+
+.bookmark-go:hover {
+  text-decoration: underline;
+}
+
+.bookmark-meta {
+  font-size: 10px;
+  opacity: 0.5;
+}
+
+.bookmark-del {
+  background: none;
+  border: none;
+  color: #f87171;
+  cursor: pointer;
+  padding: 4px 8px;
+  font-size: 16px;
+  line-height: 1;
+}
+
+.bookmark-del:hover {
+  color: #ef4444;
+}

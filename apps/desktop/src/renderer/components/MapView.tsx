@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import maplibregl from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import {
@@ -11,8 +11,16 @@ import {
 } from 'terra-draw'
 import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import * as turf from '@turf/turf'
-import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS } from '../types'
+import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS, DrawStyleConfig } from '../types'
 import './MapView.css'
+
+export type MapViewHandle = {
+  getCanvas: () => HTMLCanvasElement | null
+  undoDraw: () => boolean
+  redoDraw: () => boolean
+  canUndoDraw: () => boolean
+  canRedoDraw: () => boolean
+}
 
 interface MapViewProps {
   layers: GeoJSONLayer[]
@@ -21,10 +29,13 @@ interface MapViewProps {
   initialState: MapViewState
   drawnFeatures: any[]
   mapActions: MapAction[]
+  drawStyle?: DrawStyleConfig
   onMapMove: (state: MapViewState) => void
+  onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void
   onBasemapChange: (basemap: string) => void
   onDrawModeChange: (mode: string | null) => void
   onDrawChange: (features: any[]) => void
+  onDrawHistoryChange?: (state: { canUndo: boolean; canRedo: boolean }) => void
   onSaveDrawing: () => void
   onActionsProcessed: () => void
 }
@@ -36,25 +47,35 @@ const DRAW_MODES = [
   { id: 'select', label: 'Select', icon: '✥' },
 ]
 
-export default function MapView({
-  layers,
-  basemap,
-  drawMode,
-  initialState,
-  drawnFeatures,
-  mapActions,
-  onMapMove,
-  onBasemapChange,
-  onDrawModeChange,
-  onDrawChange,
-  onSaveDrawing,
-  onActionsProcessed,
-}: MapViewProps) {
+const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
+  {
+    layers,
+    basemap,
+    drawMode,
+    initialState,
+    drawnFeatures,
+    mapActions,
+    drawStyle,
+    onMapMove,
+    onBoundsChange,
+    onBasemapChange,
+    onDrawModeChange,
+    onDrawChange,
+    onDrawHistoryChange,
+    onSaveDrawing,
+    onActionsProcessed,
+  },
+  ref,
+) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const drawRef = useRef<TerraDraw | null>(null)
   const onDrawChangeRef = useRef(onDrawChange)
   onDrawChangeRef.current = onDrawChange
+  const onBoundsChangeRef = useRef(onBoundsChange)
+  onBoundsChangeRef.current = onBoundsChange
+  const onDrawHistoryChangeRef = useRef(onDrawHistoryChange)
+  onDrawHistoryChangeRef.current = onDrawHistoryChange
   const ownLayerIds = useRef(new Set<string>())
   const initBasemapRef = useRef(basemap)
   const aiMarkersRef = useRef<maplibregl.Marker[]>([])
@@ -108,6 +129,13 @@ export default function MapView({
         bearing: map.getBearing(),
         pitch: map.getPitch(),
       })
+      const b = map.getBounds()
+      onBoundsChangeRef.current?.({
+        west: b.getWest(),
+        south: b.getSouth(),
+        east: b.getEast(),
+        north: b.getNorth(),
+      })
     })
 
     mapRef.current = map
@@ -149,6 +177,14 @@ export default function MapView({
         draw.on('change', () => {
           const snapshot = draw.getSnapshot()
           onDrawChangeRef.current(snapshot)
+          try {
+            onDrawHistoryChangeRef.current?.({
+              canUndo: draw.canUndo(),
+              canRedo: draw.canRedo(),
+            })
+          } catch {
+            /* ignore */
+          }
         })
 
         drawRef.current = draw
@@ -328,6 +364,42 @@ export default function MapView({
       console.error('[MapView] setMode FAILED for:', mode, err)
     }
   }, [drawMode, mapReady])
+
+  useImperativeHandle(
+    ref,
+    () => ({
+      getCanvas: () => mapRef.current?.getCanvas() ?? null,
+      undoDraw: () => drawRef.current?.undo() ?? false,
+      redoDraw: () => drawRef.current?.redo() ?? false,
+      canUndoDraw: () => drawRef.current?.canUndo() ?? false,
+      canRedoDraw: () => drawRef.current?.canRedo() ?? false,
+    }),
+    [mapReady],
+  )
+
+  useEffect(() => {
+    const draw = drawRef.current
+    if (!draw || !mapReady || !drawStyle) return
+    try {
+      draw.setModeStyles('polygon', {
+        fillColor: drawStyle.fillColor,
+        outlineColor: drawStyle.strokeColor,
+        fillOpacity: drawStyle.fillOpacity,
+        outlineWidth: drawStyle.lineWidth,
+      } as any)
+      draw.setModeStyles('linestring', {
+        lineStringColor: drawStyle.strokeColor,
+        lineStringWidth: drawStyle.lineWidth,
+      } as any)
+      draw.setModeStyles('point', {
+        pointColor: drawStyle.strokeColor,
+        pointOutlineColor: drawStyle.strokeColor,
+        pointWidth: drawStyle.lineWidth + 6,
+      } as any)
+    } catch (err) {
+      console.warn('[MapView] setModeStyles', err)
+    }
+  }, [drawStyle, mapReady])
 
   // ── Measurement ──
 
@@ -786,4 +858,6 @@ export default function MapView({
       )}
     </div>
   )
-}
+})
+
+export default MapView

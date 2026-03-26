@@ -1,0 +1,51 @@
+.zoning-panel {
+  padding: 12px;
+  font-size: 12px;
+  overflow: auto;
+  flex: 1;
+}
+
+.zoning-title {
+  margin: 0 0 8px 0;
+  font-size: 13px;
+}
+
+.zoning-intro {
+  margin: 0 0 12px 0;
+  line-height: 1.45;
+  opacity: 0.9;
+}
+
+.zoning-intro code {
+  font-size: 10px;
+  background: #2a2a30;
+  padding: 1px 4px;
+  border-radius: 3px;
+}
+
+.zoning-legend {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+}
+
+.zoning-legend li {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 0;
+  border-bottom: 1px solid #2a2a2a;
+}
+
+.zoning-swatch {
+  width: 14px;
+  height: 14px;
+  border-radius: 3px;
+  border: 1px solid rgba(255, 255, 255, 0.2);
+  flex-shrink: 0;
+}
+
+.zoning-desc {
+  opacity: 0.85;
+  flex: 1;
+}

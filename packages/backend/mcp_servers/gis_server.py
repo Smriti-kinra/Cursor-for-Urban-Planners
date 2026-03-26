@@ -14,11 +14,13 @@ import math
 from llm.base import ToolDeclaration
 
 try:
-    from shapely.geometry import shape, mapping, Point, MultiPoint
+    from shapely.geometry import MultiPoint, Point, Polygon, mapping, shape
     from shapely.ops import unary_union
-    HAS_SHAPELY = True
 except ImportError:
     HAS_SHAPELY = False
+    shape = mapping = Point = MultiPoint = Polygon = unary_union = None
+else:
+    HAS_SHAPELY = True
 
 
 class GISServer:
@@ -167,6 +169,7 @@ class GISServer:
 
         geojson_input = args.get("geojson")
         if geojson_input and HAS_SHAPELY:
+            assert shape is not None and mapping is not None
             try:
                 geom = shape(geojson_input.get("geometry", geojson_input))
                 buffered = geom.buffer(radius_deg)
@@ -201,6 +204,7 @@ class GISServer:
     def _centroid(self, args: dict) -> dict:
         geojson = args.get("geojson", {})
         if HAS_SHAPELY:
+            assert shape is not None
             try:
                 geom = shape(geojson.get("geometry", geojson))
                 c = geom.centroid
@@ -254,6 +258,7 @@ class GISServer:
             return {"error": "Need at least 3 points"}
 
         if HAS_SHAPELY:
+            assert MultiPoint is not None and mapping is not None
             try:
                 mp = MultiPoint([(p[0], p[1]) for p in points])
                 hull = mp.convex_hull
@@ -275,8 +280,8 @@ class GISServer:
         polygon = args.get("polygon", [])
 
         if HAS_SHAPELY:
+            assert Point is not None and Polygon is not None
             try:
-                from shapely.geometry import Polygon
                 poly = Polygon([(c[0], c[1]) for c in polygon])
                 pt = Point(plng, plat)
                 inside = poly.contains(pt)
@@ -316,8 +321,8 @@ class GISServer:
         if not HAS_SHAPELY:
             return {"error": "Shapely not installed; union requires shapely"}
 
+        assert Polygon is not None and unary_union is not None and mapping is not None
         try:
-            from shapely.geometry import Polygon
             geoms = [Polygon([(c[0], c[1]) for c in poly]) for poly in polygons]
             merged = unary_union(geoms)
             return {

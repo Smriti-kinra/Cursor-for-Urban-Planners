@@ -19,6 +19,8 @@ from llm.base import ToolDeclaration
 from .osm_server import OSMServer
 from .weather_server import WeatherServer
 from .gis_server import GISServer
+from .zoning_server import ZoningServer
+from .demographics_server import DemographicsServer
 
 
 class MCPManager:
@@ -32,6 +34,8 @@ class MCPManager:
         self.servers["osm"] = OSMServer()
         self.servers["weather"] = WeatherServer()
         self.servers["gis"] = GISServer()
+        self.servers["zoning"] = ZoningServer()
+        self.servers["demographics"] = DemographicsServer()
 
     def get_tool_declarations(self) -> list[ToolDeclaration]:
         """Collect tool declarations from all registered servers."""

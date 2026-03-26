@@ -1,0 +1,112 @@
+.draw-toolbar {
+  position: absolute;
+  top: 48px;
+  left: 8px;
+  z-index: 5;
+  background: rgba(20, 20, 24, 0.92);
+  border: 1px solid #333;
+  border-radius: 8px;
+  padding: 8px 10px;
+  max-width: min(360px, 92vw);
+  font-size: 11px;
+  color: #e5e5e5;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.35);
+}
+
+.draw-toolbar-row {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-bottom: 6px;
+}
+
+.draw-toolbar-row:last-of-type {
+  margin-bottom: 0;
+}
+
+.draw-toolbar-label {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.draw-toolbar-label.flex {
+  flex: 1;
+  min-width: 120px;
+}
+
+.draw-toolbar-label input[type='color'] {
+  width: 28px;
+  height: 24px;
+  padding: 0;
+  border: none;
+  cursor: pointer;
+  background: transparent;
+}
+
+.draw-toolbar-select {
+  padding: 4px 6px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #1a1a1e;
+  color: inherit;
+  font-size: 11px;
+}
+
+.toolbar-mini {
+  padding: 4px 10px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #2a2a30;
+  color: inherit;
+  cursor: pointer;
+  font-size: 11px;
+}
+
+.toolbar-mini:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.toolbar-mini:not(:disabled):hover {
+  background: #36363f;
+}
+
+.draw-toolbar-zoning {
+  margin-top: 8px;
+  padding-top: 8px;
+  border-top: 1px solid #333;
+}
+
+.draw-toolbar-zoning-title {
+  display: block;
+  margin-bottom: 6px;
+  opacity: 0.85;
+  font-weight: 600;
+}
+
+.zone-chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+}
+
+.zone-chip {
+  padding: 4px 8px;
+  border-radius: 4px;
+  border: 1px solid #444;
+  background: #1f1f24;
+  color: inherit;
+  cursor: pointer;
+  font-size: 10px;
+}
+
+.zone-chip.active {
+  background: #1e3a5f;
+  border-color: #3b82f6;
+}
+
+.zone-chip:hover {
+  filter: brightness(1.1);
+}

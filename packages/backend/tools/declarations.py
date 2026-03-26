@@ -258,6 +258,54 @@ CORE_TOOLS: list[ToolDeclaration] = [
 
     # ── Artifacts ──
     ToolDeclaration(
+        name="save_bookmark",
+        description=(
+            "Save the current map region as a named bookmark for quick return. "
+            "If south/west/north/east are omitted, the app uses the current visible map bounds from context."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Bookmark label, e.g. Chandigarh CBD"},
+                "south": {"type": "number"},
+                "west": {"type": "number"},
+                "north": {"type": "number"},
+                "east": {"type": "number"},
+                "zoom": {"type": "number", "description": "Optional zoom level to restore"},
+            },
+            "required": ["name"],
+        },
+    ),
+    ToolDeclaration(
+        name="go_to_bookmark",
+        description="Fly the map to a previously saved bookmark by name",
+        parameters={
+            "type": "object",
+            "properties": {
+                "name": {"type": "string", "description": "Exact or partial bookmark name"},
+            },
+            "required": ["name"],
+        },
+    ),
+    ToolDeclaration(
+        name="export_region_clip",
+        description=(
+            "Clip all loaded layers to a bounding box and save a merged GeoJSON into the workspace. "
+            "Requires an open workspace folder. If bbox omitted, uses current map bounds from context."
+        ),
+        parameters={
+            "type": "object",
+            "properties": {
+                "output_base_name": {"type": "string", "description": "Filename base without .geojson"},
+                "south": {"type": "number"},
+                "west": {"type": "number"},
+                "north": {"type": "number"},
+                "east": {"type": "number"},
+            },
+            "required": ["output_base_name"],
+        },
+    ),
+    ToolDeclaration(
         name="create_artifact",
         description="Save a note, analysis, or report as an artifact in the project",
         parameters={

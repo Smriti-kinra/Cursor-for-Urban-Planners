@@ -16,23 +16,40 @@ SYSTEM_PROMPT = (
     "You are an expert urban planning assistant embedded in a desktop GIS application. "
     "You help with zoning analysis, land use planning, transportation networks, "
     "environmental impact, building codes, community development, and spatial analysis.\n\n"
-    "You have FULL control over the map. You can:\n"
-    "- Navigate: fly_to any location, fit_bounds to zoom to an area\n"
-    "- Markers: add_marker, add_markers, clear_markers to annotate locations\n"
-    "- Draw: draw_line, draw_polygon, draw_circle to sketch geometry on the map\n"
-    "- Layers: add_geojson to load data, toggle_layer/remove_layer/set_layer_style to manage\n"
-    "- Highlight: highlight_features to filter and emphasize features\n"
-    "- Measure: measure_distance, measure_area for spatial calculations\n"
-    "- Search: web_search for information, geocode for coordinates\n"
-    "- OSM: osm_search to find real-world features (buildings, roads, amenities), "
-    "osm_reverse_geocode for address lookup, osm_route_overview for routing\n"
-    "- Weather: get_weather and get_air_quality for environmental data\n"
-    "- GIS Analysis: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
+    "AVAILABLE TOOLS:\n"
+    "- Navigate: fly_to, fit_bounds\n"
+    "- Markers: add_marker, add_markers, clear_markers\n"
+    "- Draw: draw_line, draw_polygon, draw_circle\n"
+    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style\n"
+    "- Highlight: highlight_features\n"
+    "- Measure: measure_distance, measure_area\n"
+    "- Search: web_search, geocode\n"
+    "- OSM: osm_search (amenities, buildings, roads), "
+    "osm_boundary (city/district/state boundary polygons), "
+    "osm_reverse_geocode, osm_route_overview\n"
+    "- Weather: get_weather, get_air_quality\n"
+    "- GIS: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
     "gis_point_in_polygon, gis_bounding_box, gis_union\n"
-    "- Artifacts: create_artifact to save findings\n\n"
-    "Use these tools proactively. When the user asks about a place, fly there AND add markers. "
-    "When they ask about nearby amenities, use osm_search (results auto-display on map). "
-    "When they ask about distances, measure them. Be visual and action-oriented."
+    "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip (clip layers to bbox / workspace)\n"
+    "- Zoning: analyze_zones, detect_zone_overlaps (GeoJSON with zone_code on polygons)\n"
+    "- Demographics: get_demographics (OSM population tags + reverse geocode near a point)\n"
+    "- Artifacts: create_artifact\n\n"
+    "MAP CONTEXT:\n"
+    "The current map state is appended to every message. It includes:\n"
+    "- bounds: current viewport (west,south,east,north) when available — use for save_bookmark / export_region_clip.\n"
+    "- bookmarks: saved regions (name + bbox + zoom); use go_to_bookmark to navigate.\n"
+    "- Layer list with geometry_data (actual coordinates for small layers, bbox for large ones).\n"
+    "- You can use geometry_data from existing layers to compute centroids, buffers, etc. "
+    "Pass coordinates directly to gis_centroid, gis_buffer, or other GIS tools.\n\n"
+    "IMPORTANT RULES:\n"
+    "1. Do NOT add markers unless the user explicitly asks for markers or pins.\n"
+    "2. Do NOT repeat a tool call you already made. Call each tool ONCE per distinct item.\n"
+    "3. osm_search and osm_boundary results are AUTO-DISPLAYED on the map. "
+    "Do NOT call add_geojson for data that was already returned by these tools.\n"
+    "4. When using osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches.\n"
+    "5. Only call the tools the user's request requires. Do not add extra actions.\n"
+    "6. When the user asks to navigate somewhere, use fly_to. Do not add markers unless asked.\n"
+    "7. When finished, stop calling tools and respond with a brief summary of what you did."
 )
 
 ACTION_TOOLS = {
@@ -40,6 +57,7 @@ ACTION_TOOLS = {
     "add_marker", "add_markers", "clear_markers",
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
     "highlight_features", "set_layer_style", "toggle_layer", "remove_layer",
+    "save_bookmark", "go_to_bookmark", "export_region_clip",
 }
 
 
@@ -183,6 +201,35 @@ async def run_tool(func_name: str, func_args: dict, websocket: WebSocket) -> dic
                 "action": "add_geojson",
                 "payload": {"geojson": result["geojson"], "name": label},
             }))
+            features_summary = []
+            for f in result["geojson"].get("features", [])[:50]:
+                props = f.get("properties", {})
+                geom = f.get("geometry", {})
+                entry = {"name": props.get("name", "")}
+                if geom.get("type") == "Point":
+                    entry["lat"] = geom["coordinates"][1]
+                    entry["lng"] = geom["coordinates"][0]
+                elif geom.get("coordinates"):
+                    coords = geom["coordinates"]
+                    if geom["type"] == "Polygon":
+                        coords = coords[0]
+                    if coords:
+                        avg_lng = sum(c[0] for c in coords) / len(coords)
+                        avg_lat = sum(c[1] for c in coords) / len(coords)
+                        entry["lat"] = round(avg_lat, 6)
+                        entry["lng"] = round(avg_lng, 6)
+                features_summary.append(entry)
+            del result["geojson"]
+            result["displayed_on_map"] = True
+            result["features"] = features_summary
+
+        if func_name == "osm_boundary" and "geojson" in result:
+            label = f"{func_args.get('name', 'Boundary')} boundary"
+            await websocket.send_text(json.dumps({
+                "type": "action",
+                "action": "add_geojson",
+                "payload": {"geojson": result["geojson"], "name": label},
+            }))
             del result["geojson"]
             result["displayed_on_map"] = True
 
@@ -263,7 +310,7 @@ async def chat_websocket(websocket: WebSocket):
             history.append(Message(role="user", content=user_content))
 
             try:
-                for _round in range(8):
+                for _round in range(5):
                     response = await provider.generate(
                         messages=history,
                         tools=all_tools,
