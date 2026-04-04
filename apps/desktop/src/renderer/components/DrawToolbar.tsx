@@ -11,6 +11,8 @@ interface DrawToolbarProps {
   onRedo: () => void
   canUndo: boolean
   canRedo: boolean
+  /** False until a workspace folder is open (same as map drawing). */
+  enabled?: boolean
 }
 
 export default function DrawToolbar({
@@ -23,15 +25,17 @@ export default function DrawToolbar({
   onRedo,
   canUndo,
   canRedo,
+  enabled = true,
 }: DrawToolbarProps) {
   return (
-    <div className="draw-toolbar">
+    <div className={`draw-toolbar${enabled ? '' : ' draw-toolbar-disabled'}`} aria-disabled={!enabled}>
       <div className="draw-toolbar-row">
         <label className="draw-toolbar-label">
           Fill
           <input
             type="color"
             value={drawStyle.fillColor}
+            disabled={!enabled}
             onChange={(e) => onDrawStyleChange({ fillColor: e.target.value })}
             title="Fill color"
           />
@@ -41,6 +45,7 @@ export default function DrawToolbar({
           <input
             type="color"
             value={drawStyle.strokeColor}
+            disabled={!enabled}
             onChange={(e) => onDrawStyleChange({ strokeColor: e.target.value })}
             title="Stroke color"
           />
@@ -53,6 +58,7 @@ export default function DrawToolbar({
             max={1}
             step={0.05}
             value={drawStyle.fillOpacity}
+            disabled={!enabled}
             onChange={(e) => onDrawStyleChange({ fillOpacity: parseFloat(e.target.value) })}
           />
         </label>
@@ -64,12 +70,14 @@ export default function DrawToolbar({
             max={12}
             step={1}
             value={drawStyle.lineWidth}
+            disabled={!enabled}
             onChange={(e) => onDrawStyleChange({ lineWidth: parseInt(e.target.value, 10) })}
           />
         </label>
         <select
           className="draw-toolbar-select"
           value={drawStyle.lineDash}
+          disabled={!enabled}
           onChange={(e) =>
             onDrawStyleChange({ lineDash: e.target.value as DrawStyleConfig['lineDash'] })
           }
@@ -85,7 +93,7 @@ export default function DrawToolbar({
           type="button"
           className="toolbar-mini"
           onClick={onUndo}
-          disabled={!canUndo}
+          disabled={!enabled || !canUndo}
           title="Undo drawing"
         >
           Undo
@@ -94,7 +102,7 @@ export default function DrawToolbar({
           type="button"
           className="toolbar-mini"
           onClick={onRedo}
-          disabled={!canRedo}
+          disabled={!enabled || !canRedo}
           title="Redo drawing"
         >
           Redo
@@ -106,7 +114,8 @@ export default function DrawToolbar({
           <button
             type="button"
             className={`zone-chip ${activeZonePreset === null ? 'active' : ''}`}
-            onClick={() => onZonePresetChange(null)}
+            disabled={!enabled}
+            onClick={() => enabled && onZonePresetChange(null)}
           >
             None
           </button>
@@ -117,7 +126,8 @@ export default function DrawToolbar({
               className={`zone-chip ${activeZonePreset?.code === z.code ? 'active' : ''}`}
               style={{ borderLeft: `4px solid ${z.color}` }}
               title={z.description}
-              onClick={() => onZonePresetChange(z)}
+              disabled={!enabled}
+              onClick={() => enabled && onZonePresetChange(z)}
             >
               {z.code}
             </button>

@@ -38,6 +38,8 @@ interface MapViewProps {
   onDrawHistoryChange?: (state: { canUndo: boolean; canRedo: boolean }) => void
   onSaveDrawing: () => void
   onActionsProcessed: () => void
+  /** When false, drawing tools are disabled (requires an open workspace). */
+  drawingAllowed?: boolean
 }
 
 const DRAW_MODES = [
@@ -64,6 +66,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onDrawHistoryChange,
     onSaveDrawing,
     onActionsProcessed,
+    drawingAllowed = true,
   },
   ref,
 ) {
@@ -364,6 +367,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       console.error('[MapView] setMode FAILED for:', mode, err)
     }
   }, [drawMode, mapReady])
+
+  useEffect(() => {
+    if (drawingAllowed || !drawRef.current || !mapReady) return
+    try {
+      drawRef.current.setMode('static')
+    } catch {
+      /* ignore */
+    }
+    onDrawModeChange(null)
+  }, [drawingAllowed, mapReady, onDrawModeChange])
 
   useImperativeHandle(
     ref,
@@ -768,9 +781,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         {DRAW_MODES.map((mode) => (
           <button
             key={mode.id}
+            type="button"
             className={`toolbar-btn ${drawMode === mode.id ? 'active' : ''}`}
-            onClick={() => onDrawModeChange(drawMode === mode.id ? null : mode.id)}
-            title={mode.label}
+            disabled={!drawingAllowed}
+            onClick={() =>
+              drawingAllowed && onDrawModeChange(drawMode === mode.id ? null : mode.id)
+            }
+            title={drawingAllowed ? mode.label : 'Open a workspace to draw'}
           >
             {mode.icon}
           </button>
@@ -779,13 +796,21 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         {drawnFeatures.length > 0 && (
           <>
             <div className="toolbar-divider" />
-            <button className="toolbar-btn save" onClick={onSaveDrawing} title="Save drawing">
+            <button
+              type="button"
+              className="toolbar-btn save"
+              disabled={!drawingAllowed}
+              onClick={() => drawingAllowed && onSaveDrawing()}
+              title={drawingAllowed ? 'Save drawing' : 'Open a workspace to save'}
+            >
               💾
             </button>
             <button
+              type="button"
               className="toolbar-btn danger"
-              onClick={handleDeleteDrawn}
-              title="Delete all drawings"
+              disabled={!drawingAllowed}
+              onClick={() => drawingAllowed && handleDeleteDrawn()}
+              title={drawingAllowed ? 'Delete all drawings' : 'Open a workspace'}
             >
               🗑
             </button>

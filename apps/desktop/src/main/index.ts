@@ -8,6 +8,8 @@ const isDev = !app.isPackaged
 
 let mainWindow: BrowserWindow | null = null
 let backendProcess: ChildProcess | null = null
+let allowMainWindowClose = false
+let quitFlushTimer: ReturnType<typeof setTimeout> | null = null
 
 function startBackend(): void {
   if (isDev) return
@@ -69,7 +71,36 @@ function createWindow(): void {
   } else {
     mainWindow.loadFile(path.join(__dirname, '../renderer/index.html'))
   }
+
+  mainWindow.on('close', (e) => {
+    if (allowMainWindowClose || !mainWindow) return
+    if (mainWindow.webContents.isLoading()) {
+      allowMainWindowClose = true
+      return
+    }
+    e.preventDefault()
+    if (quitFlushTimer) clearTimeout(quitFlushTimer)
+    quitFlushTimer = setTimeout(() => {
+      quitFlushTimer = null
+      allowMainWindowClose = true
+      if (mainWindow && !mainWindow.isDestroyed()) mainWindow.close()
+      allowMainWindowClose = false
+    }, 4000)
+    mainWindow.webContents.send('app-before-quit')
+  })
 }
+
+ipcMain.on('app-quit-flush-done', () => {
+  if (quitFlushTimer) {
+    clearTimeout(quitFlushTimer)
+    quitFlushTimer = null
+  }
+  allowMainWindowClose = true
+  if (mainWindow && !mainWindow.isDestroyed()) {
+    mainWindow.close()
+  }
+  allowMainWindowClose = false
+})
 
 // --- IPC Handlers ---
 
@@ -112,6 +143,7 @@ ipcMain.handle('read-file', async (_event, filePath: string) => {
 
 ipcMain.handle('write-file', async (_event, filePath: string, content: string) => {
   try {
+    fs.mkdirSync(path.dirname(filePath), { recursive: true })
     fs.writeFileSync(filePath, content, 'utf-8')
     return true
   } catch {

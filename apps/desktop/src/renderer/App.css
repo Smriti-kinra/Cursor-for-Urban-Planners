@@ -119,6 +119,15 @@ body.resizing .resize-handle {
   min-width: 300px;
 }
 
+.workspace-hint-banner {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--warning);
+  background: rgba(249, 226, 175, 0.12);
+  border-bottom: 1px solid var(--border);
+}
+
 .map-stack {
   position: relative;
   flex: 1;

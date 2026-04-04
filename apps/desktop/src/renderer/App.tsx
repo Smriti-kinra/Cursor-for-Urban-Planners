@@ -63,6 +63,7 @@ function App() {
   const mapViewRef = useRef<MapViewHandle>(null)
   const bookmarksRef = useRef<MapBookmark[]>([])
   const mapBoundsRef = useRef<typeof mapBounds>(null)
+  const saveProjectRef = useRef<(force?: boolean) => Promise<void>>(async () => {})
 
   const colorIndexRef = useRef(0)
   const isLoadingRef = useRef(false)
@@ -180,7 +181,11 @@ function App() {
     const fc = { type: 'FeatureCollection', features: drawnFeatures }
     const fileName = `drawing-${Date.now()}.geojson`
     const filePath = `${workspacePath}/${fileName}`
-    await window.electronAPI.writeFile(filePath, JSON.stringify(fc, null, 2))
+    const ok = await window.electronAPI.writeFile(filePath, JSON.stringify(fc, null, 2))
+    if (!ok) {
+      console.error('Failed to write drawing GeoJSON')
+      return
+    }
     addLayer(fileName.replace('.geojson', ''), filePath)
   }, [workspacePath, drawnFeatures, addLayer])
 
@@ -601,28 +606,68 @@ function App() {
 
   // ── Project persistence ──
 
-  const saveProject = useCallback(async () => {
-    if (!workspacePath || isLoadingRef.current) return
-    const projectData: ProjectData = {
-      version: 2,
-      mapState: mapViewState,
-      layers: layers.map((l) => ({
-        name: l.name,
-        filePath: l.filePath,
-        visible: l.visible,
-        color: l.color,
-      })),
+  const saveProject = useCallback(
+    async (force = false) => {
+      if (!workspacePath) return
+      if (!force && isLoadingRef.current) return
+
+      let layersSnapshot = layers
+      const withPaths: GeoJSONLayer[] = []
+      let materializedAny = false
+      for (const l of layers) {
+        if (l.filePath?.trim()) {
+          withPaths.push(l)
+          continue
+        }
+        const fp = `${workspacePath}/.cursor-urban/layers/${l.id}.geojson`
+        const ok = await window.electronAPI.writeFile(fp, JSON.stringify(l.data, null, 2))
+        if (!ok) {
+          console.error('Failed to persist layer:', l.name)
+          withPaths.push(l)
+          continue
+        }
+        withPaths.push({ ...l, filePath: fp })
+        materializedAny = true
+      }
+      if (materializedAny) {
+        layersSnapshot = withPaths
+        setLayers(withPaths)
+      }
+
+      const projectData: ProjectData = {
+        version: 2,
+        mapState: mapViewState,
+        layers: layersSnapshot.map((l) => ({
+          name: l.name,
+          filePath: l.filePath,
+          visible: l.visible,
+          color: l.color,
+        })),
+        drawnFeatures,
+        conversations,
+        activeConversationId,
+        basemap,
+        bookmarks,
+      }
+      const wrote = await window.electronAPI.writeFile(
+        `${workspacePath}/project.json`,
+        JSON.stringify(projectData, null, 2),
+      )
+      if (!wrote) console.error('Failed to save project.json (check workspace permissions)')
+    },
+    [
+      workspacePath,
+      mapViewState,
+      layers,
       drawnFeatures,
       conversations,
       activeConversationId,
       basemap,
       bookmarks,
-    }
-    await window.electronAPI.writeFile(
-      `${workspacePath}/project.json`,
-      JSON.stringify(projectData, null, 2),
-    )
-  }, [workspacePath, mapViewState, layers, drawnFeatures, conversations, activeConversationId, basemap, bookmarks])
+    ],
+  )
+
+  saveProjectRef.current = saveProject
 
   const loadProject = useCallback(async () => {
     if (!workspacePath) return
@@ -660,6 +705,10 @@ function App() {
       if (data.layers) {
         const loadedLayers: GeoJSONLayer[] = []
         for (const info of data.layers) {
+          if (!info.filePath?.trim()) {
+            console.warn('Skipping layer with no file path (re-add from chat or disk):', info.name)
+            continue
+          }
           const fileContent = await window.electronAPI.readFile(info.filePath)
           if (!fileContent) continue
           try {
@@ -703,11 +752,25 @@ function App() {
   useEffect(() => {
     if (!workspacePath || isLoadingRef.current) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
-    saveTimeoutRef.current = setTimeout(saveProject, 2000)
+    saveTimeoutRef.current = setTimeout(() => void saveProject(), 800)
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
   }, [workspacePath, mapViewState, layers, drawnFeatures, conversations, activeConversationId, basemap, bookmarks, saveProject])
+
+  useEffect(() => {
+    window.electronAPI.onAppBeforeQuit(async () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current)
+        saveTimeoutRef.current = null
+      }
+      await saveProjectRef.current(true)
+    })
+  }, [])
+
+  useEffect(() => {
+    if (!workspacePath) setDrawMode(null)
+  }, [workspacePath])
 
   const workspaceLabel = workspacePath ? workspacePath.split('/').pop() : 'Open Workspace'
 
@@ -791,6 +854,12 @@ function App() {
         {/* Center */}
         <main className="center-panel">
           <div className="map-stack">
+            {!workspacePath && (
+              <div className="workspace-hint-banner">
+                Open a workspace folder (title bar) to save the map, draw, and export. Layers from chat still
+                appear, but they will not persist until a folder is open.
+              </div>
+            )}
             <MapView
               ref={mapViewRef}
               layers={layers}
@@ -800,6 +869,7 @@ function App() {
               drawnFeatures={drawnFeatures}
               mapActions={mapActions}
               drawStyle={drawStyle}
+              drawingAllowed={!!workspacePath}
               onMapMove={setMapViewState}
               onBoundsChange={setMapBounds}
               onBasemapChange={setBasemap}
@@ -810,6 +880,7 @@ function App() {
               onActionsProcessed={() => setMapActions([])}
             />
             <DrawToolbar
+              enabled={!!workspacePath}
               drawStyle={drawStyle}
               onDrawStyleChange={(partial) => setDrawStyle((s) => ({ ...s, ...partial }))}
               activeZonePreset={activeZonePreset}

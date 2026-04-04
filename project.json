@@ -1,11 +1,11 @@
 {
-  "version": 1,
+  "version": 2,
   "mapState": {
     "center": [
-      78.86424682952088,
-      23.854703031631573
+      77.19385482361349,
+      28.666527562618555
     ],
-    "zoom": 3.954065482197625,
+    "zoom": 10.214097436884892,
     "bearing": 0,
     "pitch": 0
   },
@@ -100,6 +100,16 @@
           "role": "assistant",
           "content": "I still can't calculate the total area of your polygons. My capabilities are limited to the tools I have been given: `web_search`, `geocode`, `fly_to`, `highlight_features`, and `create_artifact`. I don't have access to your map's loaded layers or the ability to perform spatial analysis like calculating areas. You'll need to use the GIS application's built-in tools for that.",
           "timestamp": 1774098755007
+        },
+        {
+          "role": "user",
+          "content": "https://github.com/datameet/Municipal_Spatial_Data/blob/master/Chandigarh/Chandigarh_Wards.geojson\ncan you fetch this and place this",
+          "timestamp": 1774595936132
+        },
+        {
+          "role": "assistant",
+          "content": "I can load it, but I need a **direct (raw) GeoJSON URL**. GitHub “blob” links often don’t return the file contents in a way the map loader can read.\n\nPlease paste either:\n1) the **raw** link (usually: `https://raw.githubusercontent.com/.../Chandigarh_Wards.geojson`), or  \n2) the actual file contents (or a smaller excerpt), or  \n3) confirm the repo path and I’ll give you the exact raw URL to use.\n\nOnce you provide the raw URL, I’ll add it as a new GeoJSON layer (e.g., **“Chandigarh Wards”**) and display it on the map.",
+          "timestamp": 1774595940554
         }
       ],
       "createdAt": 1774098727275
@@ -143,5 +153,6 @@
     }
   ],
   "activeConversationId": "1774098727275-5zkuh",
-  "basemap": "street"
+  "basemap": "street",
+  "bookmarks": []
 }

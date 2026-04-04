@@ -1,3 +1,14 @@
+.draw-toolbar.draw-toolbar-disabled {
+  opacity: 0.55;
+  pointer-events: auto;
+}
+
+.draw-toolbar-disabled .zone-chip:disabled,
+.draw-toolbar-disabled input:disabled,
+.draw-toolbar-disabled select:disabled {
+  cursor: not-allowed;
+}
+
 .draw-toolbar {
   position: absolute;
   top: 48px;
