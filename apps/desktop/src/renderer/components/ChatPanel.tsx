@@ -58,6 +58,9 @@ export default function ChatPanel({
   const [isStreaming, setIsStreaming] = useState(false)
   const [toolStatus, setToolStatus] = useState<string | null>(null)
   const [showHistory, setShowHistory] = useState(false)
+  const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
+  const [currentModel, setCurrentModel] = useState<string>('')
+  const [isSwitchingModel, setIsSwitchingModel] = useState(false)
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -76,6 +79,16 @@ export default function ChatPanel({
       }, 0)
     }
   }, [activeConversation?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    Promise.all([
+      window.electronAPI.getModels(),
+      window.electronAPI.getCurrentModel(),
+    ]).then(([models, model]) => {
+      setAvailableModels(models)
+      setCurrentModel(model)
+    }).catch(() => { /* not in Electron context */ })
+  }, [])
 
   const scrollToBottom = useCallback((): void => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' })
@@ -190,6 +203,24 @@ export default function ChatPanel({
     wsRef.current = null
     onCreateConversation()
     setShowHistory(false)
+  }
+
+  const handleModelChange = async (modelId: string) => {
+    if (modelId === currentModel || isSwitchingModel) return
+    setIsSwitchingModel(true)
+    try {
+      const result = await window.electronAPI.switchModel(modelId)
+      setCurrentModel(modelId)
+      // Close the WS so the next message gets a fresh opencode session with the new model
+      wsRef.current?.close()
+      wsRef.current = null
+      if (result.requiresManualRestart) {
+        setToolStatus('Model updated — restart opencode to apply')
+        setTimeout(() => setToolStatus(null), 4000)
+      }
+    } finally {
+      setIsSwitchingModel(false)
+    }
   }
 
   const formatTime = (ts: number) => {
@@ -379,7 +410,26 @@ export default function ChatPanel({
           </button>
         </div>
         <div className="chat-input-footer">
-          <span className="chat-hint-text">Enter to send, Shift+Enter for newline</span>
+          {availableModels.length > 0 && (
+            <select
+              className="model-selector"
+              value={currentModel}
+              onChange={(e) => handleModelChange(e.target.value)}
+              disabled={isSwitchingModel || isStreaming}
+              title="Switch model"
+            >
+              {availableModels.map((m) => (
+                <option key={m.id} value={m.id}>
+                  {m.local ? '◆ ' : '☁ '}{m.name}
+                </option>
+              ))}
+            </select>
+          )}
+          {isSwitchingModel ? (
+            <span className="chat-hint-text">Switching model...</span>
+          ) : (
+            <span className="chat-hint-text">Enter to send, Shift+Enter for newline</span>
+          )}
         </div>
       </div>
     </div>

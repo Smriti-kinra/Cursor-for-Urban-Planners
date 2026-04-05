@@ -1,3 +1,1 @@
-from .manager import MCPManager
-
-__all__ = ["MCPManager"]
+# MCP servers are now managed by opencode via mcp_bridge.py

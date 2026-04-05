@@ -16,4 +16,7 @@ contextBridge.exposeInMainWorld('electronAPI', {
       }
     })
   },
+  getModels: () => ipcRenderer.invoke('get-models'),
+  getCurrentModel: () => ipcRenderer.invoke('get-current-model'),
+  switchModel: (model: string) => ipcRenderer.invoke('switch-model', model),
 })

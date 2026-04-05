@@ -2,9 +2,8 @@ fastapi
 uvicorn[standard]
 websockets
 pydantic
-openai
-anthropic
 python-dotenv
 duckduckgo-search
 httpx
 shapely
+mcp

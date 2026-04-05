@@ -34,16 +34,3 @@ app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 @app.get("/health")
 async def health():
     return {"status": "ok"}
-
-
-@app.get("/api/mcp/servers")
-async def list_mcp_servers():
-    from mcp_servers import MCPManager
-    mgr = MCPManager()
-    return {"servers": mgr.list_servers()}
-
-
-@app.get("/api/usage")
-async def usage_stats():
-    from llm.usage import get_usage_summary
-    return get_usage_summary()

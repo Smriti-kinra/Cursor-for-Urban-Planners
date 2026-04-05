@@ -1,1 +1,1 @@
-from .declarations import CORE_TOOLS
+# Tool declarations have moved to mcp_bridge.py

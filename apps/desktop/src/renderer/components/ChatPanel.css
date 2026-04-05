@@ -576,13 +576,37 @@
 .chat-input-footer {
   display: flex;
   align-items: center;
-  justify-content: flex-end;
+  justify-content: space-between;
   margin-top: 6px;
   padding: 0 2px;
+  gap: 8px;
 }
 
 .chat-hint-text {
   font-size: 11px;
   color: var(--text-muted);
   opacity: 0.6;
+  white-space: nowrap;
+}
+
+.model-selector {
+  font-size: 11px;
+  color: var(--text-muted);
+  background: transparent;
+  border: 1px solid var(--border-color, rgba(255,255,255,0.1));
+  border-radius: 4px;
+  padding: 2px 4px;
+  cursor: pointer;
+  max-width: 160px;
+  outline: none;
+}
+
+.model-selector:hover {
+  border-color: var(--accent, rgba(255,255,255,0.25));
+  color: var(--text-primary);
+}
+
+.model-selector:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
 }
