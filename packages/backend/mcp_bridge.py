@@ -468,7 +468,7 @@ async def _post_action(action: str, payload: dict) -> None:
     try:
         async with httpx.AsyncClient(timeout=5.0) as client:
             await client.post(
-                f"{BRIDGE_URL}/internal/action",
+                f"{BRIDGE_URL}/api/chat/internal/action",
                 json={"action": action, "payload": payload},
             )
     except Exception:
@@ -505,8 +505,6 @@ async def _execute(name: str, args: dict) -> dict:
     # Action tools — relay to Python bridge
     if name in ACTION_TOOLS:
         await _post_action(name, args)
-        if name == "create_artifact":
-            pass  # handled below
         return {"status": "success", "message": f"Map action '{name}' executed."}
 
     # Utility tools

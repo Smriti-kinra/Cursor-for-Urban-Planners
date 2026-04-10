@@ -22,6 +22,7 @@ import {
   DEFAULT_DRAW_STYLE,
   ZonePreset,
   DEFAULT_ZONE_PRESETS,
+  TextAnnotation,
 } from './types'
 
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
@@ -59,6 +60,12 @@ function App() {
   const [drawStyle, setDrawStyle] = useState<DrawStyleConfig>(DEFAULT_DRAW_STYLE)
   const [activeZonePreset, setActiveZonePreset] = useState<ZonePreset | null>(null)
   const [drawHistory, setDrawHistory] = useState({ canUndo: false, canRedo: false })
+  const [artifactsRevision, setArtifactsRevision] = useState(0)
+  const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
+  const [textStyle, setTextStyle] = useState({ color: '#ffffff', fontSize: 14 })
+  const [featuresToRestore, setFeaturesToRestore] = useState<any[] | null>(null)
+  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null)
+  const [boundaryPreview, setBoundaryPreview] = useState<any | null>(null)
 
   const mapViewRef = useRef<MapViewHandle>(null)
   const bookmarksRef = useRef<MapBookmark[]>([])
@@ -212,6 +219,84 @@ function App() {
     },
     [activeZonePreset],
   )
+
+  // ── Text annotations ──
+
+  const handleAddTextAnnotation = useCallback((a: TextAnnotation) => {
+    setTextAnnotations((prev) => [...prev, a])
+  }, [])
+
+  const handleRemoveTextAnnotation = useCallback((id: string) => {
+    setTextAnnotations((prev) => prev.filter((a) => a.id !== id))
+  }, [])
+
+  // ── Per-feature color ──
+
+  const handleApplyStyleToSelected = useCallback((style: { fillColor: string; strokeColor: string }) => {
+    if (!selectedFeatureId || !mapViewRef.current) return
+    mapViewRef.current.updateFeatureProperties(selectedFeatureId, style)
+  }, [selectedFeatureId])
+
+  // ── Admin boundary save ──
+
+  const handlePreviewBoundary = useCallback((geom: any | null) => {
+    setBoundaryPreview(geom)
+    if (geom) {
+      setMapActions((prev) => [
+        ...prev,
+        {
+          type: 'add_geojson',
+          payload: {
+            geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: geom, properties: {} }] },
+            name: '__boundary_preview__',
+            color: '#f59e0b',
+          },
+        },
+      ])
+    } else {
+      setMapActions((prev) => [
+        ...prev,
+        { type: 'remove_layer', payload: { layer_name: '__boundary_preview__' } },
+      ])
+    }
+  }, [])
+
+  const handleSaveByRegion = useCallback(async (displayName: string, boundaryGeom: any) => {
+    if (!workspacePath || layers.length === 0) return
+    const boundary = { type: 'Feature', geometry: boundaryGeom, properties: {} }
+    const allClipped: any[] = []
+    for (const layer of layers) {
+      for (const f of layer.data?.features || []) {
+        try {
+          const clipped = turf.intersect(
+            turf.featureCollection([f as any, boundary as any])
+          )
+          if (clipped) {
+            allClipped.push({
+              ...clipped,
+              properties: { ...(f.properties || {}), source_layer: layer.name },
+            })
+          }
+        } catch {
+          /* skip invalid geometry */
+        }
+      }
+    }
+    const safeName = displayName.replace(/[^a-z0-9-_]/gi, '_').slice(0, 40) || 'region'
+    const filePath = `${workspacePath}/${safeName}.geojson`
+    await window.electronAPI.writeFile(
+      filePath,
+      JSON.stringify({ type: 'FeatureCollection', features: allClipped }, null, 2),
+    )
+    addLayer(safeName, filePath)
+    setActiveLeftTab('layers')
+    // clear preview
+    setBoundaryPreview(null)
+    setMapActions((prev) => [
+      ...prev,
+      { type: 'remove_layer', payload: { layer_name: '__boundary_preview__' } },
+    ])
+  }, [workspacePath, layers, addLayer])
 
   const handleBookmarkGoTo = useCallback((b: MapBookmark) => {
     setMapActions((prev) => [
@@ -472,7 +557,10 @@ function App() {
       )
       return
     }
-    if (action.type === 'refresh_artifacts') return
+    if (action.type === 'refresh_artifacts') {
+      setArtifactsRevision((n) => n + 1)
+      return
+    }
     setMapActions((prev) => [...prev, action])
   }, [upsertLayer, clipLayersToBboxAndSave, mapViewState.zoom])
 
@@ -648,6 +736,7 @@ function App() {
         activeConversationId,
         basemap,
         bookmarks,
+        textAnnotations,
       }
       const wrote = await window.electronAPI.writeFile(
         `${workspacePath}/project.json`,
@@ -664,6 +753,7 @@ function App() {
       activeConversationId,
       basemap,
       bookmarks,
+      textAnnotations,
     ],
   )
 
@@ -685,7 +775,11 @@ function App() {
         setMapActions([{ type: 'set_view', payload: data.mapState }])
       }
       if (data.basemap) setBasemap(data.basemap)
-      if (data.drawnFeatures) setDrawnFeatures(data.drawnFeatures)
+      if (data.drawnFeatures) {
+        setDrawnFeatures(data.drawnFeatures)
+        if (data.drawnFeatures.length > 0) setFeaturesToRestore(data.drawnFeatures)
+      }
+      if (data.textAnnotations) setTextAnnotations(data.textAnnotations)
       if (data.bookmarks && data.bookmarks.length > 0) setBookmarks(data.bookmarks)
 
       if (data.conversations && data.conversations.length > 0) {
@@ -756,7 +850,7 @@ function App() {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
-  }, [workspacePath, mapViewState, layers, drawnFeatures, conversations, activeConversationId, basemap, bookmarks, saveProject])
+  }, [workspacePath, mapViewState, layers, drawnFeatures, conversations, activeConversationId, basemap, bookmarks, textAnnotations, saveProject])
 
   useEffect(() => {
     window.electronAPI.onAppBeforeQuit(async () => {
@@ -843,6 +937,8 @@ function App() {
               onExportLayer={handleExportLayerFile}
               onExportPdf={handleExportPdf}
               onExportClippedRegion={(name) => void clipLayersToBboxAndSave(name)}
+              onPreviewBoundary={handlePreviewBoundary}
+              onSaveByRegion={handleSaveByRegion}
             />
           )}
           {activeLeftTab === 'zoning' && <ZoningPanel />}
@@ -869,7 +965,13 @@ function App() {
               drawnFeatures={drawnFeatures}
               mapActions={mapActions}
               drawStyle={drawStyle}
-              drawingAllowed={!!workspacePath}
+              canSave={!!workspacePath}
+              featuresToRestore={featuresToRestore ?? undefined}
+              textAnnotations={textAnnotations}
+              textStyle={textStyle}
+              onAddTextAnnotation={handleAddTextAnnotation}
+              onRemoveTextAnnotation={handleRemoveTextAnnotation}
+              onSelectedFeatureId={setSelectedFeatureId}
               onMapMove={setMapViewState}
               onBoundsChange={setMapBounds}
               onBasemapChange={setBasemap}
@@ -880,9 +982,13 @@ function App() {
               onActionsProcessed={() => setMapActions([])}
             />
             <DrawToolbar
-              enabled={!!workspacePath}
               drawStyle={drawStyle}
               onDrawStyleChange={(partial) => setDrawStyle((s) => ({ ...s, ...partial }))}
+              drawMode={drawMode}
+              selectedFeatureId={selectedFeatureId}
+              onApplyStyleToSelected={handleApplyStyleToSelected}
+              textStyle={textStyle}
+              onTextStyleChange={(partial) => setTextStyle((s) => ({ ...s, ...partial }))}
               activeZonePreset={activeZonePreset}
               onZonePresetChange={setActiveZonePreset}
               zonePresets={DEFAULT_ZONE_PRESETS}
@@ -941,7 +1047,7 @@ function App() {
               onMapAction={handleMapAction}
             />
           ) : (
-            <ArtifactsPanel />
+            <ArtifactsPanel revision={artifactsRevision} />
           )}
         </aside>
       </div>

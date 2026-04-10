@@ -12,7 +12,11 @@ interface Artifact {
   updated_at: string
 }
 
-export default function ArtifactsPanel() {
+interface ArtifactsPanelProps {
+  revision?: number
+}
+
+export default function ArtifactsPanel({ revision }: ArtifactsPanelProps) {
   const [artifacts, setArtifacts] = useState<Artifact[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [showForm, setShowForm] = useState(false)
@@ -35,6 +39,10 @@ export default function ArtifactsPanel() {
   useEffect(() => {
     fetchArtifacts()
   }, [fetchArtifacts])
+
+  useEffect(() => {
+    if (revision !== undefined && revision > 0) fetchArtifacts()
+  }, [revision, fetchArtifacts])
 
   const createArtifact = async (): Promise<void> => {
     if (!title.trim()) return

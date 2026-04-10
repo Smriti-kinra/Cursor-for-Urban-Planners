@@ -22,6 +22,7 @@ interface ModelConfig {
 }
 
 const ALL_MODELS: ModelConfig[] = [
+  { id: 'ollama/qwen3-coder:latest', name: 'Qwen3 Coder', provider: 'ollama', local: true },
   { id: 'ollama/qwen2.5:14b', name: 'Qwen 2.5 14B', provider: 'ollama', local: true },
   { id: 'ollama/llama3.1:8b', name: 'Llama 3.1 8B', provider: 'ollama', local: true },
   { id: 'anthropic/claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', local: false, envKey: 'ANTHROPIC_API_KEY' },

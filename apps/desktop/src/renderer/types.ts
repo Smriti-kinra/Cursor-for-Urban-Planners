@@ -76,6 +76,15 @@ export interface MapAction {
   payload: Record<string, any>
 }
 
+export interface TextAnnotation {
+  id: string
+  lng: number
+  lat: number
+  text: string
+  color: string
+  fontSize: number
+}
+
 export interface ProjectData {
   version: number
   mapState: MapViewState
@@ -91,6 +100,7 @@ export interface ProjectData {
   chatHistory?: ChatMessage[]
   basemap: string
   bookmarks?: MapBookmark[]
+  textAnnotations?: TextAnnotation[]
 }
 
 export interface MapContext {
@@ -143,9 +153,26 @@ export const BASEMAPS: Record<string, { name: string; tiles: string[]; attributi
     tiles: ['https://basemaps.cartocdn.com/dark_all/{z}/{x}/{y}@2x.png'],
     attribution: '&copy; CartoDB',
   },
+  light: {
+    name: 'Light',
+    tiles: ['https://basemaps.cartocdn.com/light_all/{z}/{x}/{y}@2x.png'],
+    attribution: '&copy; CartoDB',
+  },
   terrain: {
     name: 'Terrain',
     tiles: ['https://tile.opentopomap.org/{z}/{x}/{y}.png'],
     attribution: '&copy; OpenTopoMap',
+  },
+  topo: {
+    name: 'Topo',
+    tiles: [
+      'https://server.arcgisonline.com/ArcGIS/rest/services/World_Topo_Map/MapServer/tile/{z}/{y}/{x}',
+    ],
+    attribution: '&copy; Esri',
+  },
+  humanitarian: {
+    name: 'Humanitarian',
+    tiles: ['https://tile.openstreetmap.fr/hot/{z}/{x}/{y}.png'],
+    attribution: '&copy; OpenStreetMap contributors',
   },
 }

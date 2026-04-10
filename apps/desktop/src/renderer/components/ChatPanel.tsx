@@ -110,6 +110,8 @@ export default function ChatPanel({
       ws.onerror = () => reject(new Error('WebSocket connection failed'))
       ws.onclose = () => {
         wsRef.current = null
+        setIsStreaming(false)
+        setToolStatus(null)
       }
     })
   }

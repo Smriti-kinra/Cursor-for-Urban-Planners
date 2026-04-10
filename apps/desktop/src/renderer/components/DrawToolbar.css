@@ -121,3 +121,22 @@
 .zone-chip:hover {
   filter: brightness(1.1);
 }
+
+.draw-toolbar-selection {
+  border-top: 1px solid #3b82f6;
+  padding-top: 6px;
+  margin-top: 2px;
+}
+
+.draw-toolbar-hint {
+  font-size: 10px;
+  color: var(--text-muted, #6c7086);
+  white-space: nowrap;
+}
+
+.draw-toolbar-value {
+  font-size: 11px;
+  color: var(--text-secondary, #a6adc8);
+  min-width: 30px;
+  text-align: right;
+}

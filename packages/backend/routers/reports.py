@@ -43,6 +43,49 @@ Format as clean, professional markdown with these sections:
 
 Be specific, professional, and reference the actual data discussed. If map layers were loaded, describe their contents. If drawings were made, note what was drawn and where."""
 
+REPORT_SYSTEM = (
+    "You are a professional urban planning report writer. "
+    "Generate well-structured, data-driven reports. "
+    "Respond ONLY with the markdown report, no tool calls. Always respond in English."
+)
+
+
+async def _collect_response(session_id: str, prompt: str) -> str:
+    """Send prompt via prompt_async and collect streamed text via SSE until session.idle."""
+    async with httpx.AsyncClient(timeout=30.0) as client:
+        resp = await client.post(
+            f"{OPENCODE_URL}/session/{session_id}/prompt_async",
+            json={
+                "system": REPORT_SYSTEM,
+                "parts": [{"type": "text", "text": prompt}],
+            },
+        )
+        if resp.status_code != 204:
+            return ""
+
+    text = ""
+    async with httpx.AsyncClient(timeout=None) as client:
+        async with client.stream("GET", f"{OPENCODE_URL}/event") as response:
+            async for line in response.aiter_lines():
+                if not line.startswith("data: "):
+                    continue
+                try:
+                    event = json.loads(line[6:])
+                except json.JSONDecodeError:
+                    continue
+
+                props = event.get("properties", {})
+                if props.get("sessionID") != session_id:
+                    continue
+
+                etype = event.get("type", "")
+                if etype == "message.part.delta" and props.get("field") == "text":
+                    text += props.get("delta", "")
+                elif etype in ("session.idle", "session.error"):
+                    break
+
+    return text
+
 
 @router.post("/generate", response_model=ReportResponse)
 async def generate_report(request: ReportRequest):
@@ -64,25 +107,12 @@ async def generate_report(request: ReportRequest):
     full_prompt = REPORT_PROMPT + "\n\n---\n\n" + "\n\n".join(context_parts)
 
     try:
-        async with httpx.AsyncClient(timeout=120.0) as client:
-            # Create a temporary session for report generation
+        async with httpx.AsyncClient(timeout=10.0) as client:
             sess = await client.post(f"{OPENCODE_URL}/session", json={"title": "Report"})
             sess.raise_for_status()
             session_id = sess.json()["id"]
 
-            resp = await client.post(
-                f"{OPENCODE_URL}/session/{session_id}/message",
-                json={
-                    "system": "You are a professional urban planning report writer. Generate well-structured, data-driven reports. Respond ONLY with the markdown report, no tool calls.",
-                    "tools": {},  # disable all tools for report generation
-                    "parts": [{"type": "text", "text": full_prompt}],
-                },
-            )
-            resp.raise_for_status()
-            parts = resp.json().get("parts", [])
-            text = "".join(
-                p.get("text", "") for p in parts if p.get("type") == "text"
-            )
-            return ReportResponse(markdown=text or "# Error\n\nNo content generated.")
+        text = await _collect_response(session_id, full_prompt)
+        return ReportResponse(markdown=text or "# Error\n\nNo content generated.")
     except Exception as e:
         return ReportResponse(markdown=f"# Error\n\n{str(e)}")

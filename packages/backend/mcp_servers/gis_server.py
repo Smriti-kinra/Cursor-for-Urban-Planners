@@ -183,8 +183,10 @@ class GISServer:
             except Exception as e:
                 return {"error": str(e)}
 
-        lat = args.get("lat", 0)
-        lng = args.get("lng", 0)
+        lat = args.get("lat")
+        lng = args.get("lng")
+        if lat is None or lng is None:
+            return {"error": "Must provide either 'geojson' or both 'lat' and 'lng'"}
         steps = 64
         coords = []
         for i in range(steps + 1):

@@ -165,8 +165,19 @@ class ZoningServer:
                 inter = ga.intersection(gb)
                 if inter.is_empty:
                     continue
+                if inter.geom_type == "Polygon":
+                    ring = [[x, y] for x, y in inter.exterior.coords]
+                    area_m2 = self._polygon_area_m2(ring)
+                elif inter.geom_type == "MultiPolygon":
+                    area_m2 = sum(
+                        self._polygon_area_m2([[x, y] for x, y in g.exterior.coords])
+                        for g in inter.geoms
+                    )
+                else:
+                    area_m2 = 0.0
                 overlaps.append({
                     "feature_indices": [ia, ib],
                     "overlaps": True,
+                    "overlap_area_m2": round(area_m2, 1),
                 })
         return {"overlap_pairs": overlaps, "count": len(overlaps)}

@@ -219,3 +219,36 @@
   white-space: nowrap;
   pointer-events: none;
 }
+
+/* ── Text annotation input overlay ── */
+
+.map-text-input-overlay {
+  position: absolute;
+  z-index: 20;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  transform: translateX(-50%);
+  pointer-events: auto;
+}
+
+.map-text-field {
+  background: var(--bg-surface);
+  border: 1.5px solid var(--accent);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 13px;
+  padding: 6px 10px;
+  outline: none;
+  min-width: 180px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
+}
+
+.map-text-hint {
+  font-size: 10px;
+  color: var(--text-muted);
+  text-align: center;
+  background: var(--bg-surface);
+  border-radius: 4px;
+  padding: 2px 6px;
+}
