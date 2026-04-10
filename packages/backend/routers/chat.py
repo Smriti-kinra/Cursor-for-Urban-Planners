@@ -132,15 +132,17 @@ async def _stream_until_idle(session_id: str, websocket: WebSocket) -> None:
 
                     etype = event.get("type", "")
 
-                    if etype == "message.part.updated":
-                        part = props.get("part", {})
-                        delta = props.get("delta")
+                    if etype == "message.part.delta":
+                        # Streaming text delta
+                        if props.get("field") == "text":
+                            delta = props.get("delta", "")
+                            if delta:
+                                await websocket.send_text(json.dumps({
+                                    "type": "stream", "content": delta,
+                                }))
 
-                        # Streamed text
-                        if part.get("type") == "text" and delta:
-                            await websocket.send_text(json.dumps({
-                                "type": "stream", "content": delta,
-                            }))
+                    elif etype == "message.part.updated":
+                        part = props.get("part", {})
 
                         # Tool invocation notification
                         if part.get("type") == "tool":
