@@ -10,8 +10,8 @@ declare global {
   interface ModelInfo {
     id: string
     name: string
-    provider: 'ollama' | 'anthropic' | 'google'
-    local: boolean
+    provider: 'openai' | 'anthropic' | 'google'
+    locked: boolean
   }
 
   interface ElectronAPI {

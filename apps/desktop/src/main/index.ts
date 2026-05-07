@@ -5,7 +5,6 @@ import fs from 'fs'
 
 const BACKEND_PORT = 8765
 const OPENCODE_PORT = 4096
-const OLLAMA_PORT = 11434
 const isDev = !app.isPackaged
 
 // opencode.json is in the project root (dev) or bundled resources (prod)
@@ -16,25 +15,22 @@ const OPENCODE_JSON_PATH = isDev
 interface ModelConfig {
   id: string
   name: string
-  provider: 'ollama' | 'anthropic' | 'google'
-  local: boolean
-  envKey?: string
+  provider: 'openai' | 'anthropic' | 'google'
+  locked: boolean
 }
 
 const ALL_MODELS: ModelConfig[] = [
-  { id: 'ollama/qwen3-coder:latest', name: 'Qwen3 Coder', provider: 'ollama', local: true },
-  { id: 'ollama/qwen2.5:14b', name: 'Qwen 2.5 14B', provider: 'ollama', local: true },
-  { id: 'ollama/llama3.1:8b', name: 'Llama 3.1 8B', provider: 'ollama', local: true },
-  { id: 'anthropic/claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', local: false, envKey: 'ANTHROPIC_API_KEY' },
-  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', local: false, envKey: 'GEMINI_API_KEY' },
+  { id: 'openai/gpt-5-mini', name: 'GPT-5 Mini', provider: 'openai', locked: false },
+  { id: 'anthropic/claude-sonnet-4-20250514', name: 'Claude Sonnet 4', provider: 'anthropic', locked: true },
+  { id: 'google/gemini-2.5-flash', name: 'Gemini 2.5 Flash', provider: 'google', locked: true },
 ]
 
 function readOpencodeModel(): string {
   try {
     const config = JSON.parse(fs.readFileSync(OPENCODE_JSON_PATH, 'utf-8'))
-    return config.model || 'ollama/qwen2.5:14b'
+    return config.model || 'openai/gpt-5-mini'
   } catch {
-    return 'ollama/qwen2.5:14b'
+    return 'openai/gpt-5-mini'
   }
 }
 
@@ -46,7 +42,6 @@ function writeOpencodeModel(model: string): void {
 
 let mainWindow: BrowserWindow | null = null
 let backendProcess: ChildProcess | null = null
-let ollamaProcess: ChildProcess | null = null
 let opencodeProcess: ChildProcess | null = null
 let allowMainWindowClose = false
 let quitFlushTimer: ReturnType<typeof setTimeout> | null = null
@@ -64,40 +59,6 @@ function startBackend(): void {
   backendProcess.stdout?.on('data', (d) => console.log(`[backend] ${d}`))
   backendProcess.stderr?.on('data', (d) => console.error(`[backend] ${d}`))
   backendProcess.on('exit', (code) => console.log(`[backend] exited ${code}`))
-}
-
-async function startOllama(): Promise<void> {
-  // Check if Ollama is already running (common in dev)
-  try {
-    const res = await fetch(`http://localhost:${OLLAMA_PORT}/`)
-    if (res.ok) {
-      console.log('[ollama] already running, skipping spawn')
-      return
-    }
-  } catch {
-    /* not running yet */
-  }
-
-  ollamaProcess = spawn('ollama', ['serve'], {
-    stdio: ['ignore', 'pipe', 'pipe']
-  })
-
-  ollamaProcess.stdout?.on('data', (d) => console.log(`[ollama] ${d}`))
-  ollamaProcess.stderr?.on('data', (d) => console.error(`[ollama] ${d}`))
-  ollamaProcess.on('exit', (code) => console.log(`[ollama] exited ${code}`))
-}
-
-async function waitForOllama(retries = 20, delay = 500): Promise<boolean> {
-  for (let i = 0; i < retries; i++) {
-    try {
-      const res = await fetch(`http://localhost:${OLLAMA_PORT}/`)
-      if (res.ok) return true
-    } catch {
-      /* not ready yet */
-    }
-    await new Promise((r) => setTimeout(r, delay))
-  }
-  return false
 }
 
 function startOpencode(): void {
@@ -122,10 +83,6 @@ function stopBackend(): void {
   if (opencodeProcess) {
     opencodeProcess.kill()
     opencodeProcess = null
-  }
-  if (ollamaProcess) {
-    ollamaProcess.kill()
-    ollamaProcess = null
   }
 }
 
@@ -157,26 +114,11 @@ async function waitForOpencode(retries = 20, delay = 500): Promise<boolean> {
 
 // ── Model switching IPC ────────────────────────────────────────────────────────
 
-ipcMain.handle('get-models', () =>
-  ALL_MODELS.filter((m) => !m.envKey || process.env[m.envKey])
-)
+ipcMain.handle('get-models', () => ALL_MODELS)
 
 ipcMain.handle('get-current-model', () => readOpencodeModel())
 
 ipcMain.handle('switch-model', async (_event, newModel: string) => {
-  const oldModel = readOpencodeModel()
-
-  // Unload the old Ollama model from VRAM before loading a new one
-  if (oldModel.startsWith('ollama/')) {
-    try {
-      await fetch(`http://localhost:${OLLAMA_PORT}/api/generate`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ model: oldModel.replace('ollama/', ''), keep_alive: 0, prompt: '' }),
-      })
-    } catch { /* ignore — Ollama may not have the model loaded */ }
-  }
-
   writeOpencodeModel(newModel)
 
   if (!isDev) {
@@ -304,15 +246,10 @@ ipcMain.handle('write-file', async (_event, filePath: string, content: string) =
 
 app.whenReady().then(async () => {
   startBackend()
-  await startOllama()
 
   if (!isDev) {
-    const [backendReady, ollamaReady] = await Promise.all([
-      waitForBackend(),
-      waitForOllama()
-    ])
+    const backendReady = await waitForBackend()
     if (!backendReady) console.error('Backend failed to start')
-    if (!ollamaReady) console.error('Ollama failed to start — local model unavailable')
   }
 
   startOpencode()

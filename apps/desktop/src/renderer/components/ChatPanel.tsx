@@ -421,8 +421,8 @@ export default function ChatPanel({
               title="Switch model"
             >
               {availableModels.map((m) => (
-                <option key={m.id} value={m.id}>
-                  {m.local ? '◆ ' : '☁ '}{m.name}
+                <option key={m.id} value={m.id} disabled={m.locked}>
+                  {m.locked ? '🔒 ' : ''}{m.name}
                 </option>
               ))}
             </select>
