@@ -1,0 +1,68 @@
+{
+  "$schema": "https://json.schemastore.org/claude-code-settings.json",
+  "permissions": {
+    "allow": [
+      "Bash(pnpm *)",
+      "Bash(pnpm dev)",
+      "Bash(pnpm build)",
+      "Bash(pnpm install)",
+      "Bash(pnpm test)",
+      "Bash(npx tsc *)",
+      "Bash(tsc *)",
+      "Bash(pytest *)",
+      "Bash(python -m pytest *)",
+      "Bash(python -m uvicorn *)",
+      "Bash(pip install *)",
+      "Bash(pip list*)",
+      "Bash(git status*)",
+      "Bash(git diff*)",
+      "Bash(git log*)",
+      "Bash(git show*)",
+      "Bash(git branch*)",
+      "Bash(git blame*)",
+      "Bash(git ls-files*)",
+      "Bash(git remote*)",
+      "Bash(git stash list*)",
+      "Bash(gh pr view*)",
+      "Bash(gh pr list*)",
+      "Bash(gh pr checks*)",
+      "Bash(gh pr diff*)",
+      "Bash(gh issue view*)",
+      "Bash(gh issue list*)",
+      "Bash(gh repo view*)",
+      "Bash(gh api*)",
+      "Bash(ls*)",
+      "Bash(find *)",
+      "Bash(head *)",
+      "Bash(tail *)",
+      "Bash(wc *)",
+      "Bash(file *)",
+      "Bash(stat *)",
+      "Bash(tree*)",
+      "Bash(rg *)",
+      "Bash(jq *)",
+      "Bash(curl -s http://localhost:*)",
+      "Bash(curl http://localhost:*)",
+      "Bash(chmod +x*)"
+    ],
+    "deny": [
+      "Bash(rm -rf *)",
+      "Bash(git push --force*)",
+      "Bash(git push -f*)"
+    ]
+  },
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "$CLAUDE_PROJECT_DIR/.claude/hooks/typecheck.sh",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

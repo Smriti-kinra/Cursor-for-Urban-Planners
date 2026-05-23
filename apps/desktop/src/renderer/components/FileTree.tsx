@@ -73,10 +73,20 @@ export default function FileTree({ workspacePath, onFileClick }: FileTreeProps) 
   }
 
   return (
-    <div className="file-tree">
-      {entries.map((entry) => (
-        <TreeNode key={entry.path} entry={entry} depth={0} onFileClick={onFileClick} />
-      ))}
+    <div className="file-tree-wrap">
+      <div className="file-tree-toolbar">
+        <span className="file-tree-path" title={workspacePath}>
+          {workspacePath.split('/').pop()}
+        </span>
+        <button className="file-tree-refresh" onClick={loadDirectory} title="Refresh file tree">
+          ↻
+        </button>
+      </div>
+      <div className="file-tree">
+        {entries.map((entry) => (
+          <TreeNode key={entry.path} entry={entry} depth={0} onFileClick={onFileClick} />
+        ))}
+      </div>
     </div>
   )
 }

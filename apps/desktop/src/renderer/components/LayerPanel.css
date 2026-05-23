@@ -69,6 +69,21 @@
   font-variant-numeric: tabular-nums;
 }
 
+.layer-zoom {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 14px;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.layer-zoom:hover {
+  color: var(--accent);
+}
+
 .layer-remove {
   background: none;
   border: none;

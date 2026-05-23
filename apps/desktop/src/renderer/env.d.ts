@@ -19,8 +19,11 @@ declare global {
     readDirectory: (dirPath: string) => Promise<FileEntry[]>
     readFile: (filePath: string) => Promise<string | null>
     writeFile: (filePath: string, content: string) => Promise<boolean>
-    /** Called when the user closes the window; flush saves, then main process closes. */
     onAppBeforeQuit: (handler: () => void | Promise<void>) => void
+    getLastWorkspace: () => Promise<string | null>
+    setLastWorkspace: (path: string | null) => Promise<void>
+    openFile: (opts: { filters?: { name: string; extensions: string[] }[] }) => Promise<string | null>
+    readFileBase64: (filePath: string) => Promise<string | null>
     getModels: () => Promise<ModelInfo[]>
     getCurrentModel: () => Promise<string>
     switchModel: (model: string) => Promise<{ ok: boolean; requiresManualRestart: boolean }>

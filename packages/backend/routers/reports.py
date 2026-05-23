@@ -1,13 +1,35 @@
-from fastapi import APIRouter
-from pydantic import BaseModel
+"""
+Reports router — direct OpenAI integration.
+
+Generates a structured Markdown urban planning report from a chat history,
+map context, and project artifacts. One non-streaming completion; no tools.
+"""
+
 import json
 import os
+import sys
+from pathlib import Path
 
-import httpx
+from fastapi import APIRouter
+from openai import AsyncOpenAI
+from pydantic import BaseModel
 
-OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://localhost:4096")
+_BACKEND_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(_BACKEND_DIR))
 
 router = APIRouter()
+
+_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+_MODEL_CONFIG_PATH = _BACKEND_DIR / "model_config.json"
+_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+
+def _get_model() -> str:
+    try:
+        data = json.loads(_MODEL_CONFIG_PATH.read_text())
+        return data.get("model") or _DEFAULT_MODEL
+    except Exception:
+        return _DEFAULT_MODEL
 
 
 class ReportRequest(BaseModel):
@@ -50,43 +72,6 @@ REPORT_SYSTEM = (
 )
 
 
-async def _collect_response(session_id: str, prompt: str) -> str:
-    """Send prompt via prompt_async and collect streamed text via SSE until session.idle."""
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        resp = await client.post(
-            f"{OPENCODE_URL}/session/{session_id}/prompt_async",
-            json={
-                "system": REPORT_SYSTEM,
-                "parts": [{"type": "text", "text": prompt}],
-            },
-        )
-        if resp.status_code != 204:
-            return ""
-
-    text = ""
-    async with httpx.AsyncClient(timeout=None) as client:
-        async with client.stream("GET", f"{OPENCODE_URL}/event") as response:
-            async for line in response.aiter_lines():
-                if not line.startswith("data: "):
-                    continue
-                try:
-                    event = json.loads(line[6:])
-                except json.JSONDecodeError:
-                    continue
-
-                props = event.get("properties", {})
-                if props.get("sessionID") != session_id:
-                    continue
-
-                etype = event.get("type", "")
-                if etype == "message.part.delta" and props.get("field") == "text":
-                    text += props.get("delta", "")
-                elif etype in ("session.idle", "session.error"):
-                    break
-
-    return text
-
-
 @router.post("/generate", response_model=ReportResponse)
 async def generate_report(request: ReportRequest):
     context_parts = []
@@ -107,12 +92,14 @@ async def generate_report(request: ReportRequest):
     full_prompt = REPORT_PROMPT + "\n\n---\n\n" + "\n\n".join(context_parts)
 
     try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            sess = await client.post(f"{OPENCODE_URL}/session", json={"title": "Report"})
-            sess.raise_for_status()
-            session_id = sess.json()["id"]
-
-        text = await _collect_response(session_id, full_prompt)
+        completion = await _client.chat.completions.create(
+            model=_get_model(),
+            messages=[
+                {"role": "system", "content": REPORT_SYSTEM},
+                {"role": "user", "content": full_prompt},
+            ],
+        )
+        text = completion.choices[0].message.content or ""
         return ReportResponse(markdown=text or "# Error\n\nNo content generated.")
     except Exception as e:
         return ReportResponse(markdown=f"# Error\n\n{str(e)}")

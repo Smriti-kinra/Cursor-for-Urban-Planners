@@ -1,14 +1,13 @@
 import { DEFAULT_ZONE_PRESETS } from '../types'
 import './ZoningPanel.css'
 
-/** Legend for standard zoning colors (draw tagging uses DrawToolbar chips). */
 export default function ZoningPanel() {
   return (
     <div className="zoning-panel">
       <h4 className="zoning-title">Zoning legend</h4>
       <p className="zoning-intro">
-        Pick a zone chip in the draw toolbar, then draw a polygon — features get <code>zone_code</code>{' '}
-        for analysis with the assistant (<code>analyze_zones</code>, <code>detect_zone_overlaps</code>).
+        Load a GeoJSON file containing a <code>zone_code</code> property on each feature to use zoning analysis.
+        Ask the assistant to <code>analyze_zones</code> or <code>detect_zone_overlaps</code> on any loaded layer.
       </p>
       <ul className="zoning-legend">
         {DEFAULT_ZONE_PRESETS.map((z) => (

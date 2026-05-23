@@ -4,6 +4,7 @@ dist/
 release/
 build/
 .buildenv/
+.tmp/
 *.db
 __pycache__/
 *.pyc
@@ -11,3 +12,5 @@ __pycache__/
 *.spec.bak
 .DS_Store
 .env
+.claude/settings.local.json
+project.json

@@ -1,10 +1,11 @@
 import { useState } from 'react'
-import { GeoJSONLayer } from '../types'
+import type { Polygon, MultiPolygon } from 'geojson'
+import { GeoJSONLayer, BoundaryGeometry } from '../types'
 import './ExportPanel.css'
 
 interface NominatimResult {
   display_name: string
-  geojson: any
+  geojson: Polygon | MultiPolygon | { type: string }
   osm_type: string
   type: string
 }
@@ -16,8 +17,8 @@ interface ExportPanelProps {
   onExportLayer: (layerId: string) => void
   onExportPdf: () => void
   onExportClippedRegion: (name: string) => void
-  onPreviewBoundary: (geom: any | null) => void
-  onSaveByRegion: (displayName: string, boundaryGeom: any) => void
+  onPreviewBoundary: (geom: BoundaryGeometry | null) => void
+  onSaveByRegion: (displayName: string, boundaryGeom: BoundaryGeometry) => void
 }
 
 export default function ExportPanel({
@@ -70,7 +71,9 @@ export default function ExportPanel({
 
   const selectRegion = (r: NominatimResult) => {
     setSelectedRegion(r)
-    onPreviewBoundary(r.geojson)
+    if (r.geojson.type === 'Polygon' || r.geojson.type === 'MultiPolygon') {
+      onPreviewBoundary(r.geojson as BoundaryGeometry)
+    }
   }
 
   const clearRegion = () => {
@@ -185,10 +188,13 @@ export default function ExportPanel({
               type="button"
               className="export-btn primary"
               disabled={!workspacePath || layers.length === 0}
-              onClick={() => onSaveByRegion(
-                regionQuery.replace(/[^a-z0-9-_ ]/gi, '').trim() || 'region',
-                selectedRegion.geojson,
-              )}
+              onClick={() => {
+                if (selectedRegion.geojson.type !== 'Polygon' && selectedRegion.geojson.type !== 'MultiPolygon') return
+                onSaveByRegion(
+                  regionQuery.replace(/[^a-z0-9-_ ]/gi, '').trim() || 'region',
+                  selectedRegion.geojson as BoundaryGeometry,
+                )
+              }}
               title={!workspacePath ? 'Open a workspace first' : 'Clip all layers to this boundary and save'}
             >
               Save within this region

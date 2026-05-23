@@ -63,24 +63,6 @@
   pointer-events: none;
 }
 
-.toolbar-btn.danger:hover {
-  background: var(--danger);
-  color: white;
-}
-
-.toolbar-btn.save:hover {
-  background: var(--success);
-  color: var(--bg-surface);
-}
-
-.toolbar-divider {
-  width: 1px;
-  height: 20px;
-  background: var(--border);
-  margin: 0 4px;
-  flex-shrink: 0;
-}
-
 .toolbar-spacer {
   flex: 1;
 }
@@ -201,54 +183,3 @@
   font-weight: 600;
 }
 
-/* ── Measurement overlay ── */
-
-.measurement-overlay {
-  position: absolute;
-  bottom: 40px;
-  left: 50%;
-  transform: translateX(-50%);
-  background: var(--bg-surface);
-  border: 1px solid var(--border);
-  color: var(--text-primary);
-  padding: 6px 16px;
-  border-radius: 20px;
-  font-size: 12px;
-  font-weight: 600;
-  z-index: 10;
-  white-space: nowrap;
-  pointer-events: none;
-}
-
-/* ── Text annotation input overlay ── */
-
-.map-text-input-overlay {
-  position: absolute;
-  z-index: 20;
-  display: flex;
-  flex-direction: column;
-  gap: 4px;
-  transform: translateX(-50%);
-  pointer-events: auto;
-}
-
-.map-text-field {
-  background: var(--bg-surface);
-  border: 1.5px solid var(--accent);
-  border-radius: 6px;
-  color: var(--text-primary);
-  font-size: 13px;
-  padding: 6px 10px;
-  outline: none;
-  min-width: 180px;
-  box-shadow: 0 2px 12px rgba(0,0,0,0.5);
-}
-
-.map-text-hint {
-  font-size: 10px;
-  color: var(--text-muted);
-  text-align: center;
-  background: var(--bg-surface);
-  border-radius: 4px;
-  padding: 2px 6px;
-}

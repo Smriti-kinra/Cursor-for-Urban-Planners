@@ -1,0 +1,140 @@
+.doc-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 12px;
+  padding: 40px 24px;
+  text-align: center;
+}
+
+.doc-empty-icon {
+  font-size: 48px;
+  opacity: 0.4;
+}
+
+.doc-empty-title {
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary);
+  margin: 0;
+}
+
+.doc-empty-hint {
+  font-size: 12px;
+  color: var(--text-muted);
+  max-width: 320px;
+  line-height: 1.5;
+  margin: 0;
+}
+
+.doc-open-btn {
+  margin-top: 8px;
+  padding: 8px 20px;
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-size: 13px;
+  cursor: pointer;
+  transition: opacity 0.15s;
+}
+
+.doc-open-btn:hover {
+  opacity: 0.85;
+}
+
+.doc-view {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  background: #0f0f14;
+}
+
+.doc-toolbar {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 6px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: var(--bg-panel);
+}
+
+.doc-filename {
+  flex: 1;
+  font-size: 12px;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.doc-pdf-note {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.doc-change-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
+}
+
+.doc-change-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.doc-toolbar {
+  gap: 8px;
+}
+
+.doc-loading-inline {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.doc-content {
+  flex: 1;
+  overflow: auto;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: flex-start;
+  padding: 16px;
+  min-height: 0;
+}
+
+/* PDFs need the iframe to fill available space */
+.doc-content:has(iframe) {
+  padding: 0;
+  overflow: hidden;
+}
+
+.doc-img {
+  max-width: 100%;
+  height: auto;
+  object-fit: contain;
+  border-radius: 4px;
+  box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+
+.doc-pdf {
+  width: 100%;
+  height: 100%;
+  min-height: 0;
+  flex: 1;
+  border: none;
+  border-radius: 4px;
+}

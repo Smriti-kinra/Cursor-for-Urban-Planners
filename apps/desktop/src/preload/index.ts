@@ -9,13 +9,14 @@ contextBridge.exposeInMainWorld('electronAPI', {
   onAppBeforeQuit: (handler: () => void | Promise<void>) => {
     ipcRenderer.removeAllListeners('app-before-quit')
     ipcRenderer.on('app-before-quit', async () => {
-      try {
-        await handler()
-      } finally {
-        ipcRenderer.send('app-quit-flush-done')
-      }
+      try { await handler() } finally { ipcRenderer.send('app-quit-flush-done') }
     })
   },
+  getLastWorkspace: () => ipcRenderer.invoke('get-last-workspace'),
+  setLastWorkspace: (p: string | null) => ipcRenderer.invoke('set-last-workspace', p),
+  openFile: (opts: { filters?: { name: string; extensions: string[] }[] }) =>
+    ipcRenderer.invoke('open-file', opts),
+  readFileBase64: (filePath: string) => ipcRenderer.invoke('read-file-base64', filePath),
   getModels: () => ipcRenderer.invoke('get-models'),
   getCurrentModel: () => ipcRenderer.invoke('get-current-model'),
   switchModel: (model: string) => ipcRenderer.invoke('switch-model', model),

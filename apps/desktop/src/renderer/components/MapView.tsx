@@ -1,137 +1,61 @@
-import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 import maplibregl from 'maplibre-gl'
+import type { DataDrivenPropertyValueSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
-import {
-  TerraDraw,
-  TerraDrawPolygonMode,
-  TerraDrawLineStringMode,
-  TerraDrawPointMode,
-  TerraDrawRectangleMode,
-  TerraDrawCircleMode,
-  TerraDrawFreehandMode,
-  TerraDrawFreehandLineStringMode,
-  TerraDrawSelectMode,
-  TerraDrawRenderMode,
-} from 'terra-draw'
-import { TerraDrawMapLibreGLAdapter } from 'terra-draw-maplibre-gl-adapter'
 import * as turf from '@turf/turf'
-import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS, DrawStyleConfig, TextAnnotation } from '../types'
+import type { Feature } from 'geojson'
+import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS } from '../types'
 import './MapView.css'
+
+interface NominatimSearchResult {
+  display_name: string
+  lat: string
+  lon: string
+}
 
 export type MapViewHandle = {
   getCanvas: () => HTMLCanvasElement | null
-  undoDraw: () => boolean
-  redoDraw: () => boolean
-  canUndoDraw: () => boolean
-  canRedoDraw: () => boolean
-  importFeatures: (features: any[]) => void
-  updateFeatureProperties: (id: string, props: Record<string, string | number>) => void
 }
 
 interface MapViewProps {
   layers: GeoJSONLayer[]
   basemap: string
-  drawMode: string | null
   initialState: MapViewState
-  drawnFeatures: any[]
   mapActions: MapAction[]
-  drawStyle?: DrawStyleConfig
   onMapMove: (state: MapViewState) => void
   onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void
   onBasemapChange: (basemap: string) => void
-  onDrawModeChange: (mode: string | null) => void
-  onDrawChange: (features: any[]) => void
-  onDrawHistoryChange?: (state: { canUndo: boolean; canRedo: boolean }) => void
-  onSaveDrawing: () => void
   onActionsProcessed: () => void
-  /** When true, save/delete buttons are enabled (workspace is open). Drawing itself is always allowed. */
-  canSave?: boolean
-  /** Features to restore into TerraDraw after project load. */
-  featuresToRestore?: any[]
-  textAnnotations?: TextAnnotation[]
-  textStyle?: { color: string; fontSize: number }
-  onAddTextAnnotation?: (a: TextAnnotation) => void
-  onRemoveTextAnnotation?: (id: string) => void
-  onSelectedFeatureId?: (id: string | null) => void
-  /** @deprecated use canSave instead. Kept for compatibility. */
-  drawingAllowed?: boolean
 }
-
-const DRAW_MODES = [
-  { id: 'polygon', label: 'Polygon', icon: '⬡' },
-  { id: 'rectangle', label: 'Rectangle', icon: '▭' },
-  { id: 'circle', label: 'Circle', icon: '◯' },
-  { id: 'linestring', label: 'Line', icon: '╱' },
-  { id: 'freehand', label: 'Freehand', icon: '✏' },
-  { id: 'freehand-linestring', label: 'Freehand line', icon: '〰' },
-  { id: 'point', label: 'Point', icon: '●' },
-  { id: 'text', label: 'Text', icon: 'T' },
-  { id: 'select', label: 'Select', icon: '✥' },
-]
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
     layers,
     basemap,
-    drawMode,
     initialState,
-    drawnFeatures,
     mapActions,
-    drawStyle,
     onMapMove,
     onBoundsChange,
     onBasemapChange,
-    onDrawModeChange,
-    onDrawChange,
-    onDrawHistoryChange,
-    onSaveDrawing,
     onActionsProcessed,
-    canSave = false,
-    featuresToRestore,
-    textAnnotations = [],
-    textStyle = { color: '#ffffff', fontSize: 14 },
-    onAddTextAnnotation,
-    onRemoveTextAnnotation,
-    onSelectedFeatureId,
-    drawingAllowed,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const mapRef = useRef<maplibregl.Map | null>(null)
-  const drawRef = useRef<TerraDraw | null>(null)
-  const onDrawChangeRef = useRef(onDrawChange)
-  onDrawChangeRef.current = onDrawChange
   const onBoundsChangeRef = useRef(onBoundsChange)
   onBoundsChangeRef.current = onBoundsChange
-  const onDrawHistoryChangeRef = useRef(onDrawHistoryChange)
-  onDrawHistoryChangeRef.current = onDrawHistoryChange
-  const onSelectedFeatureIdRef = useRef(onSelectedFeatureId)
-  onSelectedFeatureIdRef.current = onSelectedFeatureId
-  const onAddTextAnnotationRef = useRef(onAddTextAnnotation)
-  onAddTextAnnotationRef.current = onAddTextAnnotation
-  const onRemoveTextAnnotationRef = useRef(onRemoveTextAnnotation)
-  onRemoveTextAnnotationRef.current = onRemoveTextAnnotation
   const ownLayerIds = useRef(new Set<string>())
   const initBasemapRef = useRef(basemap)
   const aiMarkersRef = useRef<maplibregl.Marker[]>([])
   const aiShapeCounterRef = useRef(0)
   const aiShapeIdsRef = useRef<Set<string>>(new Set())
-  const featuresRestoredRef = useRef(false)
-  const textStyleRef = useRef(textStyle)
-  textStyleRef.current = textStyle
 
   const [mapReady, setMapReady] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
-  const [searchResults, setSearchResults] = useState<any[]>([])
+  const [searchResults, setSearchResults] = useState<NominatimSearchResult[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [showBasemaps, setShowBasemaps] = useState(false)
-  const [measurement, setMeasurement] = useState<{
-    area: number
-    length: number
-    points: number
-  } | null>(null)
-  const [textInput, setTextInput] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
   // ── Initialize map ──
 
@@ -183,116 +107,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     map.on('load', () => {
       console.log('[MapView] Map loaded. Style layers:', map.getStyle().layers.map((l) => l.id))
 
-      try {
-        const draw = new TerraDraw({
-          adapter: new TerraDrawMapLibreGLAdapter({ map }),
-          modes: [
-            new TerraDrawPolygonMode(),
-            new TerraDrawRectangleMode(),
-            new TerraDrawCircleMode(),
-            new TerraDrawLineStringMode(),
-            new TerraDrawFreehandMode(),
-            new TerraDrawFreehandLineStringMode(),
-            new TerraDrawPointMode(),
-            new TerraDrawSelectMode({
-              flags: {
-                polygon: {
-                  feature: {
-                    draggable: true,
-                    coordinates: { midpoints: true, draggable: true, deletable: true },
-                  },
-                },
-                rectangle: {
-                  feature: { draggable: true },
-                },
-                circle: {
-                  feature: { draggable: true },
-                },
-                linestring: {
-                  feature: {
-                    draggable: true,
-                    coordinates: { midpoints: true, draggable: true, deletable: true },
-                  },
-                },
-                freehand: {
-                  feature: { draggable: true },
-                },
-                'freehand-linestring': {
-                  feature: { draggable: true },
-                },
-                point: { feature: { draggable: true } },
-              },
-            }),
-            new TerraDrawRenderMode({ modeName: 'static', styles: {} }),
-          ],
-        })
-
-        draw.start()
-        console.log('[MapView] TerraDraw started successfully')
-
-        draw.on('change', () => {
-          const snapshot = draw.getSnapshot()
-          onDrawChangeRef.current(snapshot)
-          try {
-            onDrawHistoryChangeRef.current?.({
-              canUndo: draw.canUndo(),
-              canRedo: draw.canRedo(),
-            })
-          } catch {
-            /* ignore */
-          }
-        })
-
-        // Track feature selection for per-feature styling
-        draw.on('select', (id: string) => {
-          onSelectedFeatureIdRef.current?.(id)
-        })
-        draw.on('deselect', () => {
-          onSelectedFeatureIdRef.current?.(null)
-        })
-
-        drawRef.current = draw
-
-        // Text annotation layer
-        map.addSource('text-annotations', {
-          type: 'geojson',
-          data: { type: 'FeatureCollection', features: [] },
-        })
-        map.addLayer({
-          id: 'text-annotations-layer',
-          type: 'symbol',
-          source: 'text-annotations',
-          layout: {
-            'text-field': ['get', 'text'],
-            'text-size': ['get', 'fontSize'],
-            'text-anchor': 'center',
-            'text-allow-overlap': true,
-            'text-ignore-placement': true,
-          } as any,
-          paint: {
-            'text-color': ['get', 'color'] as any,
-            'text-halo-color': 'rgba(0,0,0,0.6)',
-            'text-halo-width': 1.5,
-          },
-        })
-
-        // Remove text annotation on right-click
-        map.on('contextmenu', 'text-annotations-layer', (e) => {
-          const feature = e.features?.[0]
-          if (feature?.id != null) {
-            onRemoveTextAnnotationRef.current?.(String(feature.properties?.annotationId))
-          }
-        })
-
-      } catch (err) {
-        console.error('[MapView] TerraDraw init FAILED:', err)
-      }
-
-      console.log(
-        '[MapView] After TerraDraw, style layers:',
-        map.getStyle().layers.map((l) => l.id),
-      )
-
       setMapReady(true)
     })
 
@@ -300,10 +114,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       setMapReady(false)
       for (const m of aiMarkersRef.current) m.remove()
       aiMarkersRef.current = []
-      if (drawRef.current) {
-        drawRef.current.stop()
-        drawRef.current = null
-      }
       map.remove()
       mapRef.current = null
     }
@@ -345,8 +155,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'fill-color': ['coalesce', ['get', 'fillColor'], layer.color] as any,
-            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.3] as any,
+            'fill-color': ['coalesce', ['get', 'fillColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
+            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.3] as DataDrivenPropertyValueSpecification<number>,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -361,7 +171,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as any,
+            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -377,7 +187,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiLineString'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as any,
+            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -441,7 +251,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       tiles,
       tileSize: 256,
       attribution,
-    } as any)
+    })
 
     map.addLayer({ id: 'basemap', type: 'raster', source: 'basemap', minzoom: 0, maxzoom: 19 })
 
@@ -457,166 +267,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     console.log('[MapView] Basemap switched. Layers:', map.getStyle().layers.map((l) => l.id))
   }, [basemap, mapReady])
 
-  // ── Draw mode ──
-
-  useEffect(() => {
-    if (!drawRef.current || !mapReady) return
-    // 'text' is handled by our own click handler, not TerraDraw
-    const terraMode = drawMode === 'text' || !drawMode ? 'static' : drawMode
-    try {
-      drawRef.current.setMode(terraMode)
-      console.log('[MapView] Draw mode set to:', terraMode, '(requested:', drawMode, ')')
-    } catch (err) {
-      console.error('[MapView] setMode FAILED for:', terraMode, err)
-    }
-  }, [drawMode, mapReady])
-
-  // Text annotation click handler
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !mapReady || drawMode !== 'text') return
-
-    const handleClick = (e: maplibregl.MapMouseEvent) => {
-      setTextInput({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat })
-    }
-
-    map.on('click', handleClick)
-    return () => { map.off('click', handleClick) }
-  }, [drawMode, mapReady])
-
   useImperativeHandle(
     ref,
     () => ({
       getCanvas: () => mapRef.current?.getCanvas() ?? null,
-      undoDraw: () => drawRef.current?.undo() ?? false,
-      redoDraw: () => drawRef.current?.redo() ?? false,
-      canUndoDraw: () => drawRef.current?.canUndo() ?? false,
-      canRedoDraw: () => drawRef.current?.canRedo() ?? false,
-      importFeatures: (features: any[]) => {
-        if (!drawRef.current || !features.length) return
-        try {
-          drawRef.current.addFeatures(features)
-        } catch (e) {
-          console.warn('[MapView] importFeatures failed:', e)
-        }
-      },
-      updateFeatureProperties: (id: string, props: Record<string, string | number>) => {
-        if (!drawRef.current) return
-        try {
-          drawRef.current.updateFeatureProperties(id, props)
-        } catch (e) {
-          console.warn('[MapView] updateFeatureProperties failed:', e)
-        }
-      },
     }),
     [mapReady],
   )
-
-  useEffect(() => {
-    const draw = drawRef.current
-    if (!draw || !mapReady || !drawStyle) return
-    const dashArray =
-      drawStyle.lineDash === 'dashed' ? [4, 4] :
-      drawStyle.lineDash === 'dotted' ? [1, 4] : undefined
-    try {
-      draw.setModeStyles('polygon', {
-        fillColor: drawStyle.fillColor,
-        outlineColor: drawStyle.strokeColor,
-        fillOpacity: drawStyle.fillOpacity,
-        outlineWidth: drawStyle.lineWidth,
-      } as any)
-      draw.setModeStyles('rectangle', {
-        fillColor: drawStyle.fillColor,
-        outlineColor: drawStyle.strokeColor,
-        fillOpacity: drawStyle.fillOpacity,
-        outlineWidth: drawStyle.lineWidth,
-      } as any)
-      draw.setModeStyles('circle', {
-        fillColor: drawStyle.fillColor,
-        outlineColor: drawStyle.strokeColor,
-        fillOpacity: drawStyle.fillOpacity,
-        outlineWidth: drawStyle.lineWidth,
-      } as any)
-      draw.setModeStyles('freehand', {
-        fillColor: drawStyle.fillColor,
-        outlineColor: drawStyle.strokeColor,
-        fillOpacity: drawStyle.fillOpacity,
-        outlineWidth: drawStyle.lineWidth,
-      } as any)
-      draw.setModeStyles('linestring', {
-        lineStringColor: drawStyle.strokeColor,
-        lineStringWidth: drawStyle.lineWidth,
-        ...(dashArray ? { lineStringDash: dashArray } : {}),
-      } as any)
-      draw.setModeStyles('freehand-linestring', {
-        lineStringColor: drawStyle.strokeColor,
-        lineStringWidth: drawStyle.lineWidth,
-        ...(dashArray ? { lineStringDash: dashArray } : {}),
-      } as any)
-      draw.setModeStyles('point', {
-        pointColor: drawStyle.strokeColor,
-        pointOutlineColor: drawStyle.strokeColor,
-        pointWidth: drawStyle.lineWidth + 6,
-      } as any)
-    } catch (err) {
-      console.warn('[MapView] setModeStyles', err)
-    }
-  }, [drawStyle, mapReady])
-
-  // Restore drawn features from project load (fires once when featuresToRestore becomes non-empty)
-  useEffect(() => {
-    if (!mapReady || !drawRef.current || featuresRestoredRef.current) return
-    if (!featuresToRestore?.length) return
-    featuresRestoredRef.current = true
-    try {
-      drawRef.current.addFeatures(featuresToRestore)
-    } catch (e) {
-      console.warn('[MapView] feature restore failed:', e)
-    }
-  }, [mapReady, featuresToRestore])
-
-  // Sync text annotations to MapLibre symbol layer
-  useEffect(() => {
-    const map = mapRef.current
-    if (!map || !mapReady) return
-    const src = map.getSource('text-annotations') as maplibregl.GeoJSONSource | undefined
-    if (!src) return
-    src.setData({
-      type: 'FeatureCollection',
-      features: textAnnotations.map((a) => ({
-        type: 'Feature',
-        id: a.id,
-        geometry: { type: 'Point', coordinates: [a.lng, a.lat] },
-        properties: { text: a.text, color: a.color, fontSize: a.fontSize, annotationId: a.id },
-      })),
-    })
-  }, [textAnnotations, mapReady])
-
-  // ── Measurement ──
-
-  useEffect(() => {
-    if (drawnFeatures.length === 0) {
-      setMeasurement(null)
-      return
-    }
-
-    let area = 0,
-      length = 0,
-      points = 0
-    for (const f of drawnFeatures) {
-      if (!f.geometry) continue
-      try {
-        const t = f.geometry.type
-        if (t === 'Polygon' || t === 'MultiPolygon') area += turf.area(f)
-        if (t === 'LineString' || t === 'MultiLineString')
-          length += turf.length(f, { units: 'kilometers' })
-        if (t === 'Point') points++
-      } catch {
-        /* skip invalid geometries */
-      }
-    }
-    setMeasurement({ area, length, points })
-  }, [drawnFeatures])
 
   // ── Map actions (all AI-driven actions) ──
 
@@ -793,7 +450,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           )
           if (target) {
             const filtered = (target.data.features || []).filter(
-              (f: any) =>
+              (f: Feature) =>
                 String(f.properties?.[property_name]) === String(property_value),
             )
             if (filtered.length > 0) {
@@ -892,7 +549,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
   }
 
-  const flyToResult = (result: any) => {
+  const flyToResult = (result: NominatimSearchResult) => {
     mapRef.current?.flyTo({
       center: [parseFloat(result.lon), parseFloat(result.lat)],
       zoom: 15,
@@ -901,40 +558,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     setSearchResults([])
     setShowSearch(false)
     setSearchQuery('')
-  }
-
-  // ── Delete drawn features ──
-
-  const handleDeleteDrawn = () => {
-    if (!drawRef.current) return
-    const snapshot = drawRef.current.getSnapshot()
-    const ids = snapshot.map((f) => f.id as string)
-    if (ids.length > 0) {
-      try {
-        drawRef.current.removeFeatures(ids)
-      } catch {
-        /* ignore */
-      }
-    }
-    onDrawChange([])
-  }
-
-  const formatMeasurement = () => {
-    if (!measurement) return null
-    const parts: string[] = []
-    if (measurement.area > 0) {
-      if (measurement.area < 10000) parts.push(`${measurement.area.toFixed(0)} m²`)
-      else if (measurement.area < 1000000)
-        parts.push(`${(measurement.area / 10000).toFixed(2)} ha`)
-      else parts.push(`${(measurement.area / 1000000).toFixed(2)} km²`)
-    }
-    if (measurement.length > 0) {
-      if (measurement.length < 1) parts.push(`${(measurement.length * 1000).toFixed(0)} m`)
-      else parts.push(`${measurement.length.toFixed(2)} km`)
-    }
-    if (measurement.points > 0)
-      parts.push(`${measurement.points} pt${measurement.points > 1 ? 's' : ''}`)
-    return parts.length > 0 ? parts.join(' · ') : null
   }
 
   return (
@@ -953,43 +576,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         >
           🔍
         </button>
-
-        <div className="toolbar-divider" />
-
-        {DRAW_MODES.map((mode) => (
-          <button
-            key={mode.id}
-            type="button"
-            className={`toolbar-btn ${drawMode === mode.id ? 'active' : ''}`}
-            onClick={() => onDrawModeChange(drawMode === mode.id ? null : mode.id)}
-            title={mode.label}
-          >
-            {mode.icon}
-          </button>
-        ))}
-
-        {(drawnFeatures.length > 0 || textAnnotations.length > 0) && (
-          <>
-            <div className="toolbar-divider" />
-            <button
-              type="button"
-              className="toolbar-btn save"
-              disabled={!canSave}
-              onClick={() => canSave && onSaveDrawing()}
-              title={canSave ? 'Save drawing to workspace' : 'Open a workspace to save'}
-            >
-              💾
-            </button>
-            <button
-              type="button"
-              className="toolbar-btn danger"
-              onClick={handleDeleteDrawn}
-              title="Delete all drawings"
-            >
-              🗑
-            </button>
-          </>
-        )}
 
         <div className="toolbar-spacer" />
 
@@ -1023,7 +609,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           </div>
           {searchResults.length > 0 && (
             <div className="search-results">
-              {searchResults.map((r: any, i: number) => (
+              {searchResults.map((r, i) => (
                 <div key={i} className="search-result" onClick={() => flyToResult(r)}>
                   {r.display_name}
                 </div>
@@ -1051,56 +637,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         </div>
       )}
 
-      {/* ── Measurement overlay ── */}
-      {formatMeasurement() && (
-        <div className="measurement-overlay">{formatMeasurement()}</div>
-      )}
-
-      {/* ── Text annotation input ── */}
-      {textInput && drawMode === 'text' && (
-        <div
-          className="map-text-input-overlay"
-          style={{ left: textInput.x, top: Math.max(8, textInput.y - 50) }}
-        >
-          <input
-            autoFocus
-            className="map-text-field"
-            placeholder="Type text, Enter to place"
-            onKeyDown={(e) => {
-              if (e.key === 'Enter') {
-                const val = e.currentTarget.value.trim()
-                if (val) {
-                  onAddTextAnnotationRef.current?.({
-                    id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                    lng: textInput.lng,
-                    lat: textInput.lat,
-                    text: val,
-                    color: textStyleRef.current.color,
-                    fontSize: textStyleRef.current.fontSize,
-                  })
-                }
-                setTextInput(null)
-              }
-              if (e.key === 'Escape') setTextInput(null)
-            }}
-            onBlur={(e) => {
-              const val = e.currentTarget.value.trim()
-              if (val) {
-                onAddTextAnnotationRef.current?.({
-                  id: `text-${Date.now()}-${Math.random().toString(36).slice(2, 6)}`,
-                  lng: textInput.lng,
-                  lat: textInput.lat,
-                  text: val,
-                  color: textStyleRef.current.color,
-                  fontSize: textStyleRef.current.fontSize,
-                })
-              }
-              setTextInput(null)
-            }}
-          />
-          <span className="map-text-hint">Enter ✓ · Esc ✗ · Right-click to remove</span>
-        </div>
-      )}
     </div>
   )
 })

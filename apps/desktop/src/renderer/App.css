@@ -72,7 +72,39 @@ body.resizing .resize-handle {
   font-size: 13px;
   font-weight: 600;
   color: var(--text-secondary);
+}
+
+.mode-switcher {
+  display: flex;
+  gap: 2px;
+  background: var(--bg-hover);
+  border-radius: 6px;
+  padding: 2px;
   flex: 1;
+  max-width: 160px;
+  -webkit-app-region: no-drag;
+}
+
+.mode-btn {
+  flex: 1;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 3px 10px;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.15s, color 0.15s;
+}
+
+.mode-btn.active {
+  background: var(--accent);
+  color: var(--bg-surface);
+  font-weight: 600;
+}
+
+.mode-btn:not(.active):hover {
+  color: var(--text-primary);
 }
 
 .workspace-btn {

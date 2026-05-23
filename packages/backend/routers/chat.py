@@ -1,48 +1,100 @@
 """
-Chat router — thin WebSocket bridge to opencode.
+Chat router — direct OpenAI integration with tool-calling loop.
 
-Responsibilities:
-  1. Accept WebSocket connections from the frontend.
-  2. Create an opencode session per connection and forward user messages.
-  3. Subscribe to opencode's SSE event stream and relay text/tool events back.
-  4. Expose POST /internal/action so the MCP bridge can push map actions to
-     the active frontend WebSocket (single-user desktop app assumption).
+Each WebSocket connection keeps a running message history and runs an
+agentic loop:
+  1. Send messages to OpenAI with tool definitions.
+  2. Stream text deltas back to the frontend.
+  3. Execute tool calls inline; map actions go straight to the WebSocket.
+  4. Loop until the model stops calling tools.
 """
 
 import asyncio
 import json
 import os
+import sys
+from pathlib import Path
 
-import httpx
-from fastapi import APIRouter, Request, WebSocket, WebSocketDisconnect
+from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from openai import AsyncOpenAI
+
+# Make sure backend package is importable
+_BACKEND_DIR = Path(__file__).parent.parent
+sys.path.insert(0, str(_BACKEND_DIR))
+
+from mcp_servers.osm_server import OSMServer
+from mcp_servers.gis_server import GISServer
+from mcp_servers.weather_server import WeatherServer
+from mcp_servers.zoning_server import ZoningServer
+from mcp_servers.demographics_server import DemographicsServer
+from tools.utility import UtilityServer
 
 router = APIRouter()
 
-OPENCODE_URL = os.environ.get("OPENCODE_URL", "http://localhost:4096")
+_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+_MODEL_CONFIG_PATH = _BACKEND_DIR / "model_config.json"
+_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+
+
+def _get_model() -> str:
+    try:
+        data = json.loads(_MODEL_CONFIG_PATH.read_text())
+        return data.get("model") or _DEFAULT_MODEL
+    except Exception:
+        return _DEFAULT_MODEL
+
+DB_PATH = Path(os.environ.get("CURSOR_URBAN_DB", str(_BACKEND_DIR / "cursor_urban.db")))
+
+_servers = {
+    "osm": OSMServer(),
+    "gis": GISServer(),
+    "weather": WeatherServer(),
+    "zoning": ZoningServer(),
+    "demographics": DemographicsServer(),
+    "utility": UtilityServer(db_path=DB_PATH),
+}
+
+# ── Action tool names (sent directly to frontend as map actions) ──────────────
+
+_ACTION_TOOLS = {
+    "fly_to", "fit_bounds",
+    "add_marker", "add_markers", "clear_markers",
+    "draw_line", "draw_polygon", "draw_circle", "add_geojson",
+    "highlight_features", "set_layer_style", "toggle_layer", "remove_layer",
+    "save_bookmark", "go_to_bookmark", "export_region_clip",
+}
+
+# ── System prompt ─────────────────────────────────────────────────────────────
+
+DOCUMENT_SYSTEM_PROMPT = (
+    "You are an expert urban planning analyst. The user has shared a map image or planning document with you. "
+    "Carefully analyze what you see: land use patterns, zoning areas, transportation networks, "
+    "infrastructure, built vs. open spaces, density patterns, boundaries, and any labels or legends. "
+    "Answer questions thoroughly with professional planning insights. "
+    "You may save detailed analyses using the create_artifact tool."
+)
 
 SYSTEM_PROMPT = (
     "You are an expert urban planning assistant embedded in a desktop GIS application. "
     "You help with zoning analysis, land use planning, transportation networks, "
     "environmental impact, building codes, community development, and spatial analysis. "
     "Always respond in English regardless of the query language.\n\n"
-    "AVAILABLE TOOLS (all prefixed with urban_):\n"
-    "- Navigate: urban_fly_to, urban_fit_bounds\n"
-    "- Markers: urban_add_marker, urban_add_markers, urban_clear_markers\n"
-    "- Draw: urban_draw_line, urban_draw_polygon, urban_draw_circle\n"
-    "- Layers: urban_add_geojson, urban_toggle_layer, urban_remove_layer, urban_set_layer_style\n"
-    "- Highlight: urban_highlight_features\n"
-    "- Measure: urban_measure_distance, urban_measure_area\n"
-    "- Search: urban_web_search, urban_geocode\n"
-    "- OSM: urban_osm_search (amenities, buildings, roads), "
-    "urban_osm_boundary (city/district/state boundary polygons), "
-    "urban_osm_reverse_geocode, urban_osm_route_overview\n"
-    "- Weather: urban_get_weather, urban_get_air_quality\n"
-    "- GIS: urban_gis_buffer, urban_gis_centroid, urban_gis_area, urban_gis_convex_hull, "
-    "urban_gis_point_in_polygon, urban_gis_bounding_box, urban_gis_union\n"
-    "- Bookmarks: urban_save_bookmark, urban_go_to_bookmark, urban_export_region_clip\n"
-    "- Zoning: urban_analyze_zones, urban_detect_zone_overlaps\n"
-    "- Demographics: urban_get_demographics\n"
-    "- Artifacts: urban_create_artifact\n\n"
+    "AVAILABLE TOOLS:\n"
+    "- Navigate: fly_to, fit_bounds\n"
+    "- Markers: add_marker, add_markers, clear_markers\n"
+    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style\n"
+    "- Highlight: highlight_features\n"
+    "- Search: web_search, geocode\n"
+    "- OSM: osm_search (amenities, buildings, roads), "
+    "osm_boundary (city/district/state boundary polygons), "
+    "osm_reverse_geocode, osm_route_overview\n"
+    "- Weather: get_weather, get_air_quality\n"
+    "- GIS: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
+    "gis_point_in_polygon, gis_bounding_box, gis_union\n"
+    "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
+    "- Zoning: analyze_zones, detect_zone_overlaps\n"
+    "- Demographics: get_demographics\n"
+    "- Artifacts: create_artifact\n\n"
     "MAP CONTEXT:\n"
     "The current map state is appended to every message. It includes:\n"
     "- bounds: current viewport (west,south,east,north) when available.\n"
@@ -51,175 +103,383 @@ SYSTEM_PROMPT = (
     "IMPORTANT RULES:\n"
     "1. Do NOT add markers unless the user explicitly asks for markers or pins.\n"
     "2. Do NOT repeat a tool call you already made. Call each tool ONCE per distinct item.\n"
-    "3. urban_osm_search and urban_osm_boundary results are AUTO-DISPLAYED on the map. "
-    "Do NOT call urban_add_geojson for data that was already returned by these tools.\n"
-    "4. When using urban_osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches.\n"
+    "3. osm_search and osm_boundary results are AUTO-DISPLAYED on the map. "
+    "Do NOT call add_geojson for data that was already returned by these tools.\n"
+    "4. When using osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches.\n"
     "5. Only call the tools the user's request requires. Do not add extra actions.\n"
-    "6. When the user asks to navigate somewhere, use urban_fly_to. Do not add markers unless asked.\n"
-    "7. When finished, stop calling tools and respond with a brief summary of what you did."
+    "6. When the user asks to navigate somewhere, use fly_to. Do not add markers unless asked.\n"
+    "7. SUB-CITY BOUNDARIES (sectors, neighborhoods, colonies, suburbs): call osm_boundary with "
+    "place_type='suburb' (or 'neighbourhood'/'quarter') and parent='<city>'. Do NOT use admin_level — "
+    "Indian sectors are not administrative boundaries in OSM. If a result is empty, KEEP TRYING: "
+    "(a) name variants like 'Sector 30 A' / 'Sector 30 B' (Chandigarh sectors are often split), "
+    "(b) other place_type values, (c) osm_search(feature_type='place', feature_value='suburb') near "
+    "the city center. Do not give up after one failed call.\n"
+    "8. When finished, stop calling tools and respond with a brief summary of what you did."
 )
 
-# The most recently active WebSocket connection (single-user desktop app).
-_active_ws: WebSocket | None = None
+# ── Build OpenAI tool definitions ─────────────────────────────────────────────
+
+def _decl_to_openai(name: str, description: str, parameters: dict) -> dict:
+    return {
+        "type": "function",
+        "function": {"name": name, "description": description, "parameters": parameters},
+    }
 
 
-# ── Internal action relay ─────────────────────────────────────────────────────
+def _build_tools() -> list[dict]:
+    tools = []
 
-@router.post("/internal/action")
-async def internal_action(request: Request):
-    """Receive an action from the MCP bridge and forward it to the frontend."""
-    global _active_ws
-    body = await request.json()
-    if _active_ws is not None:
-        try:
-            await _active_ws.send_text(json.dumps({
-                "type": "action",
-                "action": body.get("action"),
-                "payload": body.get("payload", {}),
-            }))
-        except Exception:
-            _active_ws = None
-    return {"ok": True}
-
-
-# ── opencode session helpers ──────────────────────────────────────────────────
-
-async def _create_session() -> str | None:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{OPENCODE_URL}/session",
-                json={"title": "Urban Planning"},
-            )
-            resp.raise_for_status()
-            return resp.json()["id"]
-    except Exception:
-        return None
-
-
-async def _send_message(session_id: str, text: str, system: str) -> bool:
-    try:
-        async with httpx.AsyncClient(timeout=10.0) as client:
-            resp = await client.post(
-                f"{OPENCODE_URL}/session/{session_id}/prompt_async",
-                json={
-                    "system": system,
-                    "parts": [{"type": "text", "text": text}],
+    # Action tools
+    action_defs = [
+        ("fly_to", "Animate the map to specific coordinates", {
+            "type": "object",
+            "properties": {
+                "lat": {"type": "number"}, "lng": {"type": "number"},
+                "zoom": {"type": "number", "description": "Zoom level 1-20, default 15"},
+            },
+            "required": ["lat", "lng"],
+        }),
+        ("fit_bounds", "Fit the map view to a bounding box", {
+            "type": "object",
+            "properties": {
+                "south": {"type": "number"}, "west": {"type": "number"},
+                "north": {"type": "number"}, "east": {"type": "number"},
+            },
+            "required": ["south", "west", "north", "east"],
+        }),
+        ("add_marker", "Add a labeled marker pin on the map", {
+            "type": "object",
+            "properties": {
+                "lat": {"type": "number"}, "lng": {"type": "number"},
+                "label": {"type": "string"}, "color": {"type": "string"},
+            },
+            "required": ["lat", "lng", "label"],
+        }),
+        ("add_markers", "Add multiple markers at once", {
+            "type": "object",
+            "properties": {
+                "markers": {
+                    "type": "array",
+                    "items": {
+                        "type": "object",
+                        "properties": {
+                            "lat": {"type": "number"}, "lng": {"type": "number"},
+                            "label": {"type": "string"}, "color": {"type": "string"},
+                        },
+                        "required": ["lat", "lng", "label"],
+                    },
                 },
-            )
-            return resp.status_code == 204
-    except Exception:
-        return False
+            },
+            "required": ["markers"],
+        }),
+        ("clear_markers", "Remove all AI-placed markers from the map", {
+            "type": "object", "properties": {},
+        }),
+        ("add_geojson", "Add a GeoJSON FeatureCollection as a new map layer", {
+            "type": "object",
+            "properties": {
+                "geojson": {"type": "object", "description": "A GeoJSON FeatureCollection"},
+                "name": {"type": "string"}, "color": {"type": "string"},
+            },
+            "required": ["geojson", "name"],
+        }),
+        ("highlight_features", "Highlight features in a loaded layer by a property value", {
+            "type": "object",
+            "properties": {
+                "layer_name": {"type": "string"},
+                "property_name": {"type": "string"},
+                "property_value": {"type": "string"},
+            },
+            "required": ["layer_name", "property_name", "property_value"],
+        }),
+        ("set_layer_style", "Change the visual style of a loaded map layer", {
+            "type": "object",
+            "properties": {
+                "layer_name": {"type": "string"}, "fill_color": {"type": "string"},
+                "line_color": {"type": "string"}, "opacity": {"type": "number"},
+            },
+            "required": ["layer_name"],
+        }),
+        ("toggle_layer", "Show or hide a map layer", {
+            "type": "object",
+            "properties": {
+                "layer_name": {"type": "string"}, "visible": {"type": "boolean"},
+            },
+            "required": ["layer_name", "visible"],
+        }),
+        ("remove_layer", "Remove a layer from the map entirely", {
+            "type": "object",
+            "properties": {"layer_name": {"type": "string"}},
+            "required": ["layer_name"],
+        }),
+        ("save_bookmark", "Save the current map region as a named bookmark", {
+            "type": "object",
+            "properties": {
+                "name": {"type": "string"},
+                "south": {"type": "number"}, "west": {"type": "number"},
+                "north": {"type": "number"}, "east": {"type": "number"},
+                "zoom": {"type": "number"},
+            },
+            "required": ["name"],
+        }),
+        ("go_to_bookmark", "Fly the map to a previously saved bookmark by name", {
+            "type": "object",
+            "properties": {"name": {"type": "string"}},
+            "required": ["name"],
+        }),
+        ("export_region_clip", "Clip all loaded layers to a bounding box and save as GeoJSON", {
+            "type": "object",
+            "properties": {
+                "output_base_name": {"type": "string"},
+                "south": {"type": "number"}, "west": {"type": "number"},
+                "north": {"type": "number"}, "east": {"type": "number"},
+            },
+            "required": ["output_base_name"],
+        }),
+    ]
+    for name, desc, params in action_defs:
+        tools.append(_decl_to_openai(name, desc, params))
+
+    # MCP server tools (utility tools come from UtilityServer in _servers)
+    for srv in _servers.values():
+        for decl in srv.get_declarations():
+            tools.append(_decl_to_openai(decl.name, decl.description, decl.parameters))
+
+    return tools
 
 
-async def _stream_until_idle(session_id: str, websocket: WebSocket) -> None:
-    """Subscribe to opencode SSE and relay events to the frontend until the session goes idle."""
-    try:
-        async with httpx.AsyncClient(timeout=None) as client:
-            async with client.stream("GET", f"{OPENCODE_URL}/event") as response:
-                async for line in response.aiter_lines():
-                    if not line.startswith("data: "):
-                        continue
-                    try:
-                        event = json.loads(line[6:])
-                    except json.JSONDecodeError:
-                        continue
+_TOOLS = _build_tools()
 
-                    props = event.get("properties", {})
+# ── Tool execution ────────────────────────────────────────────────────────────
 
-                    # Filter to events belonging to this session
-                    if props.get("sessionID") != session_id:
-                        continue
+async def _send_action(ws: WebSocket, action: str, payload: dict) -> None:
+    await ws.send_text(json.dumps({"type": "action", "action": action, "payload": payload}))
 
-                    etype = event.get("type", "")
 
-                    if etype == "message.part.delta":
-                        # Streaming text delta
-                        if props.get("field") == "text":
-                            delta = props.get("delta", "")
-                            if delta:
-                                await websocket.send_text(json.dumps({
-                                    "type": "stream", "content": delta,
-                                }))
+async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
+    # Map action tools → send directly to frontend
+    if name in _ACTION_TOOLS:
+        await _send_action(ws, name, args)
+        return json.dumps({"status": "success", "message": f"'{name}' executed on map."})
 
-                    elif etype == "message.part.updated":
-                        part = props.get("part", {})
+    # MCP server tools (includes UtilityServer)
+    for srv in _servers.values():
+        if name in srv.tool_names:
+            result = await srv.execute(name, args)
 
-                        # Tool invocation notification
-                        if part.get("type") == "tool":
-                            state = part.get("state", {})
-                            if state.get("status") == "running":
-                                await websocket.send_text(json.dumps({
-                                    "type": "tool_use",
-                                    "tool": part.get("tool", ""),
-                                    "args": state.get("input", {}),
-                                }))
+            # Side-effect: refresh artifacts panel after a successful create_artifact
+            if name == "create_artifact":
+                await _send_action(ws, "refresh_artifacts", {})
+                return json.dumps(result)
 
-                    elif etype == "session.idle":
-                        await websocket.send_text(json.dumps({"type": "end"}))
-                        return
+            # Auto-display osm_search result on map
+            if name == "osm_search" and "geojson" in result and result.get("count", 0) > 0:
+                label = f"{args.get('feature_value', 'features')} ({args.get('feature_type', '')})"
+                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                features_summary = []
+                for f in result["geojson"].get("features", [])[:50]:
+                    props = f.get("properties", {})
+                    geom = f.get("geometry", {})
+                    entry = {"name": props.get("name", "")}
+                    if geom.get("type") == "Point":
+                        entry["lat"] = geom["coordinates"][1]
+                        entry["lng"] = geom["coordinates"][0]
+                    features_summary.append(entry)
+                result = {
+                    "count": result["count"],
+                    "displayed_on_map": True,
+                    "features": features_summary,
+                }
 
-                    elif etype == "session.error":
-                        err = props.get("error", "Unknown error")
-                        await websocket.send_text(json.dumps({
-                            "type": "stream", "content": f"\n\n[Error: {err}]",
-                        }))
-                        await websocket.send_text(json.dumps({"type": "end"}))
-                        return
+            # Auto-display osm_boundary on map
+            elif name == "osm_boundary" and "geojson" in result:
+                label = f"{args.get('name', 'Boundary')} boundary"
+                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                result = {"name": result.get("name", ""), "displayed_on_map": True}
 
-    except asyncio.CancelledError:
-        raise
-    except Exception as e:
+            # Auto-display route
+            elif name == "osm_route_overview" and "geometry" in result:
+                await _send_action(ws, "draw_line", {
+                    "coordinates": result["geometry"]["coordinates"],
+                    "color": "#2563eb", "width": 4,
+                    "label": f"Route ({result.get('distance_km', '?')} km)",
+                })
+
+            # Auto-display buffer/hull/union
+            elif name in ("gis_buffer", "gis_convex_hull", "gis_union") and "geojson" in result:
+                label = {"gis_buffer": f"Buffer ({args.get('radius_meters', '?')}m)",
+                         "gis_convex_hull": "Convex Hull", "gis_union": "Union"}[name]
+                await _send_action(ws, "add_geojson", {
+                    "geojson": {"type": "FeatureCollection", "features": [result["geojson"]]},
+                    "name": label,
+                })
+
+            return json.dumps(result)
+
+    return json.dumps({"error": f"Unknown tool: {name}"})
+
+
+# ── Agentic loop ──────────────────────────────────────────────────────────────
+
+async def _run_agent(messages: list[dict], ws: WebSocket, tools: list[dict] | None = None) -> None:
+    """Run the tool-calling loop until the model stops calling tools or errors."""
+    if tools is None:
+        tools = _TOOLS
+    max_rounds = 10
+
+    for _ in range(max_rounds):
+        accumulated_text = ""
+        tool_calls_acc: dict[int, dict] = {}
+        finish_reason = None
+
         try:
-            await websocket.send_text(json.dumps({
-                "type": "stream", "content": f"\n\n[Connection error: {e}]",
-            }))
-            await websocket.send_text(json.dumps({"type": "end"}))
-        except Exception:
-            pass
+            stream = await _client.chat.completions.create(
+                model=_get_model(),
+                messages=messages,
+                tools=tools if tools else None,
+                tool_choice="auto" if tools else None,
+                stream=True,
+                timeout=60,
+            )
+
+            async for chunk in stream:
+                choice = chunk.choices[0] if chunk.choices else None
+                if not choice:
+                    continue
+
+                delta = choice.delta
+                finish_reason = choice.finish_reason or finish_reason
+
+                # Stream text to frontend
+                if delta.content:
+                    accumulated_text += delta.content
+                    await ws.send_text(json.dumps({"type": "stream", "content": delta.content}))
+
+                # Accumulate tool call deltas
+                if delta.tool_calls:
+                    for tc in delta.tool_calls:
+                        idx = tc.index
+                        if idx not in tool_calls_acc:
+                            tool_calls_acc[idx] = {"id": "", "name": "", "arguments": ""}
+                        if tc.id:
+                            tool_calls_acc[idx]["id"] = tc.id
+                        if tc.function:
+                            if tc.function.name:
+                                tool_calls_acc[idx]["name"] += tc.function.name
+                            if tc.function.arguments:
+                                tool_calls_acc[idx]["arguments"] += tc.function.arguments
+
+        except Exception as e:
+            await ws.send_text(json.dumps({"type": "stream", "content": f"\n\n[Error: {e}]"}))
+            break
+
+        # Add assistant message to history
+        assistant_msg: dict = {"role": "assistant"}
+        if accumulated_text:
+            assistant_msg["content"] = accumulated_text
+        else:
+            assistant_msg["content"] = None
+        if tool_calls_acc:
+            assistant_msg["tool_calls"] = [
+                {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                for tc in tool_calls_acc.values()
+            ]
+        messages.append(assistant_msg)
+
+        # If no tool calls, we're done
+        if not tool_calls_acc or finish_reason == "stop":
+            break
+
+        # Execute tool calls and collect results
+        for tc in tool_calls_acc.values():
+            tool_name = tc["name"]
+            try:
+                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
+            except json.JSONDecodeError:
+                args = {}
+
+            await ws.send_text(json.dumps({"type": "tool_use", "tool": tool_name, "args": args}))
+
+            result_str = await _execute_tool(tool_name, args, ws)
+            messages.append({
+                "role": "tool",
+                "tool_call_id": tc["id"],
+                "content": result_str,
+            })
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
 
 @router.websocket("/ws")
 async def chat_websocket(websocket: WebSocket):
-    global _active_ws
     await websocket.accept()
-    _active_ws = websocket
 
-    # Create one opencode session per WebSocket connection
-    session_id = await _create_session()
-    if session_id is None:
-        await websocket.send_text(json.dumps({
-            "type": "stream",
-            "content": "Could not connect to opencode. Make sure `opencode serve` is running on port 4096.",
-        }))
-        await websocket.send_text(json.dumps({"type": "end"}))
-        await websocket.close()
-        return
+    # Persistent message history for this connection
+    messages: list[dict] = []
 
     try:
         while True:
             data = await websocket.receive_text()
-            message = json.loads(data)
-            user_content = message.get("content", "")
-            map_context = message.get("map_context")
+            payload = json.loads(data)
+            user_content = payload.get("content", "")
+            map_context = payload.get("map_context")
+            image_data = payload.get("image")  # {base64, mime_type} or None
 
-            system = SYSTEM_PROMPT
-            if map_context:
-                system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
-
-            sent = await _send_message(session_id, user_content, system)
-            if not sent:
-                await websocket.send_text(json.dumps({
-                    "type": "stream",
-                    "content": "Failed to send message to opencode.",
-                }))
-                await websocket.send_text(json.dumps({"type": "end"}))
+            if not user_content.strip():
                 continue
 
-            await _stream_until_idle(session_id, websocket)
+            is_document_mode = image_data is not None
+
+            if is_document_mode:
+                system = DOCUMENT_SYSTEM_PROMPT
+                tools = [_decl_to_openai("create_artifact",
+                    "Save a note, analysis, or report as a project artifact",
+                    {"type": "object",
+                     "properties": {"title": {"type": "string"}, "content": {"type": "string"},
+                                    "artifact_type": {"type": "string"}},
+                     "required": ["title", "content", "artifact_type"]})]
+                # Build vision message
+                user_msg: dict = {
+                    "role": "user",
+                    "content": [
+                        {"type": "text", "text": user_content},
+                        {"type": "image_url", "image_url": {
+                            "url": f"data:{image_data['mime_type']};base64,{image_data['base64']}"
+                        }},
+                    ],
+                }
+            else:
+                system = SYSTEM_PROMPT
+                if map_context:
+                    system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
+                tools = _TOOLS
+                user_msg = {"role": "user", "content": user_content}
+
+            full_messages = [{"role": "system", "content": system}] + messages
+            full_messages.append(user_msg)
+
+            await _run_agent(full_messages, websocket, tools=tools)
+
+            # Persist exchange into history, but strip system + image data (keep history lean)
+            new_history = []
+            for m in full_messages:
+                if m["role"] == "system":
+                    continue
+                if isinstance(m.get("content"), list):
+                    # Strip image parts from stored history to save memory
+                    text_parts = [p["text"] for p in m["content"] if p.get("type") == "text"]
+                    new_history.append({"role": m["role"], "content": " ".join(text_parts)})
+                else:
+                    new_history.append(m)
+            messages = new_history
+
+            await websocket.send_text(json.dumps({"type": "end"}))
 
     except WebSocketDisconnect:
-        if _active_ws is websocket:
-            _active_ws = None
+        pass
+    except Exception as e:
+        try:
+            await websocket.send_text(json.dumps({"type": "stream", "content": f"\n\n[Fatal error: {e}]"}))
+            await websocket.send_text(json.dumps({"type": "end"}))
+        except Exception:
+            pass

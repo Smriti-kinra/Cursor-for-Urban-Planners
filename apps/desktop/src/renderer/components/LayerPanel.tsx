@@ -5,9 +5,10 @@ interface LayerPanelProps {
   layers: GeoJSONLayer[]
   onToggle: (id: string) => void
   onRemove: (id: string) => void
+  onZoomTo: (id: string) => void
 }
 
-export default function LayerPanel({ layers, onToggle, onRemove }: LayerPanelProps) {
+export default function LayerPanel({ layers, onToggle, onRemove, onZoomTo }: LayerPanelProps) {
   if (layers.length === 0) {
     return (
       <div className="layer-panel-empty">
@@ -33,6 +34,13 @@ export default function LayerPanel({ layers, onToggle, onRemove }: LayerPanelPro
             {layer.name}
           </span>
           <span className="layer-count">{layer.data?.features?.length || 0}</span>
+          <button
+            className="layer-zoom"
+            onClick={() => onZoomTo(layer.id)}
+            title="Zoom to layer"
+          >
+            ⌖
+          </button>
           <button
             className="layer-remove"
             onClick={() => onRemove(layer.id)}

@@ -1,9 +1,11 @@
+import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from 'geojson'
+
 export interface GeoJSONLayer {
   id: string
   name: string
   filePath: string
   visible: boolean
-  data: any
+  data: FeatureCollection
   color: string
 }
 
@@ -25,14 +27,6 @@ export interface MapBookmark {
   zoom: number
 }
 
-export interface DrawStyleConfig {
-  fillColor: string
-  strokeColor: string
-  fillOpacity: number
-  lineWidth: number
-  lineDash: 'solid' | 'dashed' | 'dotted'
-}
-
 export interface ZonePreset {
   code: string
   label: string
@@ -50,14 +44,6 @@ export const DEFAULT_ZONE_PRESETS: ZonePreset[] = [
   { code: 'INST', label: 'Institutional', color: '#93c5fd', description: 'Schools, hospitals, civic' },
 ]
 
-export const DEFAULT_DRAW_STYLE: DrawStyleConfig = {
-  fillColor: '#3b82f6',
-  strokeColor: '#1d4ed8',
-  fillOpacity: 0.35,
-  lineWidth: 2,
-  lineDash: 'solid',
-}
-
 export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
@@ -71,19 +57,85 @@ export interface Conversation {
   createdAt: number
 }
 
-export interface MapAction {
-  type: string
-  payload: Record<string, any>
-}
+// ── Map action contract ──
+//
+// One variant per backend action tool. The backend sends `{type, action, payload}`
+// over the WebSocket; the renderer treats `{type: action, payload}` as a MapAction.
+// Adding a new action means: (1) add a variant here, (2) add a case in
+// App.tsx:handleMapAction, (3) add a case in MapView.tsx's action switch.
 
-export interface TextAnnotation {
-  id: string
-  lng: number
-  lat: number
-  text: string
-  color: string
-  fontSize: number
-}
+export type MapAction =
+  | { type: 'fly_to'; payload: { lat: number; lng: number; zoom?: number } }
+  | { type: 'fit_bounds'; payload: { south: number; west: number; north: number; east: number } }
+  | { type: 'set_view'; payload: MapViewState }
+  | { type: 'add_marker'; payload: { lat: number; lng: number; label?: string; color?: string } }
+  | {
+      type: 'add_markers'
+      payload: { markers: Array<{ lat: number; lng: number; label?: string; color?: string }> }
+    }
+  | { type: 'clear_markers'; payload: Record<string, never> }
+  | {
+      type: 'draw_line'
+      payload: { coordinates: number[][]; color?: string; width?: number; label?: string }
+    }
+  | {
+      type: 'draw_polygon'
+      payload: { coordinates: number[][]; color?: string; opacity?: number; label?: string }
+    }
+  | {
+      type: 'draw_circle'
+      payload: {
+        center_lat: number
+        center_lng: number
+        radius_km: number
+        color?: string
+        label?: string
+      }
+    }
+  | {
+      type: 'add_geojson'
+      payload: { geojson: FeatureCollection | Feature | Geometry; name: string; color?: string }
+    }
+  | {
+      type: 'highlight_features'
+      payload: { layer_name: string; property_name: string; property_value: string }
+    }
+  | {
+      type: 'set_layer_style'
+      payload: {
+        layer_name: string
+        fill_color?: string
+        line_color?: string
+        opacity?: number
+      }
+    }
+  | { type: 'toggle_layer'; payload: { layer_name: string; visible: boolean } }
+  | { type: 'remove_layer'; payload: { layer_name: string } }
+  | {
+      type: 'save_bookmark'
+      payload: {
+        name: string
+        south?: number
+        west?: number
+        north?: number
+        east?: number
+        zoom?: number
+      }
+    }
+  | { type: 'go_to_bookmark'; payload: { name: string } }
+  | {
+      type: 'export_region_clip'
+      payload: {
+        output_base_name: string
+        south?: number
+        west?: number
+        north?: number
+        east?: number
+      }
+    }
+  | { type: 'refresh_artifacts'; payload: Record<string, never> }
+
+export type MapActionType = MapAction['type']
 
 export interface ProjectData {
   version: number
@@ -94,14 +146,18 @@ export interface ProjectData {
     visible: boolean
     color: string
   }>
-  drawnFeatures: any[]
+  drawnFeatures: Feature[]
   conversations: Conversation[]
   activeConversationId: string | null
   chatHistory?: ChatMessage[]
   basemap: string
   bookmarks?: MapBookmark[]
-  textAnnotations?: TextAnnotation[]
 }
+
+/** A small, lossy summary of a layer's geometry that can be sent to the LLM. */
+export type LayerGeometryData =
+  | { bbox: [number, number, number, number] }
+  | Array<{ type?: Geometry['type']; coordinates?: unknown }>
 
 export interface MapContext {
   center: [number, number]
@@ -121,14 +177,17 @@ export interface MapContext {
     geometryTypes: string[]
     properties: string[]
     visible: boolean
-    geometry_data?: any
+    geometry_data?: LayerGeometryData
   }>
   drawnFeatures: Array<{
     type: string
-    coordinates?: any
+    coordinates?: unknown
   }>
   basemap: string
 }
+
+/** A boundary geometry — what comes out of Nominatim's `polygon_geojson=1` */
+export type BoundaryGeometry = Polygon | MultiPolygon
 
 export const LAYER_COLORS = [
   '#e6194b', '#3cb44b', '#4363d8', '#f58231', '#911eb4',

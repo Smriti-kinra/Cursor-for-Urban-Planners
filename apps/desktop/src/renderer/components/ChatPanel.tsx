@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
 import { ChatMessage, Conversation, MapContext, MapAction } from '../types'
+import type { DocumentImage } from './DocumentView'
 import './ChatPanel.css'
 
 const BACKEND_WS = 'ws://localhost:8765/api/chat/ws'
@@ -17,6 +18,7 @@ interface ChatPanelProps {
   onMessagesChange: (messages: ChatMessage[]) => void
   mapContext: MapContext
   onMapAction: (action: MapAction) => void
+  documentImage?: DocumentImage | null
 }
 
 function CodePre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
@@ -53,6 +55,7 @@ export default function ChatPanel({
   onMessagesChange,
   mapContext,
   onMapAction,
+  documentImage,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -155,7 +158,10 @@ export default function ChatPanel({
       ws.send(
         JSON.stringify({
           content: userMessage.content,
-          map_context: mapContext,
+          map_context: documentImage ? undefined : mapContext,
+          image: documentImage
+            ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
+            : undefined,
         }),
       )
     } catch {
@@ -213,11 +219,11 @@ export default function ChatPanel({
     try {
       const result = await window.electronAPI.switchModel(modelId)
       setCurrentModel(modelId)
-      // Close the WS so the next message gets a fresh opencode session with the new model
+      // Close the WS so the next message picks up the new model
       wsRef.current?.close()
       wsRef.current = null
       if (result.requiresManualRestart) {
-        setToolStatus('Model updated — restart opencode to apply')
+        setToolStatus('Model updated — restart the app to apply')
         setTimeout(() => setToolStatus(null), 4000)
       }
     } finally {

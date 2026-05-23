@@ -1,5 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import * as turf from '@turf/turf'
+import type { Feature, FeatureCollection, Polygon, MultiPolygon } from 'geojson'
 import MapView, { type MapViewHandle } from './components/MapView'
 import FileTree from './components/FileTree'
 import ChatPanel from './components/ChatPanel'
@@ -7,8 +8,9 @@ import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
-import DrawToolbar from './components/DrawToolbar'
 import ZoningPanel from './components/ZoningPanel'
+import DocumentView, { type DocumentImage } from './components/DocumentView'
+import ErrorBoundary from './components/ErrorBoundary'
 import {
   GeoJSONLayer,
   MapViewState,
@@ -18,13 +20,11 @@ import {
   ProjectData,
   LAYER_COLORS,
   MapBookmark,
-  DrawStyleConfig,
-  DEFAULT_DRAW_STYLE,
-  ZonePreset,
-  DEFAULT_ZONE_PRESETS,
-  TextAnnotation,
+  BoundaryGeometry,
+  LayerGeometryData,
 } from './types'
 
+type AppMode = 'map' | 'document'
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
 type RightTab = 'chat' | 'artifacts'
 
@@ -33,20 +33,20 @@ function genId() {
 }
 
 function App() {
+  const [appMode, setAppMode] = useState<AppMode>('map')
+  const [documentImage, setDocumentImage] = useState<DocumentImage | null>(null)
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
   const [mapViewState, setMapViewState] = useState<MapViewState>({
-    center: [-73.985, 40.748],
+    center: [76.7794, 30.7333],
     zoom: 13,
     bearing: 0,
     pitch: 0,
   })
   const [basemap, setBasemap] = useState('street')
-  const [drawMode, setDrawMode] = useState<string | null>(null)
-  const [drawnFeatures, setDrawnFeatures] = useState<any[]>([])
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [mapActions, setMapActions] = useState<MapAction[]>([])
@@ -57,15 +57,7 @@ function App() {
     east: number
     north: number
   } | null>(null)
-  const [drawStyle, setDrawStyle] = useState<DrawStyleConfig>(DEFAULT_DRAW_STYLE)
-  const [activeZonePreset, setActiveZonePreset] = useState<ZonePreset | null>(null)
-  const [drawHistory, setDrawHistory] = useState({ canUndo: false, canRedo: false })
   const [artifactsRevision, setArtifactsRevision] = useState(0)
-  const [textAnnotations, setTextAnnotations] = useState<TextAnnotation[]>([])
-  const [textStyle, setTextStyle] = useState({ color: '#ffffff', fontSize: 14 })
-  const [featuresToRestore, setFeaturesToRestore] = useState<any[] | null>(null)
-  const [selectedFeatureId, setSelectedFeatureId] = useState<string | null>(null)
-  const [boundaryPreview, setBoundaryPreview] = useState<any | null>(null)
 
   const mapViewRef = useRef<MapViewHandle>(null)
   const bookmarksRef = useRef<MapBookmark[]>([])
@@ -73,15 +65,12 @@ function App() {
   const saveProjectRef = useRef<(force?: boolean) => Promise<void>>(async () => {})
 
   const colorIndexRef = useRef(0)
+  const aiShapeNameCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
 
-  useEffect(() => {
-    bookmarksRef.current = bookmarks
-  }, [bookmarks])
-  useEffect(() => {
-    mapBoundsRef.current = mapBounds
-  }, [mapBounds])
+  useEffect(() => { bookmarksRef.current = bookmarks }, [bookmarks])
+  useEffect(() => { mapBoundsRef.current = mapBounds }, [mapBounds])
 
   // ── Resizable panels ──
 
@@ -119,9 +108,19 @@ function App() {
 
   // ── Workspace ──
 
+  // Auto-restore last workspace on startup
+  useEffect(() => {
+    window.electronAPI.getLastWorkspace().then((last) => {
+      if (last) setWorkspacePath(last)
+    }).catch(() => {})
+  }, [])
+
   const handleSelectWorkspace = async (): Promise<void> => {
     const selected = await window.electronAPI.selectWorkspace()
-    if (selected) setWorkspacePath(selected)
+    if (selected) {
+      setWorkspacePath(selected)
+      window.electronAPI.setLastWorkspace(selected).catch(() => {})
+    }
   }
 
   // ── Layer management ──
@@ -174,6 +173,20 @@ function App() {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)))
   }, [])
 
+  const zoomToLayer = useCallback((id: string) => {
+    const layer = layers.find((l) => l.id === id)
+    if (!layer?.data) return
+    try {
+      const bbox = turf.bbox(layer.data) as [number, number, number, number]
+      if (bbox.every((v) => isFinite(v))) {
+        setMapActions((prev) => [
+          ...prev,
+          { type: 'fit_bounds', payload: { west: bbox[0], south: bbox[1], east: bbox[2], north: bbox[3] } },
+        ])
+      }
+    } catch { /* ignore invalid geometry */ }
+  }, [layers])
+
   const handleFileClick = useCallback(
     (entry: FileEntry) => {
       if (entry.name.toLowerCase().endsWith('.geojson')) {
@@ -183,71 +196,20 @@ function App() {
     [addLayer],
   )
 
-  const handleSaveDrawing = useCallback(async () => {
-    if (!workspacePath || drawnFeatures.length === 0) return
-    const fc = { type: 'FeatureCollection', features: drawnFeatures }
-    const fileName = `drawing-${Date.now()}.geojson`
-    const filePath = `${workspacePath}/${fileName}`
-    const ok = await window.electronAPI.writeFile(filePath, JSON.stringify(fc, null, 2))
-    if (!ok) {
-      console.error('Failed to write drawing GeoJSON')
-      return
-    }
-    addLayer(fileName.replace('.geojson', ''), filePath)
-  }, [workspacePath, drawnFeatures, addLayer])
-
-  const handleDrawFeaturesChange = useCallback(
-    (features: any[]) => {
-      let next = features
-      if (activeZonePreset) {
-        next = features.map((f) => ({
-          ...f,
-          properties: {
-            ...(f.properties || {}),
-            zone_code: activeZonePreset.code,
-            zone_label: activeZonePreset.label,
-          },
-        }))
-      }
-      setDrawnFeatures(next)
-      queueMicrotask(() => {
-        setDrawHistory({
-          canUndo: mapViewRef.current?.canUndoDraw() ?? false,
-          canRedo: mapViewRef.current?.canRedoDraw() ?? false,
-        })
-      })
-    },
-    [activeZonePreset],
-  )
-
-  // ── Text annotations ──
-
-  const handleAddTextAnnotation = useCallback((a: TextAnnotation) => {
-    setTextAnnotations((prev) => [...prev, a])
-  }, [])
-
-  const handleRemoveTextAnnotation = useCallback((id: string) => {
-    setTextAnnotations((prev) => prev.filter((a) => a.id !== id))
-  }, [])
-
-  // ── Per-feature color ──
-
-  const handleApplyStyleToSelected = useCallback((style: { fillColor: string; strokeColor: string }) => {
-    if (!selectedFeatureId || !mapViewRef.current) return
-    mapViewRef.current.updateFeatureProperties(selectedFeatureId, style)
-  }, [selectedFeatureId])
-
   // ── Admin boundary save ──
 
-  const handlePreviewBoundary = useCallback((geom: any | null) => {
-    setBoundaryPreview(geom)
+  const handlePreviewBoundary = useCallback((geom: BoundaryGeometry | null) => {
     if (geom) {
+      const previewFC: FeatureCollection = {
+        type: 'FeatureCollection',
+        features: [{ type: 'Feature', geometry: geom, properties: {} }],
+      }
       setMapActions((prev) => [
         ...prev,
         {
           type: 'add_geojson',
           payload: {
-            geojson: { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: geom, properties: {} }] },
+            geojson: previewFC,
             name: '__boundary_preview__',
             color: '#f59e0b',
           },
@@ -261,15 +223,15 @@ function App() {
     }
   }, [])
 
-  const handleSaveByRegion = useCallback(async (displayName: string, boundaryGeom: any) => {
+  const handleSaveByRegion = useCallback(async (displayName: string, boundaryGeom: BoundaryGeometry) => {
     if (!workspacePath || layers.length === 0) return
-    const boundary = { type: 'Feature', geometry: boundaryGeom, properties: {} }
-    const allClipped: any[] = []
+    const boundary: Feature<BoundaryGeometry> = { type: 'Feature', geometry: boundaryGeom, properties: {} }
+    const allClipped: Feature[] = []
     for (const layer of layers) {
       for (const f of layer.data?.features || []) {
         try {
           const clipped = turf.intersect(
-            turf.featureCollection([f as any, boundary as any])
+            turf.featureCollection([f as Feature<Polygon | MultiPolygon>, boundary as Feature<Polygon | MultiPolygon>])
           )
           if (clipped) {
             allClipped.push({
@@ -290,8 +252,6 @@ function App() {
     )
     addLayer(safeName, filePath)
     setActiveLeftTab('layers')
-    // clear preview
-    setBoundaryPreview(null)
     setMapActions((prev) => [
       ...prev,
       { type: 'remove_layer', payload: { layer_name: '__boundary_preview__' } },
@@ -375,11 +335,11 @@ function App() {
           : mapBoundsRef.current
       if (!workspacePath || !b || !layers.length) return
       const bbox: [number, number, number, number] = [b.west, b.south, b.east, b.north]
-      const allFeatures: any[] = []
+      const allFeatures: Feature[] = []
       for (const layer of layers) {
         for (const f of layer.data?.features || []) {
           try {
-            const clipped = turf.bboxClip(f as any, bbox) as any
+            const clipped = turf.bboxClip(f as Feature<Polygon | MultiPolygon>, bbox)
             if (!clipped?.geometry) continue
             allFeatures.push({
               type: 'Feature',
@@ -403,7 +363,7 @@ function App() {
     [layers, workspacePath, addLayer],
   )
 
-  const upsertLayer = useCallback((layerName: string, data: any, color?: string) => {
+  const upsertLayer = useCallback((layerName: string, data: FeatureCollection, color?: string) => {
     const layerColor = color || LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
     colorIndexRef.current++
     setLayers((prev) => {
@@ -486,57 +446,13 @@ function App() {
     }
     if (action.type === 'add_geojson') {
       const { geojson, name, color } = action.payload
-      const data =
-        geojson?.type === 'FeatureCollection'
+      const data: FeatureCollection =
+        geojson && 'type' in geojson && geojson.type === 'FeatureCollection'
           ? geojson
-          : geojson?.type === 'Feature'
+          : geojson && 'type' in geojson && geojson.type === 'Feature'
             ? { type: 'FeatureCollection', features: [geojson] }
             : { type: 'FeatureCollection', features: [] }
       upsertLayer(name || 'AI Layer', data, color)
-      return
-    }
-    if (action.type === 'draw_line') {
-      const { coordinates, color, label } = action.payload
-      const data = {
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'LineString', coordinates: coordinates || [] },
-          properties: { label: label || '' },
-        }],
-      }
-      upsertLayer(label || 'Drawn Line', data, color || '#ef4444')
-      return
-    }
-    if (action.type === 'draw_polygon') {
-      const { coordinates: rawCoords, color, label } = action.payload
-      const coords = rawCoords || []
-      const ring =
-        coords.length >= 3 &&
-        (coords[0][0] !== coords[coords.length - 1][0] ||
-          coords[0][1] !== coords[coords.length - 1][1])
-          ? [...coords, coords[0]]
-          : coords
-      const data = {
-        type: 'FeatureCollection',
-        features: [{
-          type: 'Feature',
-          geometry: { type: 'Polygon', coordinates: [ring] },
-          properties: { label: label || '' },
-        }],
-      }
-      upsertLayer(label || 'Drawn Polygon', data, color || '#3b82f6')
-      return
-    }
-    if (action.type === 'draw_circle') {
-      const { center_lat, center_lng, radius_km, color, label } = action.payload
-      const circle = turf.circle(
-        [center_lng, center_lat],
-        radius_km,
-        { units: 'kilometers', steps: 64 },
-      )
-      const data = { type: 'FeatureCollection', features: [circle] }
-      upsertLayer(label || `Circle (${radius_km} km)`, data, color || '#8b5cf6')
       return
     }
     if (action.type === 'toggle_layer') {
@@ -561,6 +477,78 @@ function App() {
       setArtifactsRevision((n) => n + 1)
       return
     }
+    // Promote AI-drawn shapes to real layers so they appear in mapContext on
+    // the next turn. Without this they live only in the MapView ref and the
+    // assistant can't see them again.
+    if (action.type === 'draw_line') {
+      const { coordinates, label, color } = action.payload
+      if (Array.isArray(coordinates) && coordinates.length >= 2) {
+        aiShapeNameCounterRef.current += 1
+        const name = label || `AI Line ${aiShapeNameCounterRef.current}`
+        upsertLayer(
+          name,
+          {
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              geometry: { type: 'LineString', coordinates },
+              properties: { label: label || '', source: 'ai_draw' },
+            }],
+          },
+          color,
+        )
+      }
+      return
+    }
+    if (action.type === 'draw_polygon') {
+      const { coordinates, label, color } = action.payload
+      const raw = Array.isArray(coordinates) ? coordinates : []
+      if (raw.length >= 3) {
+        const ring =
+          raw[0][0] !== raw[raw.length - 1][0] || raw[0][1] !== raw[raw.length - 1][1]
+            ? [...raw, raw[0]]
+            : raw
+        aiShapeNameCounterRef.current += 1
+        const name = label || `AI Polygon ${aiShapeNameCounterRef.current}`
+        upsertLayer(
+          name,
+          {
+            type: 'FeatureCollection',
+            features: [{
+              type: 'Feature',
+              geometry: { type: 'Polygon', coordinates: [ring] },
+              properties: { label: label || '', source: 'ai_draw' },
+            }],
+          },
+          color,
+        )
+      }
+      return
+    }
+    if (action.type === 'draw_circle') {
+      const { center_lng, center_lat, radius_km, label, color } = action.payload
+      if (radius_km > 0) {
+        const circle = turf.circle([center_lng, center_lat], radius_km, {
+          units: 'kilometers',
+          steps: 64,
+        })
+        circle.properties = {
+          label: label || '',
+          source: 'ai_draw',
+          center_lng,
+          center_lat,
+          radius_km,
+        }
+        aiShapeNameCounterRef.current += 1
+        const name = label || `AI Circle ${aiShapeNameCounterRef.current}`
+        upsertLayer(
+          name,
+          { type: 'FeatureCollection', features: [circle] },
+          color,
+        )
+      }
+      return
+    }
     setMapActions((prev) => [...prev, action])
   }, [upsertLayer, clipLayersToBboxAndSave, mapViewState.zoom])
 
@@ -571,55 +559,44 @@ function App() {
       center: mapViewState.center,
       zoom: mapViewState.zoom,
       bounds: mapBounds
-        ? {
-            west: mapBounds.west,
-            south: mapBounds.south,
-            east: mapBounds.east,
-            north: mapBounds.north,
-          }
+        ? { west: mapBounds.west, south: mapBounds.south, east: mapBounds.east, north: mapBounds.north }
         : undefined,
       bookmarks: bookmarks.map((b) => ({
-        name: b.name,
-        south: b.south,
-        west: b.west,
-        north: b.north,
-        east: b.east,
-        zoom: b.zoom,
+        name: b.name, south: b.south, west: b.west, north: b.north, east: b.east, zoom: b.zoom,
       })),
       layers: layers.map((l) => {
-        const features = l.data?.features || []
+        const features: Feature[] = l.data?.features || []
         const featureCount = features.length
         const geometryTypes = [
           ...new Set(
-            features.map((f: any) => f.geometry?.type).filter(Boolean) as string[],
+            features.map((f) => f.geometry?.type).filter((t): t is NonNullable<typeof t> => Boolean(t)),
           ),
         ]
         const properties = [
           ...new Set(
-            features.flatMap((f: any) =>
-              Object.keys(f.properties || {}),
-            ) as string[],
+            features.flatMap((f) => Object.keys(f.properties || {})),
           ),
         ].slice(0, 20)
 
         // Include actual coordinates for small layers (≤5 features) so the
         // LLM can compute centroids, buffers, intersections, etc.
-        let geometry_data: any = undefined
-        const totalCoords = features.reduce((sum: number, f: any) => {
-          const c = f.geometry?.coordinates
-          if (!c) return sum
-          if (f.geometry.type === 'Point') return sum + 1
-          if (f.geometry.type === 'LineString') return sum + c.length
-          if (f.geometry.type === 'Polygon') return sum + (c[0]?.length || 0)
-          if (f.geometry.type === 'MultiPolygon')
-            return sum + c.reduce((s: number, p: any) => s + (p[0]?.length || 0), 0)
+        let geometry_data: LayerGeometryData | undefined = undefined
+        const totalCoords = features.reduce((sum: number, f) => {
+          const g = f.geometry
+          if (!g || !('coordinates' in g)) return sum
+          const c = g.coordinates
+          if (g.type === 'Point') return sum + 1
+          if (g.type === 'LineString' && Array.isArray(c)) return sum + c.length
+          if (g.type === 'Polygon' && Array.isArray(c)) return sum + ((c[0] as unknown[])?.length || 0)
+          if (g.type === 'MultiPolygon' && Array.isArray(c))
+            return sum + (c as unknown[][][]).reduce((s, p) => s + (p[0]?.length || 0), 0)
           return sum + 10
         }, 0)
 
         if (featureCount <= 5 && totalCoords <= 200) {
-          geometry_data = features.map((f: any) => ({
+          geometry_data = features.map((f) => ({
             type: f.geometry?.type,
-            coordinates: f.geometry?.coordinates,
+            coordinates: f.geometry && 'coordinates' in f.geometry ? f.geometry.coordinates : undefined,
           }))
         } else {
           try {
@@ -639,13 +616,10 @@ function App() {
           ...(geometry_data ? { geometry_data } : {}),
         }
       }),
-      drawnFeatures: drawnFeatures.slice(0, 10).map((f: any) => ({
-        type: f.geometry?.type || 'unknown',
-        coordinates: f.geometry?.coordinates,
-      })),
+      drawnFeatures: [],
       basemap,
     }),
-    [mapViewState, mapBounds, bookmarks, layers, drawnFeatures, basemap],
+    [mapViewState, mapBounds, bookmarks, layers, basemap],
   )
 
   // ── Conversation helpers ──
@@ -731,12 +705,11 @@ function App() {
           visible: l.visible,
           color: l.color,
         })),
-        drawnFeatures,
+        drawnFeatures: [],
         conversations,
         activeConversationId,
         basemap,
         bookmarks,
-        textAnnotations,
       }
       const wrote = await window.electronAPI.writeFile(
         `${workspacePath}/project.json`,
@@ -744,17 +717,7 @@ function App() {
       )
       if (!wrote) console.error('Failed to save project.json (check workspace permissions)')
     },
-    [
-      workspacePath,
-      mapViewState,
-      layers,
-      drawnFeatures,
-      conversations,
-      activeConversationId,
-      basemap,
-      bookmarks,
-      textAnnotations,
-    ],
+    [workspacePath, mapViewState, layers, conversations, activeConversationId, basemap, bookmarks],
   )
 
   saveProjectRef.current = saveProject
@@ -775,11 +738,6 @@ function App() {
         setMapActions([{ type: 'set_view', payload: data.mapState }])
       }
       if (data.basemap) setBasemap(data.basemap)
-      if (data.drawnFeatures) {
-        setDrawnFeatures(data.drawnFeatures)
-        if (data.drawnFeatures.length > 0) setFeaturesToRestore(data.drawnFeatures)
-      }
-      if (data.textAnnotations) setTextAnnotations(data.textAnnotations)
       if (data.bookmarks && data.bookmarks.length > 0) setBookmarks(data.bookmarks)
 
       if (data.conversations && data.conversations.length > 0) {
@@ -850,7 +808,7 @@ function App() {
     return () => {
       if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     }
-  }, [workspacePath, mapViewState, layers, drawnFeatures, conversations, activeConversationId, basemap, bookmarks, textAnnotations, saveProject])
+  }, [workspacePath, mapViewState, layers, conversations, activeConversationId, basemap, bookmarks, saveProject])
 
   useEffect(() => {
     window.electronAPI.onAppBeforeQuit(async () => {
@@ -862,10 +820,6 @@ function App() {
     })
   }, [])
 
-  useEffect(() => {
-    if (!workspacePath) setDrawMode(null)
-  }, [workspacePath])
-
   const workspaceLabel = workspacePath ? workspacePath.split('/').pop() : 'Open Workspace'
 
   return (
@@ -873,13 +827,30 @@ function App() {
       <header className="titlebar">
         <div className="titlebar-drag" />
         <span className="titlebar-text">Cursor for Urban Planners</span>
-        <button className="workspace-btn" onClick={handleSelectWorkspace}>
-          {workspaceLabel}
-        </button>
+        <div className="mode-switcher">
+          <button
+            className={`mode-btn ${appMode === 'map' ? 'active' : ''}`}
+            onClick={() => setAppMode('map')}
+          >
+            Map
+          </button>
+          <button
+            className={`mode-btn ${appMode === 'document' ? 'active' : ''}`}
+            onClick={() => { setAppMode('document'); setDocumentImage(null) }}
+          >
+            Document
+          </button>
+        </div>
+        {appMode === 'map' && (
+          <button className="workspace-btn" onClick={handleSelectWorkspace}>
+            {workspaceLabel}
+          </button>
+        )}
       </header>
 
       <div className="layout">
-        {/* Left panel */}
+        {/* Left panel — map mode only */}
+        {appMode === 'document' ? null : (
         <aside className="panel left-panel" style={{ width: leftWidth }}>
           <div className="tab-bar tab-bar-scroll">
             <button
@@ -919,7 +890,7 @@ function App() {
             <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
           )}
           {activeLeftTab === 'layers' && (
-            <LayerPanel layers={layers} onToggle={toggleLayer} onRemove={removeLayer} />
+            <LayerPanel layers={layers} onToggle={toggleLayer} onRemove={removeLayer} onZoomTo={zoomToLayer} />
           )}
           {activeLeftTab === 'bookmarks' && (
             <BookmarkPanel
@@ -943,77 +914,40 @@ function App() {
           )}
           {activeLeftTab === 'zoning' && <ZoningPanel />}
         </aside>
+        )}
 
-        {/* Left resize handle */}
-        <div className="resize-handle" onMouseDown={onResizeStart('left')} />
+        {/* Left resize handle — map mode only */}
+        {appMode === 'map' && <div className="resize-handle" onMouseDown={onResizeStart('left')} />}
 
         {/* Center */}
         <main className="center-panel">
-          <div className="map-stack">
-            {!workspacePath && (
-              <div className="workspace-hint-banner">
-                Open a workspace folder (title bar) to save the map, draw, and export. Layers from chat still
-                appear, but they will not persist until a folder is open.
-              </div>
-            )}
-            <MapView
-              ref={mapViewRef}
-              layers={layers}
-              basemap={basemap}
-              drawMode={drawMode}
-              initialState={mapViewState}
-              drawnFeatures={drawnFeatures}
-              mapActions={mapActions}
-              drawStyle={drawStyle}
-              canSave={!!workspacePath}
-              featuresToRestore={featuresToRestore ?? undefined}
-              textAnnotations={textAnnotations}
-              textStyle={textStyle}
-              onAddTextAnnotation={handleAddTextAnnotation}
-              onRemoveTextAnnotation={handleRemoveTextAnnotation}
-              onSelectedFeatureId={setSelectedFeatureId}
-              onMapMove={setMapViewState}
-              onBoundsChange={setMapBounds}
-              onBasemapChange={setBasemap}
-              onDrawModeChange={setDrawMode}
-              onDrawChange={handleDrawFeaturesChange}
-              onDrawHistoryChange={setDrawHistory}
-              onSaveDrawing={handleSaveDrawing}
-              onActionsProcessed={() => setMapActions([])}
-            />
-            <DrawToolbar
-              drawStyle={drawStyle}
-              onDrawStyleChange={(partial) => setDrawStyle((s) => ({ ...s, ...partial }))}
-              drawMode={drawMode}
-              selectedFeatureId={selectedFeatureId}
-              onApplyStyleToSelected={handleApplyStyleToSelected}
-              textStyle={textStyle}
-              onTextStyleChange={(partial) => setTextStyle((s) => ({ ...s, ...partial }))}
-              activeZonePreset={activeZonePreset}
-              onZonePresetChange={setActiveZonePreset}
-              zonePresets={DEFAULT_ZONE_PRESETS}
-              onUndo={() => {
-                mapViewRef.current?.undoDraw()
-                queueMicrotask(() =>
-                  setDrawHistory({
-                    canUndo: mapViewRef.current?.canUndoDraw() ?? false,
-                    canRedo: mapViewRef.current?.canRedoDraw() ?? false,
-                  }),
-                )
-              }}
-              onRedo={() => {
-                mapViewRef.current?.redoDraw()
-                queueMicrotask(() =>
-                  setDrawHistory({
-                    canUndo: mapViewRef.current?.canUndoDraw() ?? false,
-                    canRedo: mapViewRef.current?.canRedoDraw() ?? false,
-                  }),
-                )
-              }}
-              canUndo={drawHistory.canUndo}
-              canRedo={drawHistory.canRedo}
-            />
-          </div>
+          {appMode === 'map' ? (
+            <div className="map-stack">
+              {!workspacePath && (
+                <div className="workspace-hint-banner">
+                  Open a workspace folder (title bar) to save the map and export. Layers from chat still
+                  appear, but they will not persist until a folder is open.
+                </div>
+              )}
+              <ErrorBoundary label="Map">
+                <MapView
+                  ref={mapViewRef}
+                  layers={layers}
+                  basemap={basemap}
+                  initialState={mapViewState}
+                  mapActions={mapActions}
+                  onMapMove={setMapViewState}
+                  onBoundsChange={setMapBounds}
+                  onBasemapChange={setBasemap}
+                  onActionsProcessed={() => setMapActions([])}
+                />
+              </ErrorBoundary>
+            </div>
+          ) : (
+            <ErrorBoundary label="Document">
+              <DocumentView onImageChange={setDocumentImage} />
+            </ErrorBoundary>
+          )}
         </main>
 
         {/* Right resize handle */}
@@ -1028,26 +962,33 @@ function App() {
             >
               Chat
             </button>
-            <button
-              className={`tab ${activeRightTab === 'artifacts' ? 'active' : ''}`}
-              onClick={() => setActiveRightTab('artifacts')}
-            >
-              Artifacts
-            </button>
+            {appMode === 'map' && (
+              <button
+                className={`tab ${activeRightTab === 'artifacts' ? 'active' : ''}`}
+                onClick={() => setActiveRightTab('artifacts')}
+              >
+                Artifacts
+              </button>
+            )}
           </div>
-          {activeRightTab === 'chat' ? (
-            <ChatPanel
-              conversations={conversations}
-              activeConversation={activeConversation}
-              onCreateConversation={handleCreateConversation}
-              onSelectConversation={handleSelectConversation}
-              onDeleteConversation={handleDeleteConversation}
-              onMessagesChange={handleConversationMessagesChange}
-              mapContext={mapContext}
-              onMapAction={handleMapAction}
-            />
+          {activeRightTab === 'chat' || appMode === 'document' ? (
+            <ErrorBoundary label="Chat">
+              <ChatPanel
+                conversations={conversations}
+                activeConversation={activeConversation}
+                onCreateConversation={handleCreateConversation}
+                onSelectConversation={handleSelectConversation}
+                onDeleteConversation={handleDeleteConversation}
+                onMessagesChange={handleConversationMessagesChange}
+                mapContext={mapContext}
+                onMapAction={handleMapAction}
+                documentImage={appMode === 'document' ? documentImage : null}
+              />
+            </ErrorBoundary>
           ) : (
-            <ArtifactsPanel revision={artifactsRevision} />
+            <ErrorBoundary label="Artifacts">
+              <ArtifactsPanel revision={artifactsRevision} />
+            </ErrorBoundary>
           )}
         </aside>
       </div>
