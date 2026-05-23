@@ -3,9 +3,45 @@ import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
 import 'highlight.js/styles/github-dark.css'
-import { ChatMessage, Conversation, MapContext, MapAction } from '../types'
+import {
+  ChatMessage,
+  Conversation,
+  MapContext,
+  MapAction,
+  ChatErrorMessage,
+} from '../types'
 import type { DocumentImage } from './DocumentView'
 import './ChatPanel.css'
+
+const SUGGESTION_POOL: string[] = [
+  // GIS / spatial analysis
+  "What's the total area of my polygons in hectares?",
+  'Buffer the selected layer by 200 meters',
+  'Compute the centroid of each polygon',
+  // OSM data fetching
+  'Find all hospitals within 2 km of the current view',
+  'Show me schools and parks in this area',
+  // Boundaries
+  'Fetch the administrative boundary for this city',
+  // Routing
+  'Get a driving route between these two points',
+  // Weather / climate
+  "What's the historical rainfall here?",
+  // Demographics
+  'Pull population density for this region',
+  // Zoning / planning workflows
+  'Apply mixed-use zoning to the polygons in the south-east',
+  'Highlight all R1 zones',
+  // Web search
+  'Search the web for transit-oriented development guidelines',
+  // Document mode
+  'Summarize the planning document I just opened',
+]
+
+function pickSuggestions(n: number): string[] {
+  const shuffled = [...SUGGESTION_POOL].sort(() => Math.random() - 0.5)
+  return shuffled.slice(0, Math.max(1, Math.min(n, shuffled.length)))
+}
 
 const BACKEND_WS = 'ws://localhost:8765/api/chat/ws'
 
@@ -64,12 +100,30 @@ export default function ChatPanel({
   const [availableModels, setAvailableModels] = useState<ModelInfo[]>([])
   const [currentModel, setCurrentModel] = useState<string>('')
   const [isSwitchingModel, setIsSwitchingModel] = useState(false)
+  const [chatError, setChatError] = useState<ChatErrorMessage | null>(null)
+  const [suggestions, setSuggestions] = useState<string[]>(() => pickSuggestions(3))
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
   const pendingInputRef = useRef<string | null>(null)
+  // Tracks the in-flight assistant message: its accumulator and the
+  // message-list snapshot the stream is being appended to. The WS handler
+  // is attached once and dispatches into this slot, so back-to-back sends
+  // never cross-contaminate each other.
+  const inFlightRef = useRef<{
+    base: ChatMessage[]
+    accum: string
+    timestamp: number
+  } | null>(null)
+  // Whether the current WS connection has already received the history
+  // replay payload. Reset whenever we open a fresh connection.
+  const historySentRef = useRef(false)
 
   const messages = activeConversation?.messages ?? []
+  const onMessagesChangeRef = useRef(onMessagesChange)
+  onMessagesChangeRef.current = onMessagesChange
+  const onMapActionRef = useRef(onMapAction)
+  onMapActionRef.current = onMapAction
 
   useEffect(() => {
     if (activeConversation && pendingInputRef.current) {
@@ -99,34 +153,92 @@ export default function ChatPanel({
 
   useEffect(scrollToBottom, [messages, scrollToBottom])
 
-  const connectWebSocket = (): Promise<WebSocket> => {
+  const handleWsMessage = useCallback((event: MessageEvent) => {
+    let data: {
+      type?: string
+      content?: string
+      tool?: string
+      action?: string
+      payload?: unknown
+      code?: string
+      message?: string
+    }
+    try {
+      data = JSON.parse(event.data)
+    } catch {
+      return
+    }
+    if (data.type === 'stream') {
+      const slot = inFlightRef.current
+      if (!slot) return
+      slot.accum += data.content || ''
+      onMessagesChangeRef.current([
+        ...slot.base,
+        { role: 'assistant', content: slot.accum, timestamp: slot.timestamp },
+      ])
+    } else if (data.type === 'tool_use') {
+      setToolStatus(`Using ${data.tool}...`)
+    } else if (data.type === 'action' && data.action) {
+      onMapActionRef.current({
+        type: data.action,
+        payload: (data.payload || {}) as never,
+      } as MapAction)
+    } else if (data.type === 'error') {
+      setChatError({
+        code: String(data.code || 'unknown'),
+        message: String(data.message || 'Unknown error'),
+      })
+      // Treat error as terminal for the in-flight stream so the user can
+      // send the next message; an `end` frame may or may not follow.
+      setIsStreaming(false)
+      setToolStatus(null)
+      inFlightRef.current = null
+    } else if (data.type === 'end') {
+      setIsStreaming(false)
+      setToolStatus(null)
+      inFlightRef.current = null
+    }
+  }, [])
+
+  const connectWebSocket = useCallback((): Promise<WebSocket> => {
     return new Promise((resolve, reject) => {
       if (wsRef.current?.readyState === WebSocket.OPEN) {
         resolve(wsRef.current)
         return
       }
       const ws = new WebSocket(BACKEND_WS)
-      ws.onopen = () => {
+      historySentRef.current = false
+      ws.addEventListener('message', handleWsMessage)
+      ws.addEventListener('open', () => {
         wsRef.current = ws
         resolve(ws)
-      }
-      ws.onerror = () => reject(new Error('WebSocket connection failed'))
-      ws.onclose = () => {
+      })
+      ws.addEventListener('error', () =>
+        reject(new Error('WebSocket connection failed')),
+      )
+      ws.addEventListener('close', () => {
         wsRef.current = null
+        historySentRef.current = false
         setIsStreaming(false)
         setToolStatus(null)
-      }
+        inFlightRef.current = null
+      })
     })
-  }
+  }, [handleWsMessage])
 
   const sendMessageDirect = async (text: string): Promise<void> => {
     if (!text.trim() || isStreaming || !activeConversation) return
 
     const userMessage: ChatMessage = { role: 'user', content: text.trim(), timestamp: Date.now() }
-    const updated = [...messages, userMessage]
-    onMessagesChange(updated)
+    const updated: ChatMessage[] = [...messages, userMessage]
+    const placeholderTs = Date.now() + 1
+    onMessagesChange([
+      ...updated,
+      { role: 'assistant', content: '', timestamp: placeholderTs },
+    ])
     setIsStreaming(true)
     setToolStatus(null)
+    setChatError(null)
 
     if (textareaRef.current) {
       textareaRef.current.style.height = 'auto'
@@ -134,46 +246,42 @@ export default function ChatPanel({
 
     try {
       const ws = await connectWebSocket()
-      let assistantContent = ''
-      onMessagesChange([...updated, { role: 'assistant', content: '', timestamp: Date.now() }])
-
-      ws.onmessage = (event) => {
-        const data = JSON.parse(event.data)
-        if (data.type === 'stream') {
-          assistantContent += data.content
-          onMessagesChange([
-            ...updated,
-            { role: 'assistant', content: assistantContent, timestamp: Date.now() },
-          ])
-        } else if (data.type === 'tool_use') {
-          setToolStatus(`Using ${data.tool}...`)
-        } else if (data.type === 'action') {
-          onMapAction({ type: data.action, payload: data.payload })
-        } else if (data.type === 'end') {
-          setIsStreaming(false)
-          setToolStatus(null)
-        }
+      inFlightRef.current = {
+        base: updated,
+        accum: '',
+        timestamp: placeholderTs,
       }
 
-      ws.send(
-        JSON.stringify({
-          content: userMessage.content,
-          map_context: documentImage ? undefined : mapContext,
-          image: documentImage
-            ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
-            : undefined,
-        }),
-      )
+      // First payload on a fresh connection ships the conversation history
+      // so the backend can rebuild the OpenAI message list. Subsequent
+      // payloads on the same connection carry only the new user message.
+      // Document mode now bridges to the live map: send map_context too so
+      // the model can fly_to / add markers / run GIS tools while looking at
+      // the document. Backend accepts both fields in either mode.
+      const payload: Record<string, unknown> = {
+        content: userMessage.content,
+        map_context: mapContext,
+        image: documentImage
+          ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
+          : undefined,
+      }
+      if (!historySentRef.current && messages.length > 0) {
+        payload.history = messages.map((m) => ({
+          role: m.role,
+          content: m.content,
+        }))
+      }
+      historySentRef.current = true
+
+      ws.send(JSON.stringify(payload))
     } catch {
-      onMessagesChange([
-        ...updated,
-        {
-          role: 'assistant',
-          content: 'Failed to connect to backend. Make sure the server is running.',
-          timestamp: Date.now(),
-        },
-      ])
+      setChatError({
+        code: 'connection',
+        message: 'Could not reach the backend. Is the server running on :8765?',
+      })
+      onMessagesChange(updated)
       setIsStreaming(false)
+      inFlightRef.current = null
     }
   }
 
@@ -209,6 +317,8 @@ export default function ChatPanel({
   const handleNewChat = () => {
     wsRef.current?.close()
     wsRef.current = null
+    setChatError(null)
+    setSuggestions(pickSuggestions(3))
     onCreateConversation()
     setShowHistory(false)
   }
@@ -319,6 +429,21 @@ export default function ChatPanel({
         </div>
       )}
 
+      {/* ── Error banner ── */}
+      {chatError && (
+        <div className={`chat-error chat-error-${chatError.code}`} role="alert">
+          <span className="chat-error-code">{chatError.code}</span>
+          <span className="chat-error-msg">{chatError.message}</span>
+          <button
+            className="chat-error-dismiss"
+            onClick={() => setChatError(null)}
+            aria-label="Dismiss"
+          >
+            &times;
+          </button>
+        </div>
+      )}
+
       {/* ── Messages area ── */}
       <div className="chat-messages">
         {messages.length === 0 && (
@@ -330,21 +455,11 @@ export default function ChatPanel({
               layers and help with planning decisions.
             </p>
             <div className="chat-empty-suggestions">
-              <span className="suggestion" onClick={() => setInput('Analyze this zoning layout')}>
-                Analyze this zoning layout
-              </span>
-              <span
-                className="suggestion"
-                onClick={() => setInput("What's the total area of my polygons?")}
-              >
-                What&apos;s the total area of my polygons?
-              </span>
-              <span
-                className="suggestion"
-                onClick={() => setInput('Search for transit regulations')}
-              >
-                Search for transit regulations
-              </span>
+              {suggestions.map((s) => (
+                <span key={s} className="suggestion" onClick={() => setInput(s)}>
+                  {s}
+                </span>
+              ))}
             </div>
           </div>
         )}

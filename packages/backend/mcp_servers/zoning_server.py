@@ -4,8 +4,10 @@ Zoning analysis MCP tools — summarize drawn / loaded zone polygons by zone_cod
 
 from __future__ import annotations
 
-import math
+import asyncio
+
 from llm.base import ToolDeclaration
+from tools.geo import geodesic_area_m2
 
 try:
     from shapely.geometry import shape
@@ -13,6 +15,7 @@ try:
     HAS_SHAPELY = True
 except ImportError:
     HAS_SHAPELY = False
+    shape = unary_union = None
 
 
 class ZoningServer:
@@ -56,26 +59,10 @@ class ZoningServer:
 
     async def execute(self, tool_name: str, args: dict) -> dict:
         if tool_name == "analyze_zones":
-            return self._analyze_zones(args)
+            return await asyncio.to_thread(self._analyze_zones, args)
         if tool_name == "detect_zone_overlaps":
-            return self._detect_overlaps(args)
+            return await asyncio.to_thread(self._detect_overlaps, args)
         return {"error": f"Unknown tool: {tool_name}"}
-
-    def _polygon_area_m2(self, coords: list) -> float:
-        """Shoelace on projected plane approx for small regions."""
-        if len(coords) < 3:
-            return 0.0
-        R = 6371000.0
-        n = len(coords)
-        area = 0.0
-        for i in range(n):
-            j = (i + 1) % n
-            xi = math.radians(coords[i][0]) * R * math.cos(math.radians(coords[i][1]))
-            yi = math.radians(coords[i][1]) * R
-            xj = math.radians(coords[j][0]) * R * math.cos(math.radians(coords[j][1]))
-            yj = math.radians(coords[j][1]) * R
-            area += xi * yj - xj * yi
-        return abs(area) / 2
 
     def _analyze_zones(self, args: dict) -> dict:
         fc = args.get("geojson") or {}
@@ -93,30 +80,11 @@ class ZoningServer:
             code = str(f.get("properties", {}).get("zone_code") or "unspecified")
             label = f.get("properties", {}).get("zone_label") or code
             by_label[code] = str(label)
-            gtype = geom.get("type", "")
-            coords = geom.get("coordinates", [])
-
-            if gtype == "Polygon" and coords:
-                ring = coords[0]
-                a = self._polygon_area_m2(ring)
-                by_code[code] = by_code.get(code, 0) + a
-            elif gtype == "MultiPolygon":
-                for poly in coords:
-                    if poly:
-                        a = self._polygon_area_m2(poly[0])
-                        by_code[code] = by_code.get(code, 0) + a
-            elif HAS_SHAPELY:
-                try:
-                    g = shape(geom)
-                    if g.is_empty:
-                        continue
-                    gc = g.convex_hull
-                    xs, ys = zip(*list(gc.exterior.coords))
-                    ring = [[x, y] for x, y in zip(xs, ys)]
-                    a = self._polygon_area_m2(ring)
-                    by_code[code] = by_code.get(code, 0) + a * 0.85
-                except Exception:
-                    continue
+            try:
+                a = geodesic_area_m2(geom)
+            except Exception:
+                continue
+            by_code[code] = by_code.get(code, 0) + a
 
         total = sum(by_code.values())
         if total <= 0:
@@ -134,6 +102,7 @@ class ZoningServer:
 
         return {
             "total_area_m2": round(total, 1),
+            "total_area_hectares": round(total / 10000, 4),
             "zones": breakdown,
         }
 
@@ -143,6 +112,7 @@ class ZoningServer:
         if not HAS_SHAPELY or len(feats) < 2:
             return {"overlaps": [], "note": "Need at least 2 features and shapely for overlap detection"}
 
+        assert shape is not None and unary_union is not None
         polys = []
         for i, f in enumerate(feats):
             try:
@@ -165,15 +135,9 @@ class ZoningServer:
                 inter = ga.intersection(gb)
                 if inter.is_empty:
                     continue
-                if inter.geom_type == "Polygon":
-                    ring = [[x, y] for x, y in inter.exterior.coords]
-                    area_m2 = self._polygon_area_m2(ring)
-                elif inter.geom_type == "MultiPolygon":
-                    area_m2 = sum(
-                        self._polygon_area_m2([[x, y] for x, y in g.exterior.coords])
-                        for g in inter.geoms
-                    )
-                else:
+                try:
+                    area_m2 = geodesic_area_m2(inter.__geo_interface__)
+                except Exception:
                     area_m2 = 0.0
                 overlaps.append({
                     "feature_indices": [ia, ib],

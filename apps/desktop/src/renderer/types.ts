@@ -7,6 +7,9 @@ export interface GeoJSONLayer {
   visible: boolean
   data: FeatureCollection
   color: string
+  fillColor?: string
+  lineColor?: string
+  opacity?: number
 }
 
 export interface MapViewState {
@@ -135,6 +138,11 @@ export type MapAction =
     }
   | { type: 'refresh_artifacts'; payload: Record<string, never> }
 
+export interface ChatErrorMessage {
+  code: string
+  message: string
+}
+
 export type MapActionType = MapAction['type']
 
 export interface ProjectData {
@@ -142,9 +150,13 @@ export interface ProjectData {
   mapState: MapViewState
   layers: Array<{
     name: string
+    /** Workspace-relative for new projects; absolute for legacy projects. */
     filePath: string
     visible: boolean
     color: string
+    fillColor?: string
+    lineColor?: string
+    opacity?: number
   }>
   drawnFeatures: Feature[]
   conversations: Conversation[]

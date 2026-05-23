@@ -6,4 +6,5 @@ python-dotenv
 duckduckgo-search
 httpx
 shapely
+pyproj
 mcp

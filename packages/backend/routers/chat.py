@@ -22,12 +22,18 @@ from openai import AsyncOpenAI
 _BACKEND_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from database import DB_PATH
 from mcp_servers.osm_server import OSMServer
 from mcp_servers.gis_server import GISServer
 from mcp_servers.weather_server import WeatherServer
 from mcp_servers.zoning_server import ZoningServer
 from mcp_servers.demographics_server import DemographicsServer
 from tools.utility import UtilityServer
+
+try:
+    from shapely.geometry import shape as _shape
+except ImportError:
+    _shape = None
 
 router = APIRouter()
 
@@ -42,8 +48,6 @@ def _get_model() -> str:
         return data.get("model") or _DEFAULT_MODEL
     except Exception:
         return _DEFAULT_MODEL
-
-DB_PATH = Path(os.environ.get("CURSOR_URBAN_DB", str(_BACKEND_DIR / "cursor_urban.db")))
 
 _servers = {
     "osm": OSMServer(),
@@ -291,11 +295,35 @@ async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
                     "features": features_summary,
                 }
 
-            # Auto-display osm_boundary on map
+            # Auto-display osm_boundary on map. Keep geometry/centroid/bbox in
+            # the model-visible result so follow-up tools (gis_area, gis_buffer,
+            # gis_point_in_polygon) can chain on the boundary.
             elif name == "osm_boundary" and "geojson" in result:
                 label = f"{args.get('name', 'Boundary')} boundary"
                 await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
-                result = {"name": result.get("name", ""), "displayed_on_map": True}
+                model_result: dict = {
+                    "name": result.get("name", ""),
+                    "displayed_on_map": True,
+                    "layer_name": label,
+                }
+                feats = result["geojson"].get("features") or []
+                geom = feats[0].get("geometry") if feats else None
+                if geom and _shape is not None:
+                    try:
+                        g = _shape(geom)
+                        if not g.is_empty:
+                            minx, miny, maxx, maxy = g.bounds
+                            c = g.centroid
+                            model_result["centroid"] = {"lat": round(c.y, 6), "lng": round(c.x, 6)}
+                            model_result["bbox"] = {
+                                "south": round(miny, 6), "west": round(minx, 6),
+                                "north": round(maxy, 6), "east": round(maxx, 6),
+                            }
+                    except Exception:
+                        pass
+                if geom:
+                    model_result["geometry"] = geom
+                result = model_result
 
             # Auto-display route
             elif name == "osm_route_overview" and "geometry" in result:
@@ -370,7 +398,11 @@ async def _run_agent(messages: list[dict], ws: WebSocket, tools: list[dict] | No
                                 tool_calls_acc[idx]["arguments"] += tc.function.arguments
 
         except Exception as e:
-            await ws.send_text(json.dumps({"type": "stream", "content": f"\n\n[Error: {e}]"}))
+            await ws.send_text(json.dumps({
+                "type": "error",
+                "code": _classify_error(e),
+                "message": str(e),
+            }))
             break
 
         # Add assistant message to history
@@ -386,26 +418,42 @@ async def _run_agent(messages: list[dict], ws: WebSocket, tools: list[dict] | No
             ]
         messages.append(assistant_msg)
 
-        # If no tool calls, we're done
-        if not tool_calls_acc or finish_reason == "stop":
+        # If no tool calls, we're done. Tool calls MUST be answered even if
+        # finish_reason == "stop" — leaving them unanswered breaks the next turn.
+        if not tool_calls_acc:
             break
 
         # Execute tool calls and collect results
         for tc in tool_calls_acc.values():
             tool_name = tc["name"]
+            args_raw = tc["arguments"] or ""
             try:
-                args = json.loads(tc["arguments"]) if tc["arguments"] else {}
-            except json.JSONDecodeError:
+                args = json.loads(args_raw) if args_raw else {}
+                args_error = None
+            except json.JSONDecodeError as e:
                 args = {}
+                args_error = str(e)
 
             await ws.send_text(json.dumps({"type": "tool_use", "tool": tool_name, "args": args}))
 
-            result_str = await _execute_tool(tool_name, args, ws)
+            if args_error:
+                # Streaming was interrupted; return a structured error so the
+                # tool_call_id has a matching tool message and the next turn
+                # is well-formed.
+                result_str = json.dumps({
+                    "error": "Arguments could not be parsed; streaming was interrupted.",
+                    "detail": args_error,
+                })
+            else:
+                result_str = await _execute_tool(tool_name, args, ws)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
                 "content": result_str,
             })
+
+        if finish_reason == "stop":
+            break
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -424,20 +472,32 @@ async def chat_websocket(websocket: WebSocket):
             user_content = payload.get("content", "")
             map_context = payload.get("map_context")
             image_data = payload.get("image")  # {base64, mime_type} or None
+            history_payload = payload.get("history")
 
             if not user_content.strip():
                 continue
+
+            # Renderer can replay prior conversation on reconnect/model-switch
+            # by passing `history`: a list of {role, content} pairs.
+            if isinstance(history_payload, list):
+                replayed: list[dict] = []
+                for m in history_payload:
+                    role = m.get("role")
+                    content = m.get("content")
+                    if role in ("user", "assistant") and isinstance(content, str) and content.strip():
+                        replayed.append({"role": role, "content": content})
+                messages = replayed
 
             is_document_mode = image_data is not None
 
             if is_document_mode:
                 system = DOCUMENT_SYSTEM_PROMPT
-                tools = [_decl_to_openai("create_artifact",
-                    "Save a note, analysis, or report as a project artifact",
-                    {"type": "object",
-                     "properties": {"title": {"type": "string"}, "content": {"type": "string"},
-                                    "artifact_type": {"type": "string"}},
-                     "required": ["title", "content", "artifact_type"]})]
+                # Document mode now bridges to the live map: model can fly_to,
+                # add markers, run osm_search, save artifacts. Map context is
+                # included when supplied.
+                if map_context:
+                    system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
+                tools = _TOOLS
                 # Build vision message
                 user_msg: dict = {
                     "role": "user",
@@ -479,7 +539,28 @@ async def chat_websocket(websocket: WebSocket):
         pass
     except Exception as e:
         try:
-            await websocket.send_text(json.dumps({"type": "stream", "content": f"\n\n[Fatal error: {e}]"}))
+            await websocket.send_text(json.dumps({
+                "type": "error", "code": _classify_error(e), "message": str(e),
+            }))
             await websocket.send_text(json.dumps({"type": "end"}))
         except Exception:
             pass
+
+
+def _classify_error(e: Exception) -> str:
+    """Map an exception to a short error code the UI can style on."""
+    msg = str(e).lower()
+    name = type(e).__name__
+    if "api key" in msg or "openai_api_key" in msg or "401" in msg or name == "AuthenticationError":
+        return "auth"
+    if "429" in msg or "rate limit" in msg or name == "RateLimitError":
+        return "rate_limit"
+    if "timeout" in msg or "timed out" in msg or name == "APITimeoutError":
+        return "timeout"
+    if "connection" in msg or name in ("APIConnectionError", "ConnectionError"):
+        return "connection"
+    if "404" in msg or "not found" in msg:
+        return "not_found"
+    if "500" in msg or "502" in msg or "503" in msg or "504" in msg:
+        return "upstream"
+    return "internal"

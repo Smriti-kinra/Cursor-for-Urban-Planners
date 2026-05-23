@@ -67,7 +67,9 @@ function App() {
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
+  const isSavingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const AI_MARKERS_LAYER = 'AI Markers'
 
   useEffect(() => { bookmarksRef.current = bookmarks }, [bookmarks])
   useEffect(() => { mapBoundsRef.current = mapBounds }, [mapBounds])
@@ -229,15 +231,57 @@ function App() {
     const allClipped: Feature[] = []
     for (const layer of layers) {
       for (const f of layer.data?.features || []) {
+        const t = f.geometry?.type
         try {
-          const clipped = turf.intersect(
-            turf.featureCollection([f as Feature<Polygon | MultiPolygon>, boundary as Feature<Polygon | MultiPolygon>])
-          )
-          if (clipped) {
-            allClipped.push({
-              ...clipped,
-              properties: { ...(f.properties || {}), source_layer: layer.name },
-            })
+          if (t === 'Polygon' || t === 'MultiPolygon') {
+            const clipped = turf.intersect(
+              turf.featureCollection([
+                f as Feature<Polygon | MultiPolygon>,
+                boundary as Feature<Polygon | MultiPolygon>,
+              ]),
+            )
+            if (clipped) {
+              allClipped.push({
+                ...clipped,
+                properties: { ...(f.properties || {}), source_layer: layer.name },
+              })
+            }
+          } else if (t === 'Point') {
+            if (
+              turf.booleanPointInPolygon(
+                f as Feature<import('geojson').Point>,
+                boundary as Feature<Polygon | MultiPolygon>,
+              )
+            ) {
+              allClipped.push({
+                ...f,
+                properties: { ...(f.properties || {}), source_layer: layer.name },
+              })
+            }
+          } else if (t === 'MultiPoint') {
+            const coords = (f.geometry as import('geojson').MultiPoint).coordinates
+            const inside = coords.filter((c) =>
+              turf.booleanPointInPolygon(turf.point(c), boundary as Feature<Polygon | MultiPolygon>),
+            )
+            if (inside.length) {
+              allClipped.push({
+                type: 'Feature',
+                geometry: { type: 'MultiPoint', coordinates: inside },
+                properties: { ...(f.properties || {}), source_layer: layer.name },
+              })
+            }
+          } else if (t === 'LineString' || t === 'MultiLineString') {
+            if (
+              turf.booleanIntersects(
+                f as Feature,
+                boundary as Feature<Polygon | MultiPolygon>,
+              )
+            ) {
+              allClipped.push({
+                ...f,
+                properties: { ...(f.properties || {}), source_layer: layer.name },
+              })
+            }
           }
         } catch {
           /* skip invalid geometry */
@@ -305,9 +349,35 @@ function App() {
     const { jsPDF } = await import('jspdf')
     const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
     const img = canvas.toDataURL('image/png')
+
+    // A4 landscape ~842 × 595pt. Fit the canvas (in DPR-aware logical
+    // pixels) into the page below the title, preserving aspect ratio.
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const margin = 40
+    const titleSpace = 30
+    const maxW = pageW - margin * 2
+    const maxH = pageH - margin - titleSpace - margin
+    const dpr = window.devicePixelRatio || 1
+    const logicalW = canvas.width / dpr
+    const logicalH = canvas.height / dpr
+    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
+    let drawW = maxW
+    let drawH = drawW / aspect
+    if (drawH > maxH) {
+      drawH = maxH
+      drawW = drawH * aspect
+    }
+    const drawX = (pageW - drawW) / 2
+    const drawY = margin + titleSpace
+
     pdf.setFontSize(14)
-    pdf.text('Map export — Cursor for Urban Planners', 40, 40)
-    pdf.addImage(img, 'PNG', 40, 55, 760, 520)
+    pdf.text('Map export — Cursor for Urban Planners', margin, margin + 18)
+    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
+
+    const footer = `Viewport export — ${new Date().toISOString()}`
+    pdf.setFontSize(9)
+    pdf.text(footer, margin, pageH - 18)
     pdf.save(`map-report-${Date.now()}.pdf`)
   }, [])
 
@@ -387,6 +457,82 @@ function App() {
     })
     setActiveLeftTab('layers')
   }, [])
+
+  // Append-merge AI-placed markers into the canonical "AI Markers" layer.
+  // We intercept add_marker / add_markers in handleMapAction so the pins
+  // live in React state (and project.json), not in a MapView ref that
+  // disappears on reload.
+  const appendMarkersToLayer = useCallback(
+    (markers: Array<{ lat: number; lng: number; label?: string; color?: string }>) => {
+      if (!markers.length) return
+      const newFeatures: Feature[] = markers
+        .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
+        .map((m) => ({
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: [m.lng, m.lat] },
+          properties: {
+            label: m.label || '',
+            ...(m.color ? { fillColor: m.color, strokeColor: m.color } : {}),
+            source: 'ai_marker',
+          },
+        }))
+      if (!newFeatures.length) return
+      setLayers((prev) => {
+        const idx = prev.findIndex(
+          (l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase(),
+        )
+        if (idx >= 0) {
+          const merged = {
+            ...prev[idx],
+            visible: true,
+            data: {
+              type: 'FeatureCollection',
+              features: [...(prev[idx].data?.features || []), ...newFeatures],
+            } as FeatureCollection,
+          }
+          const next = [...prev]
+          next[idx] = merged
+          return next
+        }
+        const layerColor = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
+        colorIndexRef.current++
+        return [
+          ...prev,
+          {
+            id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            name: AI_MARKERS_LAYER,
+            filePath: '',
+            visible: true,
+            data: { type: 'FeatureCollection', features: newFeatures } as FeatureCollection,
+            color: layerColor,
+          },
+        ]
+      })
+      setActiveLeftTab('layers')
+    },
+    [],
+  )
+
+  const handleLayerStyleChange = useCallback(
+    (
+      layerName: string,
+      style: { fillColor?: string; lineColor?: string; opacity?: number },
+    ) => {
+      setLayers((prev) =>
+        prev.map((l) =>
+          l.name.toLowerCase() === layerName.toLowerCase()
+            ? {
+                ...l,
+                ...(style.fillColor !== undefined ? { fillColor: style.fillColor } : {}),
+                ...(style.lineColor !== undefined ? { lineColor: style.lineColor } : {}),
+                ...(style.opacity !== undefined ? { opacity: style.opacity } : {}),
+              }
+            : l,
+        ),
+      )
+    },
+    [],
+  )
 
   // ── Map action handler (intercepts layer ops, queues the rest) ──
 
@@ -477,6 +623,23 @@ function App() {
       setArtifactsRevision((n) => n + 1)
       return
     }
+    // AI-placed pins: merge into a single "AI Markers" Point layer so they
+    // appear in mapContext, persist to project.json, and survive reload.
+    if (action.type === 'add_marker') {
+      appendMarkersToLayer([action.payload])
+      return
+    }
+    if (action.type === 'add_markers') {
+      const list = Array.isArray(action.payload?.markers) ? action.payload.markers : []
+      appendMarkersToLayer(list)
+      return
+    }
+    if (action.type === 'clear_markers') {
+      setLayers((prev) =>
+        prev.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()),
+      )
+      return
+    }
     // Promote AI-drawn shapes to real layers so they appear in mapContext on
     // the next turn. Without this they live only in the MapView ref and the
     // assistant can't see them again.
@@ -550,7 +713,7 @@ function App() {
       return
     }
     setMapActions((prev) => [...prev, action])
-  }, [upsertLayer, clipLayersToBboxAndSave, mapViewState.zoom])
+  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom])
 
   // ── Map context for AI ──
 
@@ -672,50 +835,64 @@ function App() {
     async (force = false) => {
       if (!workspacePath) return
       if (!force && isLoadingRef.current) return
-
-      let layersSnapshot = layers
-      const withPaths: GeoJSONLayer[] = []
-      let materializedAny = false
-      for (const l of layers) {
-        if (l.filePath?.trim()) {
-          withPaths.push(l)
-          continue
+      isSavingRef.current = true
+      try {
+        let layersSnapshot = layers
+        const withPaths: GeoJSONLayer[] = []
+        let materializedAny = false
+        for (const l of layers) {
+          if (l.filePath?.trim()) {
+            withPaths.push(l)
+            continue
+          }
+          const fp = `${workspacePath}/.cursor-urban/layers/${l.id}.geojson`
+          const ok = await window.electronAPI.writeFile(fp, JSON.stringify(l.data, null, 2))
+          if (!ok) {
+            console.error('Failed to persist layer:', l.name)
+            withPaths.push(l)
+            continue
+          }
+          withPaths.push({ ...l, filePath: fp })
+          materializedAny = true
         }
-        const fp = `${workspacePath}/.cursor-urban/layers/${l.id}.geojson`
-        const ok = await window.electronAPI.writeFile(fp, JSON.stringify(l.data, null, 2))
-        if (!ok) {
-          console.error('Failed to persist layer:', l.name)
-          withPaths.push(l)
-          continue
+        if (materializedAny) {
+          layersSnapshot = withPaths
+          setLayers(withPaths)
         }
-        withPaths.push({ ...l, filePath: fp })
-        materializedAny = true
-      }
-      if (materializedAny) {
-        layersSnapshot = withPaths
-        setLayers(withPaths)
-      }
 
-      const projectData: ProjectData = {
-        version: 2,
-        mapState: mapViewState,
-        layers: layersSnapshot.map((l) => ({
-          name: l.name,
-          filePath: l.filePath,
-          visible: l.visible,
-          color: l.color,
-        })),
-        drawnFeatures: [],
-        conversations,
-        activeConversationId,
-        basemap,
-        bookmarks,
+        // Store paths relative to the workspace so the project survives a
+        // workspace-folder move. loadProject re-resolves against the
+        // current workspacePath.
+        const wsPrefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`
+        const toRelative = (fp: string): string =>
+          fp.startsWith(wsPrefix) ? fp.slice(wsPrefix.length) : fp
+
+        const projectData: ProjectData = {
+          version: 2,
+          mapState: mapViewState,
+          layers: layersSnapshot.map((l) => ({
+            name: l.name,
+            filePath: toRelative(l.filePath),
+            visible: l.visible,
+            color: l.color,
+            ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
+            ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
+            ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
+          })),
+          drawnFeatures: [],
+          conversations,
+          activeConversationId,
+          basemap,
+          bookmarks,
+        }
+        const wrote = await window.electronAPI.writeFile(
+          `${workspacePath}/project.json`,
+          JSON.stringify(projectData, null, 2),
+        )
+        if (!wrote) console.error('Failed to save project.json (check workspace permissions)')
+      } finally {
+        isSavingRef.current = false
       }
-      const wrote = await window.electronAPI.writeFile(
-        `${workspacePath}/project.json`,
-        JSON.stringify(projectData, null, 2),
-      )
-      if (!wrote) console.error('Failed to save project.json (check workspace permissions)')
     },
     [workspacePath, mapViewState, layers, conversations, activeConversationId, basemap, bookmarks],
   )
@@ -756,13 +933,23 @@ function App() {
 
       if (data.layers) {
         const loadedLayers: GeoJSONLayer[] = []
+        const wsPrefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`
         for (const info of data.layers) {
           if (!info.filePath?.trim()) {
             console.warn('Skipping layer with no file path (re-add from chat or disk):', info.name)
             continue
           }
-          const fileContent = await window.electronAPI.readFile(info.filePath)
-          if (!fileContent) continue
+          // Resolve relative paths against the current workspace so the
+          // project survives a workspace-folder move. Absolute paths from
+          // older project.json files keep working.
+          const resolved = info.filePath.startsWith('/')
+            ? info.filePath
+            : `${wsPrefix}${info.filePath}`
+          const fileContent = await window.electronAPI.readFile(resolved)
+          if (!fileContent) {
+            console.warn('Layer file missing:', info.name, resolved)
+            continue
+          }
           try {
             const raw = JSON.parse(fileContent)
             const geojson =
@@ -777,10 +964,13 @@ function App() {
             loadedLayers.push({
               id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               name: info.name,
-              filePath: info.filePath,
+              filePath: resolved,
               visible: info.visible,
               data: geojson,
               color: info.color,
+              ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
+              ...(info.lineColor !== undefined ? { lineColor: info.lineColor } : {}),
+              ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
             })
           } catch {
             /* skip invalid files */
@@ -802,7 +992,7 @@ function App() {
   }, [workspacePath, loadProject])
 
   useEffect(() => {
-    if (!workspacePath || isLoadingRef.current) return
+    if (!workspacePath || isLoadingRef.current || isSavingRef.current) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(() => void saveProject(), 800)
     return () => {
@@ -940,6 +1130,7 @@ function App() {
                   onBoundsChange={setMapBounds}
                   onBasemapChange={setBasemap}
                   onActionsProcessed={() => setMapActions([])}
+                  onLayerStyleChange={handleLayerStyleChange}
                 />
               </ErrorBoundary>
             </div>

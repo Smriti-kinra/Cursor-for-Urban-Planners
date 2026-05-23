@@ -7,8 +7,70 @@ Supports amenity search, land-use queries, building footprints, road networks, e
 
 from __future__ import annotations
 
+import asyncio
+import json as _json
+
 import httpx
 from llm.base import ToolDeclaration
+
+
+# Multiple Overpass mirrors. The main instance frequently rate-limits (429)
+# or returns empty 504 bodies under load — try the next mirror automatically.
+_OVERPASS_MIRRORS = [
+    "https://overpass-api.de/api/interpreter",
+    "https://overpass.private.coffee/api/interpreter",
+    "https://overpass.openstreetmap.fr/api/interpreter",
+]
+
+_OVERPASS_HEADERS = {"User-Agent": "CursorUrbanPlanners/1.0"}
+
+
+async def _overpass_post(query: str, timeout: float = 30.0) -> dict:
+    """Resilient Overpass call with mirror failover.
+
+    Returns a dict, or raises a single OverpassError with a human-readable
+    message — never the raw `JSONDecodeError("Expecting value: line 1 column 1")`
+    that bubbled up before. Callers should `try/except OverpassError`.
+    """
+    last_status: int | None = None
+    last_body_snippet: str = ""
+    for url in _OVERPASS_MIRRORS:
+        try:
+            async with httpx.AsyncClient(timeout=timeout, headers=_OVERPASS_HEADERS) as http:
+                resp = await http.post(url, data={"data": query})
+        except httpx.RequestError as e:
+            last_body_snippet = f"network error: {e}"
+            continue
+        last_status = resp.status_code
+        # Overpass returns 429 (rate limit) and 504 (gateway timeout) frequently.
+        # Body is often empty or HTML on those — fail over to the next mirror.
+        if resp.status_code in (429, 502, 503, 504):
+            last_body_snippet = (resp.text or "").strip()[:200]
+            await asyncio.sleep(0.4)
+            continue
+        if resp.status_code != 200:
+            last_body_snippet = (resp.text or "").strip()[:200]
+            continue
+        text = resp.text or ""
+        if not text.strip():
+            last_body_snippet = "<empty body>"
+            continue
+        try:
+            return _json.loads(text)
+        except _json.JSONDecodeError:
+            # Some Overpass mirrors return an HTML error page with status 200.
+            last_body_snippet = text.strip()[:200]
+            continue
+    raise OverpassError(
+        f"Overpass mirrors all failed (last status {last_status}). "
+        f"This is usually a transient rate-limit or upstream outage; "
+        f"please retry in 30–60 seconds."
+        + (f" Last body: {last_body_snippet!r}" if last_body_snippet else "")
+    )
+
+
+class OverpassError(RuntimeError):
+    """Raised by `_overpass_post` when every mirror fails."""
 
 
 def _merge_ways(way_coords: list[list[list[float]]]) -> list[list[list[float]]]:
@@ -75,6 +137,55 @@ def _sanitize_osm_token(value) -> str:
     if not isinstance(value, str):
         value = str(value)
     return "".join(c for c in value if c.isalnum() or c in "_:-")
+
+
+def _sanitize_osm_name(value) -> str:
+    """Sanitize a place name for safe interpolation into an Overpass query.
+
+    Place names can contain spaces, accents, dots — but never quotes, brackets,
+    semicolons, or backslashes. Strip those.
+    """
+    if not isinstance(value, str):
+        value = str(value)
+    return "".join(c for c in value if c not in '"\\[];()$<>{}')
+
+
+# Cap for `osm_search` results before the FeatureCollection is auto-displayed
+# on the map. Larger payloads freeze the renderer's main thread on JSON.parse.
+_OSM_MAX_FEATURES = 1000
+
+# OSM tag keys that ALWAYS imply a linear feature, even when the way is closed
+# (roundabouts, loop trails, circular roads).
+_LINE_TAG_KEYS = {"highway", "railway", "waterway", "barrier", "power", "aeroway"}
+
+# OSM tag keys that, when present on a closed way, imply an areal feature.
+_AREA_TAG_KEYS = {"building", "landuse", "leisure", "amenity", "natural",
+                  "tourism", "historic", "shop", "office", "place", "boundary"}
+
+# Values of `natural=*` that are linear (coast, ridge), not areal.
+_NATURAL_LINE_VALUES = {"coastline", "ridge", "tree_row", "cliff"}
+
+
+def _is_area_way(tags: dict) -> bool:
+    """Decide whether a closed OSM way represents an Area (Polygon) or just a
+    closed Line. Mirrors the OSM 'area or line' rules.
+    """
+    if not tags:
+        return False
+    if str(tags.get("area", "")).lower() == "yes":
+        return True
+    if str(tags.get("area", "")).lower() == "no":
+        return False
+    for k in _LINE_TAG_KEYS:
+        if k in tags:
+            return False
+    nat = tags.get("natural")
+    if nat and nat in _NATURAL_LINE_VALUES:
+        return False
+    for k in _AREA_TAG_KEYS:
+        if k in tags:
+            return True
+    return False
 
 
 class OSMServer:
@@ -256,12 +367,7 @@ out body;
 out skel qt;
 """
         try:
-            async with httpx.AsyncClient(timeout=30) as http:
-                resp = await http.post(
-                    "https://overpass-api.de/api/interpreter",
-                    data={"data": overpass_query},
-                )
-                data = resp.json()
+            data = await _overpass_post(overpass_query, timeout=30.0)
 
             nodes: dict[int, tuple[float, float]] = {}
             features = []
@@ -275,31 +381,44 @@ out skel qt;
                             "properties": {**el.get("tags", {}), "osm_id": el["id"]},
                         })
                 elif el["type"] == "way" and el.get("tags"):
+                    tags = el.get("tags", {})
                     coords = [nodes[nid] for nid in el.get("nodes", []) if nid in nodes]
                     if len(coords) >= 2:
-                        geom_type = "Polygon" if coords[0] == coords[-1] and len(coords) >= 4 else "LineString"
-                        geom = {"type": geom_type, "coordinates": [coords] if geom_type == "Polygon" else coords}
+                        is_closed = coords[0] == coords[-1] and len(coords) >= 4
+                        if is_closed and _is_area_way(tags):
+                            geom = {"type": "Polygon", "coordinates": [coords]}
+                        else:
+                            geom = {"type": "LineString", "coordinates": coords}
                         features.append({
                             "type": "Feature",
                             "geometry": geom,
-                            "properties": {**el.get("tags", {}), "osm_id": el["id"]},
+                            "properties": {**tags, "osm_id": el["id"]},
                         })
+
+            total_count = len(features)
+            truncated = total_count > _OSM_MAX_FEATURES
+            if truncated:
+                features = features[:_OSM_MAX_FEATURES]
 
             geojson = {"type": "FeatureCollection", "features": features}
             return {
                 "geojson": geojson,
                 "count": len(features),
+                "total_count": total_count,
+                "truncated": truncated,
                 "feature_type": feature_type,
-                "feature_value": feature_value,
+                "feature_value": raw_value,
             }
+        except OverpassError as e:
+            return {"error": str(e), "code": "upstream_unavailable"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Unexpected error: {e}", "code": "internal"}
 
     async def _fetch_boundary(self, args: dict) -> dict:
-        name = args.get("name", "")
-        place_type = (args.get("place_type") or "").strip()
-        parent = (args.get("parent") or "").strip()
-        country_code = (args.get("country_code") or "").strip()
+        name = _sanitize_osm_name(args.get("name", "")).strip()
+        place_type = _sanitize_osm_token((args.get("place_type") or "").strip())
+        parent = _sanitize_osm_name((args.get("parent") or "").strip())
+        country_code = _sanitize_osm_token((args.get("country_code") or "").strip())
 
         if not name:
             return {"error": "Place name is required"}
@@ -371,17 +490,10 @@ out skel qt;
 
     async def _overpass_boundary(self, query: str) -> dict | None:
         """Run an Overpass query and convert the first relation/way result to a GeoJSON Feature."""
-        async with httpx.AsyncClient(timeout=35) as http:
-            resp = await http.post(
-                "https://overpass-api.de/api/interpreter",
-                data={"data": query},
-            )
-            if resp.status_code != 200:
-                return None
-            try:
-                data = resp.json()
-            except Exception:
-                return None
+        try:
+            data = await _overpass_post(query, timeout=35.0)
+        except OverpassError:
+            return None
 
         elements = data.get("elements", [])
         for el in elements:
@@ -415,16 +527,21 @@ out skel qt;
         if country_code:
             params["countrycodes"] = country_code.lower()
 
-        async with httpx.AsyncClient(timeout=15) as http:
-            resp = await http.get(
-                "https://nominatim.openstreetmap.org/search",
-                params=params,
-                headers={"User-Agent": "CursorUrbanPlanners/1.0"},
-            )
-            try:
-                results = resp.json()
-            except Exception:
-                return None
+        try:
+            async with httpx.AsyncClient(timeout=15) as http:
+                resp = await http.get(
+                    "https://nominatim.openstreetmap.org/search",
+                    params=params,
+                    headers={"User-Agent": "CursorUrbanPlanners/1.0"},
+                )
+        except httpx.RequestError:
+            return None
+        if resp.status_code != 200 or not (resp.text or "").strip():
+            return None
+        try:
+            results = _json.loads(resp.text)
+        except _json.JSONDecodeError:
+            return None
 
         if not results:
             return None
@@ -568,15 +685,25 @@ out skel qt;
                     },
                     headers={"User-Agent": "CursorUrbanPlanners/1.0"},
                 )
-                data = resp.json()
+                if resp.status_code != 200 or not (resp.text or "").strip():
+                    return {"error": f"Nominatim returned status {resp.status_code} with empty body. "
+                                     "Likely rate-limited; please retry in 30s.",
+                            "code": "upstream_unavailable"}
+                try:
+                    data = _json.loads(resp.text)
+                except _json.JSONDecodeError:
+                    return {"error": "Nominatim returned a non-JSON response (rate-limit page).",
+                            "code": "upstream_unavailable"}
                 return {
                     "display_name": data.get("display_name", ""),
                     "address": data.get("address", {}),
                     "type": data.get("type", ""),
                     "osm_type": data.get("osm_type", ""),
                 }
+        except httpx.RequestError as e:
+            return {"error": f"Network error reaching Nominatim: {e}", "code": "connection"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Unexpected error: {e}", "code": "internal"}
 
     async def _route_overview(self, args: dict) -> dict:
         mode_map = {"driving": "car", "walking": "foot", "cycling": "bike"}
@@ -590,15 +717,24 @@ out skel qt;
                     f"https://router.project-osrm.org/route/v1/{mode}/{start};{end}",
                     params={"overview": "full", "geometries": "geojson", "steps": "false"},
                 )
-                data = resp.json()
-                if data.get("code") != "Ok" or not data.get("routes"):
-                    return {"error": data.get("message", "No route found")}
+            if resp.status_code != 200 or not (resp.text or "").strip():
+                return {"error": f"OSRM returned status {resp.status_code} with empty body.",
+                        "code": "upstream_unavailable"}
+            try:
+                data = _json.loads(resp.text)
+            except _json.JSONDecodeError:
+                return {"error": "OSRM returned a non-JSON response.",
+                        "code": "upstream_unavailable"}
+            if data.get("code") != "Ok" or not data.get("routes"):
+                return {"error": data.get("message", "No route found"), "code": "not_found"}
 
-                route = data["routes"][0]
-                return {
-                    "distance_km": round(route["distance"] / 1000, 2),
-                    "duration_minutes": round(route["duration"] / 60, 1),
-                    "geometry": route["geometry"],
-                }
+            route = data["routes"][0]
+            return {
+                "distance_km": round(route["distance"] / 1000, 2),
+                "duration_minutes": round(route["duration"] / 60, 1),
+                "geometry": route["geometry"],
+            }
+        except httpx.RequestError as e:
+            return {"error": f"Network error reaching OSRM: {e}", "code": "connection"}
         except Exception as e:
-            return {"error": str(e)}
+            return {"error": f"Unexpected error: {e}", "code": "internal"}

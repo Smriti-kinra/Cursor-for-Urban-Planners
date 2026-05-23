@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import type { DataDrivenPropertyValueSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import * as turf from '@turf/turf'
-import type { Feature } from 'geojson'
+import type { Feature, FeatureCollection } from 'geojson'
 import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS } from '../types'
 import './MapView.css'
 
@@ -26,6 +26,10 @@ interface MapViewProps {
   onBoundsChange?: (b: { west: number; south: number; east: number; north: number }) => void
   onBasemapChange: (basemap: string) => void
   onActionsProcessed: () => void
+  onLayerStyleChange?: (
+    layerName: string,
+    style: { fillColor?: string; lineColor?: string; opacity?: number },
+  ) => void
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -38,6 +42,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onBoundsChange,
     onBasemapChange,
     onActionsProcessed,
+    onLayerStyleChange,
   },
   ref,
 ) {
@@ -45,11 +50,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const mapRef = useRef<maplibregl.Map | null>(null)
   const onBoundsChangeRef = useRef(onBoundsChange)
   onBoundsChangeRef.current = onBoundsChange
+  const onLayerStyleChangeRef = useRef(onLayerStyleChange)
+  onLayerStyleChangeRef.current = onLayerStyleChange
   const ownLayerIds = useRef(new Set<string>())
+  // Per-source revision token: setData() is only called when layer.data changes.
+  const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
   const initBasemapRef = useRef(basemap)
-  const aiMarkersRef = useRef<maplibregl.Marker[]>([])
-  const aiShapeCounterRef = useRef(0)
-  const aiShapeIdsRef = useRef<Set<string>>(new Set())
 
   const [mapReady, setMapReady] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -81,6 +87,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       zoom: initialState.zoom,
       bearing: initialState.bearing || 0,
       pitch: initialState.pitch || 0,
+      // PNG/PDF export reads the canvas via toBlob/toDataURL. WebGL clears the
+      // back-buffer after each frame composite by default, which makes those
+      // reads return blank pixels. Trade ~10–20% GPU memory for working export.
+      canvasContextAttributes: { preserveDrawingBuffer: true },
     })
 
     map.addControl(new maplibregl.NavigationControl(), 'top-right')
@@ -112,8 +122,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     return () => {
       setMapReady(false)
-      for (const m of aiMarkersRef.current) m.remove()
-      aiMarkersRef.current = []
+      layerRevisionRef.current.clear()
       map.remove()
       mapRef.current = null
     }
@@ -136,14 +145,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
         if (map.getSource(id)) map.removeSource(id)
         ownLayerIds.current.delete(id)
+        layerRevisionRef.current.delete(id)
       }
     }
 
     for (const layer of layers) {
+      const fillColor = layer.fillColor || layer.color
+      const lineColor = layer.lineColor || layer.color
+      const fillOpacity = layer.opacity ?? 0.3
+
       if (!map.getSource(layer.id)) {
         console.log('[MapView] Adding layer source:', layer.id, layer.name)
         map.addSource(layer.id, { type: 'geojson', data: layer.data })
         ownLayerIds.current.add(layer.id)
+        layerRevisionRef.current.set(layer.id, layer.data)
 
         map.addLayer({
           id: `${layer.id}-fill`,
@@ -155,8 +170,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'fill-color': ['coalesce', ['get', 'fillColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
-            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], 0.3] as DataDrivenPropertyValueSpecification<number>,
+            'fill-color': ['coalesce', ['get', 'fillColor'], fillColor] as DataDrivenPropertyValueSpecification<string>,
+            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -171,7 +186,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
+            'line-color': ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -187,7 +202,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiLineString'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], layer.color] as DataDrivenPropertyValueSpecification<string>,
+            'line-color': ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -203,7 +218,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPoint'],
           ],
           paint: {
-            'circle-color': layer.color,
+            'circle-color': fillColor,
             'circle-radius': 6,
             'circle-stroke-color': '#ffffff',
             'circle-stroke-width': 1.5,
@@ -222,11 +237,43 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           /* ignore invalid bbox */
         }
       } else {
+        // Existing source — sync data + visibility + style overrides.
+        const previous = layerRevisionRef.current.get(layer.id)
+        if (previous !== layer.data) {
+          const src = map.getSource(layer.id) as maplibregl.GeoJSONSource
+          src.setData(layer.data)
+          layerRevisionRef.current.set(layer.id, layer.data)
+        }
         const vis = layer.visible ? 'visible' : 'none'
         for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
           if (map.getLayer(`${layer.id}${suffix}`)) {
             map.setLayoutProperty(`${layer.id}${suffix}`, 'visibility', vis)
           }
+        }
+        if (map.getLayer(`${layer.id}-fill`)) {
+          map.setPaintProperty(
+            `${layer.id}-fill`, 'fill-color',
+            ['coalesce', ['get', 'fillColor'], fillColor] as DataDrivenPropertyValueSpecification<string>,
+          )
+          map.setPaintProperty(
+            `${layer.id}-fill`, 'fill-opacity',
+            ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
+          )
+        }
+        if (map.getLayer(`${layer.id}-outline`)) {
+          map.setPaintProperty(
+            `${layer.id}-outline`, 'line-color',
+            ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
+          )
+        }
+        if (map.getLayer(`${layer.id}-line`)) {
+          map.setPaintProperty(
+            `${layer.id}-line`, 'line-color',
+            ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
+          )
+        }
+        if (map.getLayer(`${layer.id}-circle`)) {
+          map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColor)
         }
       }
     }
@@ -312,217 +359,106 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           })
           break
 
-        case 'add_marker': {
-          const el = document.createElement('div')
-          el.style.cssText = `width:14px;height:14px;border-radius:50%;background:${payload.color || '#e6194b'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;`
-          const marker = new maplibregl.Marker({ element: el })
-            .setLngLat([payload.lng, payload.lat])
-            .setPopup(
-              new maplibregl.Popup({ offset: 10 }).setHTML(
-                `<div style="font:13px/1.4 system-ui;max-width:200px"><b>${payload.label || ''}</b></div>`,
-              ),
-            )
-            .addTo(map)
-          aiMarkersRef.current.push(marker)
-          break
-        }
-
-        case 'add_markers': {
-          for (const m of payload.markers || []) {
-            const el = document.createElement('div')
-            el.style.cssText = `width:12px;height:12px;border-radius:50%;background:${m.color || '#e6194b'};border:2px solid white;box-shadow:0 1px 4px rgba(0,0,0,0.4);cursor:pointer;`
-            const marker = new maplibregl.Marker({ element: el })
-              .setLngLat([m.lng, m.lat])
-              .setPopup(
-                new maplibregl.Popup({ offset: 10 }).setHTML(
-                  `<div style="font:13px/1.4 system-ui;max-width:200px"><b>${m.label || ''}</b></div>`,
-                ),
-              )
-              .addTo(map)
-            aiMarkersRef.current.push(marker)
-          }
-          break
-        }
-
-        case 'clear_markers':
-          for (const m of aiMarkersRef.current) m.remove()
-          aiMarkersRef.current = []
-          break
-
-        case 'draw_line': {
-          const lineId = `ai-line-${aiShapeCounterRef.current++}`
-          map.addSource(lineId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: { type: 'LineString', coordinates: payload.coordinates },
-              properties: { label: payload.label || '' },
-            },
-          })
-          map.addLayer({
-            id: lineId,
-            type: 'line',
-            source: lineId,
-            paint: {
-              'line-color': payload.color || '#ef4444',
-              'line-width': payload.width || 3,
-            },
-          })
-          aiShapeIdsRef.current.add(lineId)
-          break
-        }
-
-        case 'draw_polygon': {
-          const polyId = `ai-poly-${aiShapeCounterRef.current++}`
-          const rawCoords = payload.coordinates || []
-          const ring =
-            rawCoords.length >= 3 &&
-            (rawCoords[0][0] !== rawCoords[rawCoords.length - 1][0] ||
-              rawCoords[0][1] !== rawCoords[rawCoords.length - 1][1])
-              ? [...rawCoords, rawCoords[0]]
-              : rawCoords
-          map.addSource(polyId, {
-            type: 'geojson',
-            data: {
-              type: 'Feature',
-              geometry: { type: 'Polygon', coordinates: [ring] },
-              properties: { label: payload.label || '' },
-            },
-          })
-          map.addLayer({
-            id: `${polyId}-fill`,
-            type: 'fill',
-            source: polyId,
-            paint: {
-              'fill-color': payload.color || '#3b82f6',
-              'fill-opacity': payload.opacity ?? 0.3,
-            },
-          })
-          map.addLayer({
-            id: `${polyId}-outline`,
-            type: 'line',
-            source: polyId,
-            paint: { 'line-color': payload.color || '#3b82f6', 'line-width': 2 },
-          })
-          aiShapeIdsRef.current.add(polyId)
-          aiShapeIdsRef.current.add(`${polyId}-fill`)
-          aiShapeIdsRef.current.add(`${polyId}-outline`)
-          break
-        }
-
-        case 'draw_circle': {
-          const circleId = `ai-circle-${aiShapeCounterRef.current++}`
-          const circle = turf.circle(
-            [payload.center_lng, payload.center_lat],
-            payload.radius_km,
-            { units: 'kilometers', steps: 64 },
-          )
-          map.addSource(circleId, { type: 'geojson', data: circle })
-          map.addLayer({
-            id: `${circleId}-fill`,
-            type: 'fill',
-            source: circleId,
-            paint: {
-              'fill-color': payload.color || '#8b5cf6',
-              'fill-opacity': 0.2,
-            },
-          })
-          map.addLayer({
-            id: `${circleId}-outline`,
-            type: 'line',
-            source: circleId,
-            paint: {
-              'line-color': payload.color || '#8b5cf6',
-              'line-width': 2,
-              'line-dasharray': [4, 2],
-            },
-          })
-          aiShapeIdsRef.current.add(circleId)
-          aiShapeIdsRef.current.add(`${circleId}-fill`)
-          aiShapeIdsRef.current.add(`${circleId}-outline`)
-          break
-        }
+        // add_marker / add_markers / clear_markers / draw_line / draw_polygon /
+        // draw_circle are intercepted in App.tsx and routed through upsertLayer
+        // so the data lives in React state and survives reload. MapView no
+        // longer handles them directly.
 
         case 'highlight_features': {
           const { layer_name, property_name, property_value } = payload
           const target = layers.find(
             (l) => l.name.toLowerCase() === layer_name?.toLowerCase(),
           )
-          if (target) {
-            const filtered = (target.data.features || []).filter(
-              (f: Feature) =>
-                String(f.properties?.[property_name]) === String(property_value),
-            )
-            if (filtered.length > 0) {
-              const hlId = 'highlight-temp'
-              if (map.getSource(hlId)) {
-                if (map.getLayer(`${hlId}-fill`)) map.removeLayer(`${hlId}-fill`)
-                if (map.getLayer(`${hlId}-line`)) map.removeLayer(`${hlId}-line`)
-                map.removeSource(hlId)
-              }
-              map.addSource(hlId, {
-                type: 'geojson',
-                data: { type: 'FeatureCollection', features: filtered },
-              })
-              map.addLayer({
-                id: `${hlId}-fill`,
-                type: 'fill',
-                source: hlId,
-                paint: { 'fill-color': '#ffff00', 'fill-opacity': 0.5 },
-              })
-              map.addLayer({
-                id: `${hlId}-line`,
-                type: 'line',
-                source: hlId,
-                paint: { 'line-color': '#ffff00', 'line-width': 3 },
-              })
-              try {
-                const bbox = turf.bbox({
-                  type: 'FeatureCollection',
-                  features: filtered,
-                }) as [number, number, number, number]
-                if (bbox.every((v) => isFinite(v))) {
-                  map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
-                }
-              } catch {
-                /* ignore */
-              }
-              setTimeout(() => {
-                if (!mapRef.current) return
-                const m = mapRef.current
-                if (m.getLayer(`${hlId}-fill`)) m.removeLayer(`${hlId}-fill`)
-                if (m.getLayer(`${hlId}-line`)) m.removeLayer(`${hlId}-line`)
-                if (m.getSource(hlId)) m.removeSource(hlId)
-              }, 10000)
-            }
+          if (!target) break
+
+          const filtered = (target.data.features || []).filter(
+            (f: Feature) =>
+              String(f.properties?.[property_name]) === String(property_value),
+          )
+          if (filtered.length === 0) break
+
+          const hlId = 'highlight-temp'
+          for (const suffix of ['-fill', '-line', '-circle']) {
+            if (map.getLayer(`${hlId}${suffix}`)) map.removeLayer(`${hlId}${suffix}`)
           }
+          if (map.getSource(hlId)) map.removeSource(hlId)
+
+          map.addSource(hlId, {
+            type: 'geojson',
+            data: { type: 'FeatureCollection', features: filtered },
+          })
+          map.addLayer({
+            id: `${hlId}-fill`,
+            type: 'fill',
+            source: hlId,
+            filter: [
+              'any',
+              ['==', ['geometry-type'], 'Polygon'],
+              ['==', ['geometry-type'], 'MultiPolygon'],
+            ],
+            paint: { 'fill-color': '#ffff00', 'fill-opacity': 0.5 },
+          })
+          map.addLayer({
+            id: `${hlId}-line`,
+            type: 'line',
+            source: hlId,
+            filter: [
+              'any',
+              ['==', ['geometry-type'], 'Polygon'],
+              ['==', ['geometry-type'], 'MultiPolygon'],
+              ['==', ['geometry-type'], 'LineString'],
+              ['==', ['geometry-type'], 'MultiLineString'],
+            ],
+            paint: { 'line-color': '#ffff00', 'line-width': 3 },
+          })
+          map.addLayer({
+            id: `${hlId}-circle`,
+            type: 'circle',
+            source: hlId,
+            filter: [
+              'any',
+              ['==', ['geometry-type'], 'Point'],
+              ['==', ['geometry-type'], 'MultiPoint'],
+            ],
+            paint: {
+              'circle-color': '#ffff00',
+              'circle-radius': 9,
+              'circle-stroke-color': '#000000',
+              'circle-stroke-width': 2,
+            },
+          })
+
+          try {
+            const bbox = turf.bbox({
+              type: 'FeatureCollection',
+              features: filtered,
+            }) as [number, number, number, number]
+            if (bbox.every((v) => isFinite(v))) {
+              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
+            }
+          } catch {
+            /* ignore */
+          }
+          setTimeout(() => {
+            if (!mapRef.current) return
+            const m = mapRef.current
+            for (const suffix of ['-fill', '-line', '-circle']) {
+              if (m.getLayer(`${hlId}${suffix}`)) m.removeLayer(`${hlId}${suffix}`)
+            }
+            if (m.getSource(hlId)) m.removeSource(hlId)
+          }, 10000)
           break
         }
 
         case 'set_layer_style': {
-          const { layer_name, fill_color, line_color, opacity } = payload
-          const target = layers.find(
-            (l) => l.name.toLowerCase() === layer_name?.toLowerCase(),
-          )
-          if (target) {
-            const lid = target.id
-            if (fill_color && map.getLayer(`${lid}-fill`))
-              map.setPaintProperty(`${lid}-fill`, 'fill-color', fill_color)
-            if (opacity !== undefined && map.getLayer(`${lid}-fill`))
-              map.setPaintProperty(`${lid}-fill`, 'fill-opacity', opacity)
-            if ((line_color || fill_color) && map.getLayer(`${lid}-outline`))
-              map.setPaintProperty(
-                `${lid}-outline`,
-                'line-color',
-                line_color || fill_color,
-              )
-            if ((line_color || fill_color) && map.getLayer(`${lid}-line`))
-              map.setPaintProperty(
-                `${lid}-line`,
-                'line-color',
-                line_color || fill_color,
-              )
-          }
+          // Style changes belong in React state so they survive a project
+          // reload. App.tsx persists fillColor/lineColor/opacity onto the
+          // layer and the layer-sync effect re-applies on the next render.
+          onLayerStyleChangeRef.current?.(payload.layer_name, {
+            fillColor: payload.fill_color,
+            lineColor: payload.line_color,
+            opacity: payload.opacity,
+          })
           break
         }
 
@@ -539,11 +475,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const handleSearch = async () => {
     if (!searchQuery.trim()) return
     try {
+      // Proxy through the backend — browsers can't set the User-Agent that
+      // Nominatim's usage policy requires.
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(searchQuery)}&format=json&limit=5`,
-        { headers: { 'User-Agent': 'CursorUrbanPlanners/1.0' } },
+        `http://localhost:8765/api/geocode?query=${encodeURIComponent(searchQuery)}&limit=5`,
       )
-      setSearchResults(await resp.json())
+      const data = await resp.json()
+      const results: NominatimSearchResult[] = (data?.results || [])
+        .filter((r: { lat: number | null; lon: number | null }) => r.lat != null && r.lon != null)
+        .map((r: { display_name: string; lat: number; lon: number }) => ({
+          display_name: r.display_name,
+          lat: String(r.lat),
+          lon: String(r.lon),
+        }))
+      setSearchResults(results)
     } catch {
       setSearchResults([])
     }

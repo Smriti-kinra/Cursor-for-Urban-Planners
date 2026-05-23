@@ -105,6 +105,45 @@
   font-style: italic;
 }
 
+.doc-error {
+  color: #fca5a5;
+}
+
+.doc-pdf-pager {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+}
+
+.doc-pdf-pager-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  font-size: 12px;
+  width: 22px;
+  height: 22px;
+  cursor: pointer;
+  line-height: 1;
+}
+
+.doc-pdf-pager-btn:hover:not(:disabled) {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+}
+
+.doc-pdf-pager-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.doc-pdf-pager-label {
+  font-size: 11px;
+  color: var(--text-muted);
+  min-width: 38px;
+  text-align: center;
+}
+
 .doc-content {
   flex: 1;
   overflow: auto;

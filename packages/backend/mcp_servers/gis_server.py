@@ -5,13 +5,16 @@ Provides spatial analysis operations: buffer, centroid, convex hull, bounding bo
 area/perimeter computation, point-in-polygon, nearest-feature, and isochrone
 approximation using server-side geometry computation.
 
-Uses Shapely for geometry operations (no external API needed).
+Uses Shapely for geometry, pyproj for geodesic measurements & UTM-based buffering.
+All inputs are EPSG:4326 lng/lat.
 """
 
 from __future__ import annotations
 
-import math
+import asyncio
+
 from llm.base import ToolDeclaration
+from tools.geo import area_breakdown, geodesic_buffer
 
 try:
     from shapely.geometry import MultiPoint, Point, Polygon, mapping, shape
@@ -42,7 +45,8 @@ class GISServer:
                 description=(
                     "Create a buffer zone around a point or geometry. "
                     "Returns GeoJSON polygon that can be displayed with add_geojson. "
-                    "Useful for proximity analysis (e.g. 500m buffer around a school)."
+                    "Useful for proximity analysis (e.g. 500m buffer around a school). "
+                    "Uses geodesic UTM projection — accurate at any latitude."
                 ),
                 parameters={
                     "type": "object",
@@ -68,17 +72,23 @@ class GISServer:
             ),
             ToolDeclaration(
                 name="gis_area",
-                description="Calculate area and perimeter of a polygon in m², hectares, km²",
+                description=(
+                    "Calculate geodesic area + perimeter of a polygon (in m², hectares, km², acres). "
+                    "Handles holes (interior rings) and MultiPolygons correctly via the WGS84 ellipsoid."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "polygon": {
                             "type": "array",
-                            "description": "Array of [longitude, latitude] coordinate pairs",
+                            "description": "Array of [longitude, latitude] coordinate pairs (single ring)",
                             "items": {"type": "array", "items": {"type": "number"}},
                         },
+                        "geojson": {
+                            "type": "object",
+                            "description": "Alternative: full GeoJSON Feature/geometry — use this for polygons with holes or MultiPolygons.",
+                        },
                     },
-                    "required": ["polygon"],
                 },
             ),
             ToolDeclaration(
@@ -149,6 +159,7 @@ class GISServer:
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
+        # Handlers are sync + CPU-bound — defer to a thread so we don't block the loop.
         dispatch = {
             "gis_buffer": self._buffer,
             "gis_centroid": self._centroid,
@@ -160,48 +171,39 @@ class GISServer:
         }
         handler = dispatch.get(tool_name)
         if handler:
-            return handler(args)
+            return await asyncio.to_thread(handler, args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     def _buffer(self, args: dict) -> dict:
-        radius_m = args.get("radius_meters", 100)
-        radius_deg = radius_m / 111320.0
-
+        radius_m = float(args.get("radius_meters", 100))
         geojson_input = args.get("geojson")
-        if geojson_input and HAS_SHAPELY:
-            assert shape is not None and mapping is not None
-            try:
-                geom = shape(geojson_input.get("geometry", geojson_input))
-                buffered = geom.buffer(radius_deg)
+
+        try:
+            if geojson_input:
+                geom_dict = geojson_input.get("geometry", geojson_input) if isinstance(geojson_input, dict) else geojson_input
+                buffered = geodesic_buffer(geom_dict, radius_m)
                 return {
                     "geojson": {
                         "type": "Feature",
-                        "geometry": mapping(buffered),
+                        "geometry": buffered,
                         "properties": {"buffer_meters": radius_m},
                     }
                 }
-            except Exception as e:
-                return {"error": str(e)}
 
-        lat = args.get("lat")
-        lng = args.get("lng")
-        if lat is None or lng is None:
-            return {"error": "Must provide either 'geojson' or both 'lat' and 'lng'"}
-        steps = 64
-        coords = []
-        for i in range(steps + 1):
-            angle = (i / steps) * 2 * math.pi
-            dx = radius_deg * math.cos(angle) / math.cos(math.radians(lat))
-            dy = radius_deg * math.sin(angle)
-            coords.append([round(lng + dx, 6), round(lat + dy, 6)])
-
-        return {
-            "geojson": {
-                "type": "Feature",
-                "geometry": {"type": "Polygon", "coordinates": [coords]},
-                "properties": {"center": [lng, lat], "buffer_meters": radius_m},
+            lat = args.get("lat")
+            lng = args.get("lng")
+            if lat is None or lng is None:
+                return {"error": "Must provide either 'geojson' or both 'lat' and 'lng'"}
+            buffered = geodesic_buffer({"type": "Point", "coordinates": [lng, lat]}, radius_m)
+            return {
+                "geojson": {
+                    "type": "Feature",
+                    "geometry": buffered,
+                    "properties": {"center": [lng, lat], "buffer_meters": radius_m},
+                }
             }
-        }
+        except Exception as e:
+            return {"error": str(e)}
 
     def _centroid(self, args: dict) -> dict:
         geojson = args.get("geojson", {})
@@ -222,37 +224,20 @@ class GISServer:
         return {"lat": round(avg_lat, 6), "lng": round(avg_lng, 6)}
 
     def _area(self, args: dict) -> dict:
-        polygon = args.get("polygon", [])
-        if len(polygon) < 3:
-            return {"error": "Need at least 3 coordinate pairs"}
+        polygon = args.get("polygon")
+        geojson_input = args.get("geojson")
 
-        R = 6371000.0
-        n = len(polygon)
-        area = 0.0
-        perimeter = 0.0
-
-        for i in range(n):
-            j = (i + 1) % n
-            xi = math.radians(polygon[i][0]) * R * math.cos(math.radians(polygon[i][1]))
-            yi = math.radians(polygon[i][1]) * R
-            xj = math.radians(polygon[j][0]) * R * math.cos(math.radians(polygon[j][1]))
-            yj = math.radians(polygon[j][1]) * R
-            area += xi * yj - xj * yi
-
-            dlat = math.radians(polygon[j][1] - polygon[i][1])
-            dlon = math.radians(polygon[j][0] - polygon[i][0])
-            a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(polygon[i][1])) * math.cos(math.radians(polygon[j][1])) * math.sin(dlon / 2) ** 2
-            perimeter += R * 2 * math.asin(math.sqrt(a))
-
-        area_m2 = abs(area) / 2
-        return {
-            "area_m2": round(area_m2, 1),
-            "area_hectares": round(area_m2 / 10000, 4),
-            "area_km2": round(area_m2 / 1e6, 6),
-            "area_acres": round(area_m2 / 4046.86, 4),
-            "perimeter_m": round(perimeter, 1),
-            "perimeter_km": round(perimeter / 1000, 4),
-        }
+        try:
+            if geojson_input:
+                geom_dict = geojson_input.get("geometry", geojson_input) if isinstance(geojson_input, dict) else geojson_input
+                return area_breakdown(geom_dict)
+            if polygon:
+                if len(polygon) < 3:
+                    return {"error": "Need at least 3 coordinate pairs"}
+                return area_breakdown(polygon)
+            return {"error": "Provide either 'polygon' (ring) or 'geojson'"}
+        except Exception as e:
+            return {"error": str(e)}
 
     def _convex_hull(self, args: dict) -> dict:
         points = args.get("points", [])

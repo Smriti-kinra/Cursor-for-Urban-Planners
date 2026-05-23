@@ -20,6 +20,7 @@ from pathlib import Path
 import httpx
 
 from llm.base import ToolDeclaration
+from tools.geo import area_breakdown
 
 
 def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -29,25 +30,12 @@ def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
-def _shoelace_area_m2(coords: list) -> float:
-    n = len(coords)
-    if n < 3:
-        return 0.0
-    R = 6371000.0
-    area = 0.0
-    for i in range(n):
-        j = (i + 1) % n
-        xi = math.radians(coords[i][0]) * R * math.cos(math.radians(coords[i][1]))
-        yi = math.radians(coords[i][1]) * R
-        xj = math.radians(coords[j][0]) * R * math.cos(math.radians(coords[j][1]))
-        yj = math.radians(coords[j][1]) * R
-        area += xi * yj - xj * yi
-    return abs(area) / 2
-
-
 class UtilityServer:
     description = "Cross-cutting utility tools (search, geocoding, measurements, artifacts)"
-    tool_names = {"web_search", "geocode", "measure_distance", "measure_area", "create_artifact"}
+    tool_names = {
+        "web_search", "geocode", "measure_distance", "measure_area",
+        "create_artifact", "list_artifacts", "get_artifact",
+    }
 
     def __init__(self, db_path: Path):
         self._db_path = db_path
@@ -89,7 +77,10 @@ class UtilityServer:
             ),
             ToolDeclaration(
                 name="measure_area",
-                description="Calculate the area of a polygon (m², hectares, km², acres)",
+                description=(
+                    "Calculate geodesic area + perimeter of a polygon (m², hectares, km², acres). "
+                    "Handles holes and MultiPolygons via the WGS84 ellipsoid."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -98,8 +89,11 @@ class UtilityServer:
                             "description": "Array of [longitude, latitude] pairs forming the polygon",
                             "items": {"type": "array", "items": {"type": "number"}},
                         },
+                        "geojson": {
+                            "type": "object",
+                            "description": "Alternative: full GeoJSON Feature/geometry — required for polygons with holes or MultiPolygons.",
+                        },
                     },
-                    "required": ["polygon"],
                 },
             ),
             ToolDeclaration(
@@ -115,6 +109,38 @@ class UtilityServer:
                     "required": ["title", "content", "artifact_type"],
                 },
             ),
+            ToolDeclaration(
+                name="list_artifacts",
+                description=(
+                    "List previously saved artifacts. Returns id, title, artifact_type, "
+                    "created_at, updated_at, and a short content preview. Use this to "
+                    "reference or extend prior analyses."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "artifact_type": {
+                            "type": "string",
+                            "description": "Optional filter by type (note, analysis, report, sketch).",
+                        },
+                        "limit": {
+                            "type": "number",
+                            "description": "Max number of artifacts to return (default 20).",
+                        },
+                    },
+                },
+            ),
+            ToolDeclaration(
+                name="get_artifact",
+                description="Read the full content of a saved artifact by id.",
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "id": {"type": "number", "description": "Artifact id"},
+                    },
+                    "required": ["id"],
+                },
+            ),
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
@@ -125,9 +151,13 @@ class UtilityServer:
         if tool_name == "measure_distance":
             return self._measure_distance(args.get("points", []))
         if tool_name == "measure_area":
-            return self._measure_area(args.get("polygon", []))
+            return self._measure_area(args)
         if tool_name == "create_artifact":
             return self._create_artifact(args)
+        if tool_name == "list_artifacts":
+            return self._list_artifacts(args)
+        if tool_name == "get_artifact":
+            return self._get_artifact(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _web_search(self, query: str) -> dict:
@@ -175,20 +205,27 @@ class UtilityServer:
             "distance_meters": round(total_km * 1000, 1),
         }
 
-    def _measure_area(self, polygon: list) -> dict:
-        if len(polygon) < 3:
-            return {"error": "Need at least 3 points"}
-        area_m2 = _shoelace_area_m2(polygon)
-        return {
-            "area_m2": round(area_m2, 1),
-            "area_hectares": round(area_m2 / 10000, 4),
-            "area_km2": round(area_m2 / 1e6, 6),
-            "area_acres": round(area_m2 / 4046.86, 4),
-        }
+    def _measure_area(self, args: dict) -> dict:
+        polygon = args.get("polygon")
+        geojson_input = args.get("geojson")
+        try:
+            if geojson_input:
+                geom_dict = (
+                    geojson_input.get("geometry", geojson_input)
+                    if isinstance(geojson_input, dict) else geojson_input
+                )
+                return area_breakdown(geom_dict)
+            if polygon:
+                if len(polygon) < 3:
+                    return {"error": "Need at least 3 coordinate pairs"}
+                return area_breakdown(polygon)
+            return {"error": "Provide either 'polygon' (ring) or 'geojson'"}
+        except Exception as e:
+            return {"error": str(e)}
 
     def _create_artifact(self, args: dict) -> dict:
         try:
-            conn = sqlite3.connect(str(self._db_path))
+            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
             cursor = conn.execute(
                 "INSERT INTO artifacts (title, content, artifact_type) VALUES (?, ?, ?)",
                 (args.get("title", "Untitled"), args.get("content", ""), args.get("artifact_type", "note")),
@@ -197,5 +234,60 @@ class UtilityServer:
             artifact_id = cursor.lastrowid
             conn.close()
             return {"status": "created", "id": artifact_id}
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _list_artifacts(self, args: dict) -> dict:
+        try:
+            limit = int(args.get("limit", 20))
+            limit = max(1, min(limit, 100))
+            artifact_type = args.get("artifact_type")
+            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            conn.row_factory = sqlite3.Row
+            if artifact_type:
+                rows = conn.execute(
+                    "SELECT id, title, artifact_type, content, created_at, updated_at "
+                    "FROM artifacts WHERE artifact_type = ? "
+                    "ORDER BY updated_at DESC LIMIT ?",
+                    (artifact_type, limit),
+                ).fetchall()
+            else:
+                rows = conn.execute(
+                    "SELECT id, title, artifact_type, content, created_at, updated_at "
+                    "FROM artifacts ORDER BY updated_at DESC LIMIT ?",
+                    (limit,),
+                ).fetchall()
+            conn.close()
+            return {
+                "artifacts": [
+                    {
+                        "id": r["id"],
+                        "title": r["title"],
+                        "artifact_type": r["artifact_type"],
+                        "preview": (r["content"] or "")[:200],
+                        "created_at": r["created_at"],
+                        "updated_at": r["updated_at"],
+                    }
+                    for r in rows
+                ],
+                "count": len(rows),
+            }
+        except Exception as e:
+            return {"error": str(e)}
+
+    def _get_artifact(self, args: dict) -> dict:
+        try:
+            artifact_id = int(args.get("id"))
+            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            conn.row_factory = sqlite3.Row
+            row = conn.execute(
+                "SELECT id, title, artifact_type, content, created_at, updated_at "
+                "FROM artifacts WHERE id = ?",
+                (artifact_id,),
+            ).fetchone()
+            conn.close()
+            if not row:
+                return {"error": f"Artifact {artifact_id} not found"}
+            return dict(row)
         except Exception as e:
             return {"error": str(e)}
