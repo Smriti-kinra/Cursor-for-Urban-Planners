@@ -1,8 +1,8 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
-import { Artifact } from '../types'
+import { Artifact, ChatMessage, MapContext } from '../types'
 import './ArtifactsPanel.css'
 
 const API_BASE = 'http://localhost:8765/api/artifacts'
@@ -15,9 +15,11 @@ interface ArtifactPreview extends Omit<Artifact, 'content'> {
 interface ArtifactsPanelProps {
   revision?: number
   onAddToMap: (geojson: object, name: string) => void
+  chatHistory?: ChatMessage[]
+  mapContext?: MapContext
 }
 
-export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelProps) {
+export default function ArtifactsPanel({ revision, onAddToMap, chatHistory = [], mapContext }: ArtifactsPanelProps) {
   const [artifacts, setArtifacts] = useState<ArtifactPreview[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [fullArtifact, setFullArtifact] = useState<Artifact | null>(null)
@@ -36,6 +38,14 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
   const [editingContent, setEditingContent] = useState(false)
   const [editContentValue, setEditContentValue] = useState('')
 
+  // Report generation state
+  type ReportPhase = 'idle' | 'running' | 'done' | 'error'
+  const [reportPhase, setReportPhase] = useState<ReportPhase>('idle')
+  const [reportSteps, setReportSteps] = useState<string[]>([])
+  const [reportMarkdown, setReportMarkdown] = useState('')
+  const [reportError, setReportError] = useState('')
+  const reportAbortRef = useRef<AbortController | null>(null)
+
   const fetchArtifacts = useCallback(async () => {
     try {
       const res = await fetch(API_BASE)
@@ -47,6 +57,158 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
       /* backend may not be available */
     }
   }, [])
+
+  const generateReport = useCallback(async () => {
+    setReportPhase('running')
+    setReportSteps([])
+    setReportMarkdown('')
+    setReportError('')
+
+    const controller = new AbortController()
+    reportAbortRef.current = controller
+
+    let artifactsContext: object[] = []
+    try {
+      const res = await fetch('http://localhost:8765/api/artifacts')
+      if (res.ok) artifactsContext = await res.json()
+    } catch { /* ignore */ }
+
+    try {
+      const res = await fetch('http://localhost:8765/api/reports/stream', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          chat_history: chatHistory.map((m) => ({ role: m.role, content: m.content })),
+          map_context: mapContext ?? null,
+          artifacts: artifactsContext,
+        }),
+        signal: controller.signal,
+      })
+
+      if (!res.ok || !res.body) {
+        setReportError('Backend returned an error. Is the server running?')
+        setReportPhase('error')
+        return
+      }
+
+      const reader = res.body.getReader()
+      const decoder = new TextDecoder()
+      let buffer = ''
+
+      while (true) {
+        const { done, value } = await reader.read()
+        if (done) break
+        buffer += decoder.decode(value, { stream: true })
+
+        const lines = buffer.split('\n')
+        buffer = lines.pop() ?? ''
+
+        let currentEvent = ''
+        for (const line of lines) {
+          if (line.startsWith('event: ')) {
+            currentEvent = line.slice(7).trim()
+          } else if (line.startsWith('data: ')) {
+            const raw = line.slice(6).trim()
+            try {
+              const payload = JSON.parse(raw)
+              if (currentEvent === 'tool_call') {
+                const label =
+                  payload.action === 'search'
+                    ? `Searching: ${payload.query}`
+                    : `Opening: ${payload.url ?? payload.query ?? ''}`
+                setReportSteps((prev) => [...prev, label])
+              } else if (currentEvent === 'message') {
+                setReportMarkdown(payload.markdown ?? '')
+                setReportPhase('done')
+              } else if (currentEvent === 'error') {
+                setReportError(payload.detail ?? 'Unknown error')
+                setReportPhase('error')
+              } else if (currentEvent === 'done') {
+                if (reportPhase !== 'done') setReportPhase('done')
+              }
+            } catch { /* malformed SSE line */ }
+            currentEvent = ''
+          }
+        }
+      }
+    } catch (err: unknown) {
+      if ((err as { name?: string }).name !== 'AbortError') {
+        setReportError(String(err))
+        setReportPhase('error')
+      }
+    }
+  }, [chatHistory, mapContext])
+
+  const cancelReport = useCallback(() => {
+    reportAbortRef.current?.abort()
+    setReportPhase('idle')
+    setReportSteps([])
+  }, [])
+
+  const downloadMd = useCallback(() => {
+    const blob = new Blob([reportMarkdown], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `urban-planning-report-${Date.now()}.md`
+    a.click()
+    URL.revokeObjectURL(url)
+  }, [reportMarkdown])
+
+  const downloadPdf = useCallback(async () => {
+    const { jsPDF } = await import('jspdf')
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const margin = 48
+    const maxLineWidth = pageWidth - margin * 2
+    let y = margin
+
+    const addPage = () => {
+      doc.addPage()
+      y = margin
+    }
+
+    const checkY = (needed: number) => {
+      if (y + needed > doc.internal.pageSize.getHeight() - margin) addPage()
+    }
+
+    for (const rawLine of reportMarkdown.split('\n')) {
+      const line = rawLine.trimEnd()
+
+      if (line.startsWith('# ')) {
+        checkY(28)
+        doc.setFontSize(20)
+        doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(2), margin, y)
+        y += 28
+      } else if (line.startsWith('## ')) {
+        checkY(22)
+        doc.setFontSize(16)
+        doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(3), margin, y)
+        y += 22
+      } else if (line.startsWith('### ')) {
+        checkY(18)
+        doc.setFontSize(13)
+        doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(4), margin, y)
+        y += 18
+      } else if (line === '') {
+        y += 8
+      } else {
+        doc.setFontSize(11)
+        doc.setFont('helvetica', 'normal')
+        const wrapped = doc.splitTextToSize(line.replace(/^\s*[-*]\s+/, '• '), maxLineWidth)
+        for (const wl of wrapped) {
+          checkY(14)
+          doc.text(wl, margin, y)
+          y += 14
+        }
+      }
+    }
+
+    doc.save(`urban-planning-report-${Date.now()}.pdf`)
+  }, [reportMarkdown])
 
   useEffect(() => {
     fetchArtifacts()
@@ -332,6 +494,52 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
 
   return (
     <div className="artifacts-panel">
+      {/* Report generation section */}
+      <div className="report-section">
+        {reportPhase === 'idle' && (
+          <button className="generate-report-btn" onClick={generateReport}>
+            Generate Report
+          </button>
+        )}
+
+        {reportPhase === 'running' && (
+          <div className="report-progress">
+            <div className="report-progress-header">
+              <span className="report-spinner">⟳</span>
+              <span>Researching…</span>
+              <button className="cancel-report-btn" onClick={cancelReport}>Cancel</button>
+            </div>
+            <div className="report-steps">
+              {reportSteps.map((step, i) => (
+                <div key={i} className={`report-step ${i < reportSteps.length - 1 ? 'done' : 'active'}`}>
+                  {i < reportSteps.length - 1 ? '✓' : '⟳'} {step}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {reportPhase === 'done' && (
+          <div className="report-done">
+            <span className="report-done-label">✓ Report ready</span>
+            <div className="report-download-btns">
+              <button className="download-md-btn" onClick={downloadMd}>Download .md</button>
+              <button className="download-pdf-btn" onClick={downloadPdf}>Download PDF</button>
+            </div>
+            <button className="report-reset-btn" onClick={() => { setReportPhase('idle'); setReportMarkdown(''); setReportSteps([]); }}>
+              Generate new report
+            </button>
+          </div>
+        )}
+
+        {reportPhase === 'error' && (
+          <div className="report-error">
+            <span>Error: {reportError}</span>
+            <button className="report-reset-btn" onClick={() => setReportPhase('idle')}>Try again</button>
+          </div>
+        )}
+      </div>
+
       <div className="artifacts-toolbar">
         <button className="new-artifact-btn" onClick={() => setShowForm(!showForm)}>
           {showForm ? 'Cancel' : '+ New'}
