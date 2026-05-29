@@ -1178,7 +1178,15 @@ function App() {
             </ErrorBoundary>
           ) : (
             <ErrorBoundary label="Artifacts">
-              <ArtifactsPanel revision={artifactsRevision} />
+              <ArtifactsPanel
+                revision={artifactsRevision}
+                onAddToMap={(geojson, name) => {
+                  setMapActions((prev) => [
+                    ...prev,
+                    { type: 'add_geojson', payload: { geojson: geojson as FeatureCollection, name } },
+                  ])
+                }}
+              />
             </ErrorBoundary>
           )}
         </aside>

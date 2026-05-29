@@ -191,3 +191,173 @@
   font-size: 11px;
   color: var(--text-muted);
 }
+
+/* ── Title inline edit ── */
+.artifact-title-input {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--accent);
+  color: var(--text-primary);
+  padding: 2px 6px;
+  border-radius: 4px;
+  font-size: 13px;
+  font-family: inherit;
+  outline: none;
+}
+
+.edit-title-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 13px;
+  cursor: pointer;
+  padding: 0 3px;
+  line-height: 1;
+  transition: color 0.15s;
+}
+
+.edit-title-btn:hover {
+  color: var(--accent);
+}
+
+/* ── Format-aware detail renderers ── */
+
+.artifact-detail-markdown {
+  font-size: 12px;
+  line-height: 1.6;
+  color: var(--text-secondary);
+}
+
+.artifact-detail-markdown p {
+  margin: 0 0 6px;
+}
+
+.artifact-detail-markdown h1,
+.artifact-detail-markdown h2,
+.artifact-detail-markdown h3 {
+  margin: 8px 0 4px;
+  color: var(--text-primary);
+}
+
+.artifact-detail-markdown pre {
+  background: var(--bg-primary);
+  border-radius: 4px;
+  padding: 8px;
+  overflow-x: auto;
+  font-size: 11px;
+}
+
+.artifact-detail-markdown code {
+  background: var(--bg-primary);
+  padding: 1px 4px;
+  border-radius: 3px;
+  font-size: 11px;
+}
+
+.artifact-table-wrapper {
+  overflow-x: auto;
+  max-height: 300px;
+  overflow-y: auto;
+}
+
+.artifact-table {
+  border-collapse: collapse;
+  width: 100%;
+  font-size: 12px;
+}
+
+.artifact-table th,
+.artifact-table td {
+  border: 1px solid #333;
+  padding: 4px 8px;
+  text-align: left;
+}
+
+.artifact-table th {
+  background: var(--bg-primary);
+  color: var(--text-primary);
+  font-weight: 600;
+}
+
+.artifact-table td {
+  color: var(--text-secondary);
+}
+
+.artifact-image-thumb {
+  max-width: 100%;
+  cursor: pointer;
+  border-radius: 4px;
+  display: block;
+}
+
+.artifact-geojson-summary {
+  font-size: 12px;
+  color: #aaa;
+  margin: 0 0 6px;
+}
+
+.artifact-actions {
+  display: flex;
+  gap: 6px;
+  margin-top: 8px;
+  flex-wrap: wrap;
+  align-items: center;
+}
+
+.artifact-edit-area {
+  width: 100%;
+  min-height: 100px;
+  background: #1a1a1a;
+  color: #e0e0e0;
+  border: 1px solid #444;
+  padding: 6px;
+  font-size: 12px;
+  resize: vertical;
+  font-family: inherit;
+  border-radius: 4px;
+  box-sizing: border-box;
+}
+
+.edit-btn,
+.cancel-btn,
+.add-to-map-btn {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  transition: background 0.15s;
+}
+
+.edit-btn:hover,
+.cancel-btn:hover {
+  background: var(--bg-primary);
+}
+
+.add-to-map-btn {
+  background: rgba(137, 180, 250, 0.15);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.add-to-map-btn:hover {
+  background: rgba(137, 180, 250, 0.25);
+}
+
+.download-btn {
+  background: var(--bg-hover);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 4px 10px;
+  border-radius: 4px;
+  font-size: 11px;
+  cursor: pointer;
+  text-decoration: none;
+  transition: background 0.15s;
+}
+
+.download-btn:hover {
+  background: var(--bg-primary);
+}

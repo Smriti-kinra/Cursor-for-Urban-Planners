@@ -145,6 +145,18 @@ export interface ChatErrorMessage {
 
 export type MapActionType = MapAction['type']
 
+export interface Artifact {
+  id: number
+  title: string
+  content: string
+  artifact_type: string
+  format: 'markdown' | 'table' | 'image' | 'geojson'
+  file_path: string | null
+  meta: string | null   // JSON string
+  created_at: string
+  updated_at: string
+}
+
 export interface ProjectData {
   version: number
   mapState: MapViewState
