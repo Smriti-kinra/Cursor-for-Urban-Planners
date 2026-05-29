@@ -1252,6 +1252,8 @@ function App() {
             <ErrorBoundary label="Artifacts">
               <ArtifactsPanel
                 revision={artifactsRevision}
+                chatHistory={activeConversation?.messages ?? []}
+                mapContext={mapContext}
                 onAddToMap={(geojson, name) => {
                   setMapActions((prev) => [
                     ...prev,
