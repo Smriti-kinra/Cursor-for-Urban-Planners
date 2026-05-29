@@ -381,6 +381,75 @@ function App() {
     pdf.save(`map-report-${Date.now()}.pdf`)
   }, [])
 
+  const handleSavePngToArtifact = useCallback(async (title: string) => {
+    const canvas = mapViewRef.current?.getCanvas()
+    if (!canvas) return
+    canvas.toBlob(async (blob) => {
+      if (!blob) return
+      const form = new FormData()
+      form.append('title', title)
+      form.append('artifact_type', 'sketch')
+      form.append('format', 'image')
+      form.append('content', '')
+      form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.png`)
+      try {
+        await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
+        setArtifactsRevision((n) => n + 1)
+      } catch {
+        /* backend unavailable */
+      }
+    })
+  }, [])
+
+  const handleSavePdfToArtifact = useCallback(async (title: string) => {
+    const canvas = mapViewRef.current?.getCanvas()
+    if (!canvas) return
+    const { jsPDF } = await import('jspdf')
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const img = canvas.toDataURL('image/png')
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const margin = 40
+    const titleSpace = 30
+    const maxW = pageW - margin * 2
+    const maxH = pageH - margin - titleSpace - margin
+    const dpr = window.devicePixelRatio || 1
+    const logicalW = canvas.width / dpr
+    const logicalH = canvas.height / dpr
+    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
+    let drawW = maxW
+    let drawH = drawW / aspect
+    if (drawH > maxH) { drawH = maxH; drawW = drawH * aspect }
+    const drawX = (pageW - drawW) / 2
+    const drawY = margin + titleSpace
+    pdf.setFontSize(14)
+    pdf.text(title, margin, margin + 18)
+    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
+    const footer = `Viewport export — ${new Date().toISOString()}`
+    pdf.setFontSize(9)
+    pdf.text(footer, margin, pageH - 18)
+    const pdfBytes = pdf.output('arraybuffer')
+    const blob = new Blob([pdfBytes], { type: 'application/pdf' })
+    const form = new FormData()
+    form.append('title', title)
+    form.append('artifact_type', 'sketch')
+    form.append('format', 'image')
+    form.append('content', '')
+    form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.pdf`)
+    try {
+      await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
+      setArtifactsRevision((n) => n + 1)
+    } catch {
+      /* backend unavailable */
+    }
+  }, [])
+
+  const suggestExportTitle = useCallback((): string => {
+    const topLayer = layers.length > 0 ? layers[layers.length - 1].name : null
+    const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
+    return topLayer ? `${topLayer} — ${date}` : `Map export — ${date}`
+  }, [layers])
+
   const handleExportLayerFile = useCallback((layerId: string) => {
     const layer = layers.find((l) => l.id === layerId)
     if (!layer?.data) return
@@ -1103,6 +1172,9 @@ function App() {
               onExportClippedRegion={(name) => void clipLayersToBboxAndSave(name)}
               onPreviewBoundary={handlePreviewBoundary}
               onSaveByRegion={handleSaveByRegion}
+              onSavePngToArtifact={handleSavePngToArtifact}
+              onSavePdfToArtifact={handleSavePdfToArtifact}
+              onSuggestExportTitle={suggestExportTitle}
             />
           )}
           {activeLeftTab === 'zoning' && <ZoningPanel />}

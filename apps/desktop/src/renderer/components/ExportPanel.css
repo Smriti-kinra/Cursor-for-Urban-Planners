@@ -158,3 +158,15 @@
   display: flex;
   gap: 6px;
 }
+
+.export-artifact-save {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-bottom: 12px;
+}
+
+.export-artifact-btns {
+  display: flex;
+  gap: 6px;
+}

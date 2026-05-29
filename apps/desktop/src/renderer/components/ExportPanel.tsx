@@ -19,6 +19,9 @@ interface ExportPanelProps {
   onExportClippedRegion: (name: string) => void
   onPreviewBoundary: (geom: BoundaryGeometry | null) => void
   onSaveByRegion: (displayName: string, boundaryGeom: BoundaryGeometry) => void
+  onSavePngToArtifact: (title: string) => void
+  onSavePdfToArtifact: (title: string) => void
+  onSuggestExportTitle: () => string
 }
 
 export default function ExportPanel({
@@ -30,8 +33,12 @@ export default function ExportPanel({
   onExportClippedRegion,
   onPreviewBoundary,
   onSaveByRegion,
+  onSavePngToArtifact,
+  onSavePdfToArtifact,
+  onSuggestExportTitle,
 }: ExportPanelProps) {
   const [regionQuery, setRegionQuery] = useState('')
+  const [artifactTitle, setArtifactTitle] = useState('')
   const [regionResults, setRegionResults] = useState<NominatimResult[]>([])
   const [selectedRegion, setSelectedRegion] = useState<NominatimResult | null>(null)
   const [regionSearching, setRegionSearching] = useState(false)
@@ -95,6 +102,42 @@ export default function ExportPanel({
         <button type="button" className="export-btn" onClick={onExportPdf}>
           Map + title as PDF
         </button>
+      </div>
+
+      <h4 className="export-sub">Save to artifacts</h4>
+      <div className="export-artifact-save">
+        <input
+          type="text"
+          className="export-input"
+          placeholder="Artifact title"
+          value={artifactTitle}
+          onChange={(e) => setArtifactTitle(e.target.value)}
+        />
+        <button
+          type="button"
+          className="export-btn small"
+          onClick={() => setArtifactTitle(onSuggestExportTitle())}
+        >
+          Suggest name
+        </button>
+        <div className="export-artifact-btns">
+          <button
+            type="button"
+            className="export-btn primary"
+            disabled={!artifactTitle.trim()}
+            onClick={() => onSavePngToArtifact(artifactTitle.trim())}
+          >
+            Save PNG to artifacts
+          </button>
+          <button
+            type="button"
+            className="export-btn"
+            disabled={!artifactTitle.trim()}
+            onClick={() => onSavePdfToArtifact(artifactTitle.trim())}
+          >
+            Save PDF to artifacts
+          </button>
+        </div>
       </div>
 
       <h4 className="export-sub">Layers as GeoJSON</h4>
