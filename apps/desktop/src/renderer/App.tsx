@@ -4,6 +4,7 @@ import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from
 import MapView, { type MapViewHandle } from './components/MapView'
 import FileTree from './components/FileTree'
 import ChatPanel from './components/ChatPanel'
+import StreetViewDialog from './components/StreetViewDialog'
 import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
 import BookmarkPanel from './components/BookmarkPanel'
@@ -50,6 +51,8 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [mapActions, setMapActions] = useState<MapAction[]>([])
+  const [streetViewTarget, setStreetViewTarget] = useState<{ lng: number; lat: number } | null>(null)
+  const [injectedMessage, setInjectedMessage] = useState<{ text: string; nonce: number } | null>(null)
   const [bookmarks, setBookmarks] = useState<MapBookmark[]>([])
   const [mapBounds, setMapBounds] = useState<{
     west: number
@@ -787,6 +790,56 @@ function App() {
     setMapActions((prev) => [...prev, action])
   }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom])
 
+  // ── Right-click map actions ──
+
+  const handleRightClickAddMarker = useCallback(
+    (lng: number, lat: number) => {
+      // Place immediately with a coordinate label, then upgrade to the
+      // reverse-geocoded address when it resolves. Never block the pin.
+      appendMarkersToLayer([{ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}` }])
+      fetch(`http://localhost:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`)
+        .then((r) => r.json())
+        .then((d: { display_name?: string | null }) => {
+          if (!d?.display_name) return
+          setLayers((prev) =>
+            prev.map((l) => {
+              if (l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()) return l
+              const features = [...(l.data?.features || [])]
+              // Update the most-recently-added point matching these coords.
+              for (let i = features.length - 1; i >= 0; i--) {
+                const g = features[i].geometry
+                if (g?.type === 'Point' && g.coordinates[0] === lng && g.coordinates[1] === lat) {
+                  features[i] = {
+                    ...features[i],
+                    properties: { ...features[i].properties, label: d.display_name },
+                  }
+                  break
+                }
+              }
+              return { ...l, data: { type: 'FeatureCollection', features } as FeatureCollection }
+            }),
+          )
+        })
+        .catch(() => { /* keep coordinate label */ })
+    },
+    [appendMarkersToLayer],
+  )
+
+  const handleRightClickStreetView = useCallback((lng: number, lat: number) => {
+    setStreetViewTarget({ lng, lat })
+  }, [])
+
+  const handleRightClickAskChat = useCallback(
+    (lng: number, lat: number) => {
+      setActiveRightTab('chat')
+      const text =
+        `Tell me everything you can about this location (${lat.toFixed(5)}, ${lng.toFixed(5)}): ` +
+        `the address/neighborhood, nearby amenities, demographics, weather, and any notable features. Use your tools.`
+      setInjectedMessage((prev) => ({ text, nonce: (prev?.nonce || 0) + 1 }))
+    },
+    [],
+  )
+
   // ── Map context for AI ──
 
   const mapContext: MapContext = useMemo(
@@ -1203,6 +1256,9 @@ function App() {
                   onBasemapChange={setBasemap}
                   onActionsProcessed={() => setMapActions([])}
                   onLayerStyleChange={handleLayerStyleChange}
+                  onAddMarker={handleRightClickAddMarker}
+                  onOpenStreetView={handleRightClickStreetView}
+                  onAskChat={handleRightClickAskChat}
                 />
               </ErrorBoundary>
             </div>
@@ -1246,6 +1302,7 @@ function App() {
                 mapContext={mapContext}
                 onMapAction={handleMapAction}
                 documentImage={appMode === 'document' ? documentImage : null}
+                injectedMessage={injectedMessage}
               />
             </ErrorBoundary>
           ) : (
@@ -1263,6 +1320,7 @@ function App() {
           )}
         </aside>
       </div>
+      <StreetViewDialog target={streetViewTarget} onClose={() => setStreetViewTarget(null)} />
     </div>
   )
 }
