@@ -1,6 +1,5 @@
 import { useEffect, useRef, useState } from 'react'
 import 'pannellum/build/pannellum.css'
-// @ts-expect-error pannellum ships no types
 import 'pannellum/build/pannellum.js'
 import './StreetViewDialog.css'
 
