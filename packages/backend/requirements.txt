@@ -10,3 +10,5 @@ pyproj>=3.6,<4
 duckdb>=1.1,<2
 mcp>=1.0,<2
 Pillow>=10.0,<12
+python-multipart>=0.0.9,<1
+streetlevel>=0.10,<1
