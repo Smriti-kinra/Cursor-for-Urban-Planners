@@ -136,7 +136,7 @@ async def update_artifact(artifact_id: int, update: ArtifactUpdate):
     if update.title is not None:
         fields.append("title = ?")
         values.append(update.title)
-    if update.content is not None:
+    if update.content is not None and existing["format"] != "image":
         fields.append("content = ?")
         values.append(update.content)
     if update.artifact_type is not None:
