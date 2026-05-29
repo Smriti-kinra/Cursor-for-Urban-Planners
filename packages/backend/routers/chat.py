@@ -103,7 +103,9 @@ SYSTEM_PROMPT = (
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
     "- Demographics: get_demographics\n"
     "- Artifacts: create_artifact (format: markdown/table/geojson), list_artifacts, get_artifact\n"
-    "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n\n"
+    "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n"
+    "- Reports: generate_report — generates a deep research urban planning report using web search. "
+    "Use when user asks to generate/create/write a report or planning analysis.\n\n"
     "MAP CONTEXT:\n"
     "The current map state is appended to every message. It includes:\n"
     "- bounds: current viewport (west,south,east,north) when available.\n"
@@ -144,6 +146,178 @@ SYSTEM_PROMPT = (
     "places_autocomplete first to get candidate place_ids, then place_details on the best match "
     "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster."
 )
+
+# ── Deep research helpers ──────────────────────────────────────────────────────
+
+_RESEARCH_SYSTEM = (
+    "You are a professional urban planning report writer. "
+    "Generate a well-structured, data-driven report in clean Markdown. "
+    "Use the provided conversation, map data, and artifacts as your primary source. "
+    "Enrich your analysis with publicly available information about the location. "
+    "Respond ONLY with the Markdown report. Always respond in English."
+)
+
+_RESEARCH_REPORT_TEMPLATE = """Generate a comprehensive urban planning report based on the data below.
+
+Structure the report with these sections:
+
+# Urban Planning Report
+
+## Executive Summary
+(2-3 paragraph overview of the planning discussion, location, and key findings)
+
+## Site Analysis
+(Geographic context, existing conditions, basemap and layer data, drawn features, placed markers)
+
+## Key Findings
+(Main points from the conversation and analysis, enriched with current public data)
+
+## Recommendations
+(Actionable next steps based on the discussion and research)
+
+## Appendix
+(Data sources, layer descriptions, methodology notes, web sources consulted)
+
+Be specific and professional. Reference the actual map data, drawn geometries, and conversation details provided.
+
+---
+"""
+
+
+def _build_research_prompt(messages: list[dict], map_context: dict | None) -> str:
+    """Build the deep research prompt from conversation history and map context."""
+    parts = [_RESEARCH_REPORT_TEMPLATE]
+
+    if map_context:
+        center = map_context.get("center", [])
+        zoom = map_context.get("zoom", "")
+        bounds = map_context.get("bounds", {})
+        basemap = map_context.get("basemap", "")
+        bookmarks = map_context.get("bookmarks", [])
+        layers = map_context.get("layers", [])
+
+        loc_lines = [f"**Center:** {center}", f"**Zoom:** {zoom}", f"**Basemap:** {basemap}"]
+        if bounds:
+            loc_lines.append(
+                f"**Bounds:** W={bounds.get('west')}, S={bounds.get('south')}, "
+                f"E={bounds.get('east')}, N={bounds.get('north')}"
+            )
+        parts.append("## Map Context\n" + "\n".join(loc_lines))
+
+        if bookmarks:
+            bm_lines = [
+                f"- {b.get('name', '')}: bounds W={b.get('west')}, S={b.get('south')}, "
+                f"E={b.get('east')}, N={b.get('north')}"
+                for b in bookmarks
+            ]
+            parts.append("### Bookmarks\n" + "\n".join(bm_lines))
+
+        if layers:
+            layer_lines = []
+            for layer in layers:
+                name = layer.get("name", "unnamed")
+                count = layer.get("featureCount", 0)
+                geom_types = ", ".join(layer.get("geometryTypes", []))
+                props = ", ".join(layer.get("properties", []))
+                visible = layer.get("visible", True)
+                line = f"- **{name}** ({count} features, {geom_types}, visible={visible})"
+                if props:
+                    line += f"\n  Properties: {props}"
+                geo = layer.get("geometry_data")
+                if geo:
+                    if isinstance(geo, list):
+                        line += f"\n  Coordinates: {json.dumps(geo)}"
+                    elif isinstance(geo, dict) and "bbox" in geo:
+                        line += f"\n  Bounding box: {geo['bbox']}"
+                layer_lines.append(line)
+            parts.append("### Layers\n" + "\n".join(layer_lines))
+
+    # Include conversation (skip system and tool messages)
+    conv_lines = []
+    for m in messages:
+        role = m.get("role")
+        content = m.get("content")
+        if role == "user" and isinstance(content, str) and content.strip():
+            conv_lines.append(f"**User:** {content}")
+        elif role == "assistant" and isinstance(content, str) and content.strip():
+            conv_lines.append(f"**Assistant:** {content}")
+    if conv_lines:
+        parts.append("## Conversation\n" + "\n\n".join(conv_lines))
+
+    return "\n\n".join(parts)
+
+
+async def _run_deep_research(messages: list[dict], map_context: dict | None, ws: WebSocket) -> str:
+    """Run o4-mini-deep-research and stream progress back over the WebSocket.
+
+    Sends these WS message types:
+      research_start  — emitted once before the API call
+      research_step   — one per web search (query string)
+      research_report — final markdown text + citations list
+      research_done   — terminal signal
+
+    Returns a short result string for the tool message inserted into history.
+    """
+    await ws.send_text(json.dumps({"type": "research_start"}))
+
+    prompt = _build_research_prompt(messages, map_context)
+
+    try:
+        got_text = False
+        async with await _client.responses.create(
+            model="o4-mini-deep-research",
+            input=prompt,
+            instructions=_RESEARCH_SYSTEM,
+            tools=[{"type": "web_search_preview"}],
+            max_tool_calls=30,
+            stream=True,
+        ) as stream:
+            async for event in stream:
+                event_type = getattr(event, "type", None)
+
+                if event_type == "response.web_search_call.searching":
+                    query = getattr(event, "query", "") or ""
+                    if query:
+                        await ws.send_text(json.dumps({
+                            "type": "research_step",
+                            "query": query,
+                        }))
+
+                elif event_type == "response.output_text.done":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        got_text = True
+                        annotations = []
+                        for item in getattr(event, "annotations", None) or []:
+                            url = getattr(item, "url", None)
+                            title = getattr(item, "title", None)
+                            if url:
+                                annotations.append({"url": url, "title": title or url})
+                        await ws.send_text(json.dumps({
+                            "type": "research_report",
+                            "markdown": text,
+                            "citations": annotations,
+                        }))
+
+        if not got_text:
+            await ws.send_text(json.dumps({
+                "type": "error",
+                "code": "research_empty",
+                "message": "Deep research completed but produced no report text.",
+            }))
+            return json.dumps({"error": "No report text produced."})
+
+        await ws.send_text(json.dumps({"type": "research_done"}))
+        return json.dumps({"status": "report_generated"})
+
+    except Exception as exc:
+        await ws.send_text(json.dumps({
+            "type": "error",
+            "code": "research_error",
+            "message": str(exc),
+        }))
+        return json.dumps({"error": str(exc)})
+
 
 # ── Build OpenAI tool definitions ─────────────────────────────────────────────
 
@@ -273,6 +447,18 @@ def _build_tools() -> list[dict]:
         for decl in srv.get_declarations():
             tools.append(_decl_to_openai(decl.name, decl.description, decl.parameters))
 
+    # Deep research report generation
+    tools.append(_decl_to_openai(
+        "generate_report",
+        (
+            "Generate a comprehensive urban planning research report for the current project. "
+            "Use this when the user asks to generate a report, create a report, write a planning report, "
+            "or produce a deep research analysis. The report uses web search to enrich the analysis "
+            "with current public data. This takes several minutes."
+        ),
+        {"type": "object", "properties": {}, "required": []},
+    ))
+
     return tools
 
 
@@ -284,7 +470,16 @@ async def _send_action(ws: WebSocket, action: str, payload: dict) -> None:
     await ws.send_text(json.dumps({"type": "action", "action": action, "payload": payload}))
 
 
-async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
+async def _execute_tool(
+    name: str,
+    args: dict,
+    ws: WebSocket,
+    messages: list[dict] | None = None,
+    map_context: dict | None = None,
+) -> str:
+    if name == "generate_report":
+        return await _run_deep_research(messages or [], map_context, ws)
+
     # Map action tools → send directly to frontend
     if name in _ACTION_TOOLS:
         await _send_action(ws, name, args)
@@ -470,7 +665,12 @@ async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
 
 # ── Agentic loop ──────────────────────────────────────────────────────────────
 
-async def _run_agent(messages: list[dict], ws: WebSocket, tools: list[dict] | None = None) -> None:
+async def _run_agent(
+    messages: list[dict],
+    ws: WebSocket,
+    tools: list[dict] | None = None,
+    map_context: dict | None = None,
+) -> None:
     """Run the tool-calling loop until the model stops calling tools or errors."""
     if tools is None:
         tools = _TOOLS
@@ -566,7 +766,7 @@ async def _run_agent(messages: list[dict], ws: WebSocket, tools: list[dict] | No
                     "detail": args_error,
                 })
             else:
-                result_str = await _execute_tool(tool_name, args, ws)
+                result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -639,7 +839,7 @@ async def chat_websocket(websocket: WebSocket):
             full_messages = [{"role": "system", "content": system}] + messages
             full_messages.append(user_msg)
 
-            await _run_agent(full_messages, websocket, tools=tools)
+            await _run_agent(full_messages, websocket, tools=tools, map_context=map_context)
 
             # Persist exchange into history, but strip system + image data (keep history lean)
             new_history = []
