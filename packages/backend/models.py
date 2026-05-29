@@ -14,4 +14,4 @@ class ArtifactUpdate(BaseModel):
     title: Optional[str] = None
     content: Optional[str] = None
     artifact_type: Optional[str] = None
-    meta: Optional[Any] = None
+    meta: Optional[dict] = None

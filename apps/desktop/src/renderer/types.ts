@@ -158,7 +158,6 @@ export interface Artifact {
 }
 
 export interface ProjectData {
-  version: number
   mapState: MapViewState
   layers: Array<{
     name: string
@@ -170,7 +169,6 @@ export interface ProjectData {
     lineColor?: string
     opacity?: number
   }>
-  drawnFeatures: Feature[]
   conversations: Conversation[]
   activeConversationId: string | null
   chatHistory?: ChatMessage[]
@@ -202,10 +200,6 @@ export interface MapContext {
     properties: string[]
     visible: boolean
     geometry_data?: LayerGeometryData
-  }>
-  drawnFeatures: Array<{
-    type: string
-    coordinates?: unknown
   }>
   basemap: string
 }

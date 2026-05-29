@@ -851,7 +851,6 @@ function App() {
           ...(geometry_data ? { geometry_data } : {}),
         }
       }),
-      drawnFeatures: [],
       basemap,
     }),
     [mapViewState, mapBounds, bookmarks, layers, basemap],
@@ -940,7 +939,6 @@ function App() {
           fp.startsWith(wsPrefix) ? fp.slice(wsPrefix.length) : fp
 
         const projectData: ProjectData = {
-          version: 2,
           mapState: mapViewState,
           layers: layersSnapshot.map((l) => ({
             name: l.name,
@@ -951,7 +949,6 @@ function App() {
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
             ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
           })),
-          drawnFeatures: [],
           conversations,
           activeConversationId,
           basemap,

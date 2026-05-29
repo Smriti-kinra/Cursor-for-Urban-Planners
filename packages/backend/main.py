@@ -9,12 +9,14 @@ from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
 from routers import files, chat, artifacts, reports, geocode
+from tools import http as http_client
 
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     init_db()
     yield
+    await http_client.aclose()
 
 
 app = FastAPI(title="Cursor Urban Planners API", lifespan=lifespan)

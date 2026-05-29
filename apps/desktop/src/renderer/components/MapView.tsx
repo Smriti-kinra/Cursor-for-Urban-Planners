@@ -70,8 +70,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     const { tiles, attribution } = BASEMAPS[initBasemapRef.current] || BASEMAPS.street
 
-    console.log('[MapView] Creating map with basemap:', initBasemapRef.current)
-
     const map = new maplibregl.Map({
       container: containerRef.current,
       style: {
@@ -115,8 +113,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     mapRef.current = map
 
     map.on('load', () => {
-      console.log('[MapView] Map loaded. Style layers:', map.getStyle().layers.map((l) => l.id))
-
       setMapReady(true)
     })
 
@@ -133,8 +129,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
-
-    console.log('[MapView] syncLayers running, count:', layers.length)
 
     const desiredIds = new Set(layers.map((l) => l.id))
 
@@ -155,7 +149,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const fillOpacity = layer.opacity ?? 0.3
 
       if (!map.getSource(layer.id)) {
-        console.log('[MapView] Adding layer source:', layer.id, layer.name)
         map.addSource(layer.id, { type: 'geojson', data: layer.data })
         ownLayerIds.current.add(layer.id)
         layerRevisionRef.current.set(layer.id, layer.data)
@@ -226,8 +219,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
 
-        console.log('[MapView] Layer added. All layers now:', map.getStyle().layers.map((l) => l.id))
-
         try {
           const bbox = turf.bbox(layer.data) as [number, number, number, number]
           if (bbox.every((v) => isFinite(v))) {
@@ -286,8 +277,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (!map || !mapReady) return
     if (basemap === initBasemapRef.current && map.getSource('basemap')) return
 
-    console.log('[MapView] Switching basemap to:', basemap)
-
     const { tiles, attribution } = BASEMAPS[basemap] || BASEMAPS.street
 
     if (map.getLayer('basemap')) map.removeLayer('basemap')
@@ -311,7 +300,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
 
     initBasemapRef.current = basemap
-    console.log('[MapView] Basemap switched. Layers:', map.getStyle().layers.map((l) => l.id))
   }, [basemap, mapReady])
 
   useImperativeHandle(

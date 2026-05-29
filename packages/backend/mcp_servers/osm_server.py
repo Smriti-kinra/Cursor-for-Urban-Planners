@@ -12,6 +12,7 @@ import json as _json
 
 import httpx
 from llm.base import ToolDeclaration
+from tools import cache, http as http_client
 
 
 # Multiple Overpass mirrors. The main instance frequently rate-limits (429)
@@ -154,6 +155,36 @@ def _sanitize_osm_name(value) -> str:
 # on the map. Larger payloads freeze the renderer's main thread on JSON.parse.
 _OSM_MAX_FEATURES = 1000
 
+
+# Subset of ISO-3166-1: alpha-2 → alpha-3. Country codes not here fall back to
+# Nominatim+Overpass (which doesn't need ISO-3). Add more as users request them.
+_ISO2_TO_ISO3 = {
+    "AE": "ARE", "AF": "AFG", "AR": "ARG", "AT": "AUT", "AU": "AUS",
+    "BD": "BGD", "BE": "BEL", "BR": "BRA", "BT": "BTN", "CA": "CAN",
+    "CH": "CHE", "CL": "CHL", "CN": "CHN", "CO": "COL", "CZ": "CZE",
+    "DE": "DEU", "DK": "DNK", "EG": "EGY", "ES": "ESP", "ET": "ETH",
+    "FI": "FIN", "FR": "FRA", "GB": "GBR", "GH": "GHA", "GR": "GRC",
+    "ID": "IDN", "IE": "IRL", "IL": "ISR", "IN": "IND", "IQ": "IRQ",
+    "IR": "IRN", "IT": "ITA", "JP": "JPN", "KE": "KEN", "KH": "KHM",
+    "KR": "KOR", "LK": "LKA", "MA": "MAR", "MM": "MMR", "MX": "MEX",
+    "MY": "MYS", "NG": "NGA", "NL": "NLD", "NO": "NOR", "NP": "NPL",
+    "NZ": "NZL", "PE": "PER", "PH": "PHL", "PK": "PAK", "PL": "POL",
+    "PT": "PRT", "RO": "ROU", "RU": "RUS", "SA": "SAU", "SE": "SWE",
+    "SG": "SGP", "TH": "THA", "TR": "TUR", "TW": "TWN", "UA": "UKR",
+    "US": "USA", "VN": "VNM", "ZA": "ZAF",
+}
+
+# OSM admin_level → geoBoundaries ADM level. Mapping is approximate; admin_level
+# conventions vary by country. If geoBoundaries returns no match the chain falls
+# through to Nominatim+Overpass, so a conservative mapping is fine.
+_ADMIN_LEVEL_TO_GB = {
+    2: "ADM0", 3: "ADM0",
+    4: "ADM1",
+    5: "ADM2", 6: "ADM2",
+    7: "ADM3", 8: "ADM3",
+    9: "ADM4", 10: "ADM4",
+}
+
 # OSM tag keys that ALWAYS imply a linear feature, even when the way is closed
 # (roundabouts, loop trails, circular roads).
 _LINE_TAG_KEYS = {"highway", "railway", "waterway", "barrier", "power", "aeroway"}
@@ -190,7 +221,7 @@ def _is_area_way(tags: dict) -> bool:
 
 class OSMServer:
     description = "OpenStreetMap Overpass API for querying real-world features"
-    tool_names = {"osm_search", "osm_boundary", "osm_reverse_geocode", "osm_route_overview"}
+    tool_names = {"osm_search", "osm_boundary", "osm_boundary_union", "osm_reverse_geocode", "osm_route_overview"}
 
     def get_declarations(self) -> list[ToolDeclaration]:
         return [
@@ -276,6 +307,46 @@ class OSMServer:
                 },
             ),
             ToolDeclaration(
+                name="osm_boundary_union",
+                description=(
+                    "Fetch multiple OSM boundaries and merge them server-side into ONE polygon, "
+                    "displayed as a single map layer. Use this WHENEVER the user asks for a single "
+                    "polygon/region/boundary that covers multiple cities, districts, or sectors "
+                    "(e.g. 'mark Chandigarh, Panchkula and Mohali as one polygon', 'show the tricity "
+                    "area', 'merge X and Y into one region'). Each entry in `places` follows the same "
+                    "shape as osm_boundary args. Server unions the geometries with Shapely (handles "
+                    "MultiPolygon correctly). The merged geometry is NOT returned to you — only a "
+                    "summary (centroid, bbox, area). Do NOT call osm_boundary multiple times and try "
+                    "to gis_union the results yourself; that requires echoing every coordinate back "
+                    "and reliably fails."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "places": {
+                            "type": "array",
+                            "description": "Two or more places to fetch and merge. Each item uses the same fields as osm_boundary.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "name": {"type": "string", "description": "Place name, e.g. 'Chandigarh'."},
+                                    "admin_level": {"type": "number", "description": "Admin level for administrative boundaries (2/4/5/6/8). Omit when using place_type."},
+                                    "place_type": {"type": "string", "description": "OSM `place` tag value for sub-city features ('suburb','neighbourhood','quarter')."},
+                                    "parent": {"type": "string", "description": "Containing city/region for sub-city queries."},
+                                    "country_code": {"type": "string", "description": "ISO 3166-1 alpha-2 country code, e.g. 'IN'. Always pass this."},
+                                },
+                                "required": ["name"],
+                            },
+                        },
+                        "layer_name": {
+                            "type": "string",
+                            "description": "Label for the merged map layer, e.g. 'Tricity', 'Bay Area'.",
+                        },
+                    },
+                    "required": ["places", "layer_name"],
+                },
+            ),
+            ToolDeclaration(
                 name="osm_reverse_geocode",
                 description="Get address and place details from coordinates",
                 parameters={
@@ -315,6 +386,8 @@ class OSMServer:
             return await self._osm_search(args)
         elif tool_name == "osm_boundary":
             return await self._fetch_boundary(args)
+        elif tool_name == "osm_boundary_union":
+            return await self._fetch_boundary_union(args)
         elif tool_name == "osm_reverse_geocode":
             return await self._reverse_geocode(args)
         elif tool_name == "osm_route_overview":
@@ -452,7 +525,8 @@ out skel qt;
                         f"or call osm_search(feature_type='place', feature_value='suburb') near the city center."
                     )}
             else:
-                admin_level = str(int(args.get("admin_level", 4)))
+                admin_level_int = int(args.get("admin_level", 4))
+                admin_level = str(admin_level_int)
                 overpass_query = (
                     f'[out:json][timeout:30];'
                     f'relation["name"~"^{name}$",i]["admin_level"="{admin_level}"]'
@@ -461,9 +535,20 @@ out skel qt;
                 )
 
                 if country_code:
-                    geojson_feature = await self._nominatim_boundary(
-                        name=name, country_code=country_code, parent=parent,
+                    # 1) geoBoundaries: clean MultiPolygon, no way-merge needed,
+                    #    aggressively cached (30-day TTL).
+                    geojson_feature = await self._geoboundaries_boundary(
+                        name=name,
+                        country_code=country_code,
+                        admin_level=admin_level_int,
                     )
+                    # 2) Nominatim: handles arbitrary names (sub-national places
+                    #    geoBoundaries doesn't ship — sectors, neighborhoods).
+                    if not geojson_feature:
+                        geojson_feature = await self._nominatim_boundary(
+                            name=name, country_code=country_code, parent=parent,
+                        )
+                    # 3) Overpass: last resort, with the way-merge fallback path.
                     if not geojson_feature:
                         geojson_feature = await self._overpass_boundary(overpass_query)
                 else:
@@ -487,6 +572,181 @@ out skel qt;
             }
         except Exception as e:
             return {"error": str(e)}
+
+    async def _fetch_boundary_union(self, args: dict) -> dict:
+        places = args.get("places")
+        if not isinstance(places, list) or len(places) < 2:
+            return {"error": "Provide at least 2 entries in 'places'."}
+        layer_name = (args.get("layer_name") or "").strip() or "Merged region"
+
+        # Fetch all boundaries concurrently. Each _fetch_boundary call hits
+        # Nominatim and/or Overpass on its own and is independent of the others.
+        place_args = [p if isinstance(p, dict) else {} for p in places]
+        results = await asyncio.gather(
+            *(self._fetch_boundary(p) for p in place_args),
+            return_exceptions=True,
+        )
+
+        resolved: list[dict] = []
+        failed: list[dict] = []
+        for place, res in zip(place_args, results):
+            place_name = place.get("name", "<unnamed>")
+            if isinstance(res, Exception):
+                failed.append({"name": place_name, "error": str(res)})
+                continue
+            if not isinstance(res, dict) or res.get("error"):
+                failed.append({"name": place_name, "error": (res.get("error") if isinstance(res, dict) else "Unexpected result")})
+                continue
+            feats = (res.get("geojson") or {}).get("features") or []
+            geom = feats[0].get("geometry") if feats else None
+            if not geom:
+                failed.append({"name": place_name, "error": "No geometry returned"})
+                continue
+            resolved.append({"name": res.get("name", place_name), "geometry": geom})
+
+        if len(resolved) < 2:
+            return {
+                "error": "Need at least 2 successfully resolved boundaries to merge.",
+                "places_resolved": [r["name"] for r in resolved],
+                "places_failed": failed,
+            }
+
+        try:
+            from shapely.geometry import mapping, shape
+            from shapely.ops import unary_union
+        except ImportError:
+            return {"error": "Shapely not installed; union requires shapely"}
+
+        try:
+            merged = unary_union([shape(r["geometry"]) for r in resolved])
+            if merged.is_empty:
+                return {"error": "Union produced empty geometry"}
+            merged_geom = mapping(merged)
+        except Exception as e:
+            return {"error": f"Union failed: {e}"}
+
+        feature = {
+            "type": "Feature",
+            "geometry": merged_geom,
+            "properties": {
+                "name": layer_name,
+                "merged_from": [r["name"] for r in resolved],
+            },
+        }
+        return {
+            "geojson": {"type": "FeatureCollection", "features": [feature]},
+            "name": layer_name,
+            "places_resolved": [r["name"] for r in resolved],
+            "places_failed": failed,
+        }
+
+    async def _geoboundaries_boundary(
+        self,
+        name: str,
+        country_code: str,
+        admin_level: int,
+    ) -> dict | None:
+        """Fetch a single boundary feature from geoBoundaries (gbOpen).
+
+        Returns clean MultiPolygon GeoJSON without the way-merge dance. Returns
+        ``None`` when country_code can't be mapped to ISO-3, the API errors,
+        or no feature matches `name`. Both the metadata response and the GeoJSON
+        download are cached for 30 days — boundaries change rarely.
+        """
+        if not country_code:
+            return None
+        iso3 = _ISO2_TO_ISO3.get(country_code.upper())
+        if not iso3:
+            return None
+        gb_level = _ADMIN_LEVEL_TO_GB.get(int(admin_level))
+        if not gb_level:
+            return None
+
+        metadata_url = f"https://www.geoboundaries.org/api/current/gbOpen/{iso3}/{gb_level}/"
+
+        async def _fetch_metadata() -> dict:
+            return await http_client.fetch_json(metadata_url, namespace="geoboundaries")
+
+        try:
+            metadata = await cache.get_or_fetch(
+                namespace="geoboundaries",
+                key={"url": metadata_url},
+                ttl_seconds=86_400 * 30,
+                fetch_fn=_fetch_metadata,
+            )
+        except http_client.HTTPError:
+            return None
+
+        download_url = (metadata or {}).get("gjDownloadURL")
+        if not download_url:
+            return None
+
+        async def _fetch_geojson() -> dict:
+            return await http_client.fetch_json(download_url, namespace="geoboundaries")
+
+        try:
+            feature_collection = await cache.get_or_fetch(
+                namespace="geoboundaries",
+                key={"url": download_url},
+                ttl_seconds=86_400 * 30,
+                fetch_fn=_fetch_geojson,
+            )
+        except http_client.HTTPError:
+            return None
+
+        features = (feature_collection or {}).get("features") or []
+        if not features:
+            return None
+
+        if gb_level == "ADM0":
+            chosen = features[0]
+        else:
+            chosen = self._select_geoboundaries_feature(features, name)
+            if chosen is None:
+                return None
+
+        geom = chosen.get("geometry")
+        if not geom:
+            return None
+        props = chosen.get("properties") or {}
+        return {
+            "type": "Feature",
+            "geometry": geom,
+            "properties": {
+                "name": props.get("shapeName") or props.get("boundaryName") or name,
+                "source": "geoboundaries",
+                "shape_iso": props.get("shapeISO"),
+                "shape_type": props.get("shapeType"),
+                "admin_level": admin_level,
+            },
+        }
+
+    @staticmethod
+    def _select_geoboundaries_feature(features: list[dict], name: str) -> dict | None:
+        """Pick the feature whose shapeName best matches `name` (case-insensitive).
+
+        Exact match wins. Otherwise prefer the candidate whose name length is
+        closest to the query — substrings on the right end ("Punjab" matches
+        "Punjab" before "Punjab and Sind"). Returns None if no candidate
+        contains or is contained by the query.
+        """
+        target = name.lower().strip()
+        if not target:
+            return None
+        best: tuple[int, dict] | None = None
+        for feat in features:
+            props = feat.get("properties") or {}
+            candidate = (props.get("shapeName") or props.get("boundaryName") or "").strip()
+            if not candidate:
+                continue
+            cand = candidate.lower()
+            if cand == target:
+                return feat
+            if target in cand or cand in target:
+                score = abs(len(cand) - len(target))
+                if best is None or score < best[0]:
+                    best = (score, feat)
+        return best[1] if best else None
 
     async def _overpass_boundary(self, query: str) -> dict | None:
         """Run an Overpass query and convert the first relation/way result to a GeoJSON Feature."""
@@ -672,69 +932,75 @@ out skel qt;
         }
 
     async def _reverse_geocode(self, args: dict) -> dict:
+        lat = args["lat"]
+        lng = args["lng"]
+        cache_key = {"lat": round(float(lat), 5), "lng": round(float(lng), 5), "zoom": 18}
+
+        async def _fetch() -> dict:
+            return await http_client.fetch_json(
+                "https://nominatim.openstreetmap.org/reverse",
+                namespace="nominatim",
+                params={
+                    "lat": lat,
+                    "lon": lng,
+                    "format": "json",
+                    "addressdetails": 1,
+                    "zoom": 18,
+                },
+            )
+
         try:
-            async with httpx.AsyncClient(timeout=10) as http:
-                resp = await http.get(
-                    "https://nominatim.openstreetmap.org/reverse",
-                    params={
-                        "lat": args["lat"],
-                        "lon": args["lng"],
-                        "format": "json",
-                        "addressdetails": 1,
-                        "zoom": 18,
-                    },
-                    headers={"User-Agent": "CursorUrbanPlanners/1.0"},
-                )
-                if resp.status_code != 200 or not (resp.text or "").strip():
-                    return {"error": f"Nominatim returned status {resp.status_code} with empty body. "
-                                     "Likely rate-limited; please retry in 30s.",
-                            "code": "upstream_unavailable"}
-                try:
-                    data = _json.loads(resp.text)
-                except _json.JSONDecodeError:
-                    return {"error": "Nominatim returned a non-JSON response (rate-limit page).",
-                            "code": "upstream_unavailable"}
-                return {
-                    "display_name": data.get("display_name", ""),
-                    "address": data.get("address", {}),
-                    "type": data.get("type", ""),
-                    "osm_type": data.get("osm_type", ""),
-                }
-        except httpx.RequestError as e:
-            return {"error": f"Network error reaching Nominatim: {e}", "code": "connection"}
+            data = await cache.get_or_fetch(
+                namespace="nominatim",
+                key=cache_key,
+                ttl_seconds=86_400 * 7,
+                fetch_fn=_fetch,
+            )
+        except http_client.HTTPError as e:
+            return {"error": str(e), "code": e.code}
         except Exception as e:
             return {"error": f"Unexpected error: {e}", "code": "internal"}
+
+        return {
+            "display_name": data.get("display_name", ""),
+            "address": data.get("address", {}),
+            "type": data.get("type", ""),
+            "osm_type": data.get("osm_type", ""),
+        }
 
     async def _route_overview(self, args: dict) -> dict:
         mode_map = {"driving": "car", "walking": "foot", "cycling": "bike"}
         mode = mode_map.get(args.get("mode", "driving"), "car")
         start = f"{args['start_lng']},{args['start_lat']}"
         end = f"{args['end_lng']},{args['end_lat']}"
+        url = f"https://router.project-osrm.org/route/v1/{mode}/{start};{end}"
+        cache_key = {"mode": mode, "start": start, "end": end}
+
+        async def _fetch() -> dict:
+            return await http_client.fetch_json(
+                url,
+                namespace="osrm",
+                params={"overview": "full", "geometries": "geojson", "steps": "false"},
+            )
 
         try:
-            async with httpx.AsyncClient(timeout=15) as http:
-                resp = await http.get(
-                    f"https://router.project-osrm.org/route/v1/{mode}/{start};{end}",
-                    params={"overview": "full", "geometries": "geojson", "steps": "false"},
-                )
-            if resp.status_code != 200 or not (resp.text or "").strip():
-                return {"error": f"OSRM returned status {resp.status_code} with empty body.",
-                        "code": "upstream_unavailable"}
-            try:
-                data = _json.loads(resp.text)
-            except _json.JSONDecodeError:
-                return {"error": "OSRM returned a non-JSON response.",
-                        "code": "upstream_unavailable"}
-            if data.get("code") != "Ok" or not data.get("routes"):
-                return {"error": data.get("message", "No route found"), "code": "not_found"}
-
-            route = data["routes"][0]
-            return {
-                "distance_km": round(route["distance"] / 1000, 2),
-                "duration_minutes": round(route["duration"] / 60, 1),
-                "geometry": route["geometry"],
-            }
-        except httpx.RequestError as e:
-            return {"error": f"Network error reaching OSRM: {e}", "code": "connection"}
+            data = await cache.get_or_fetch(
+                namespace="osrm",
+                key=cache_key,
+                ttl_seconds=86_400,
+                fetch_fn=_fetch,
+            )
+        except http_client.HTTPError as e:
+            return {"error": str(e), "code": e.code}
         except Exception as e:
             return {"error": f"Unexpected error: {e}", "code": "internal"}
+
+        if data.get("code") != "Ok" or not data.get("routes"):
+            return {"error": data.get("message", "No route found"), "code": "not_found"}
+
+        route = data["routes"][0]
+        return {
+            "distance_km": round(route["distance"] / 1000, 2),
+            "duration_minutes": round(route["duration"] / 60, 1),
+            "geometry": route["geometry"],
+        }

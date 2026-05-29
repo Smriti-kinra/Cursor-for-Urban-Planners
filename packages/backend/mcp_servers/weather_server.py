@@ -6,8 +6,8 @@ Provides weather and air quality data from Open-Meteo (free, no API key required
 
 from __future__ import annotations
 
-import httpx
 from llm.base import ToolDeclaration
+from tools import cache, http as http_client
 
 WMO_WEATHER_CODES = {
     0: "Clear sky", 1: "Mainly clear", 2: "Partly cloudy", 3: "Overcast",
@@ -61,21 +61,35 @@ class WeatherServer:
 
     async def _get_weather(self, args: dict) -> dict:
         lat, lng = args.get("lat", 0), args.get("lng", 0)
-        try:
-            async with httpx.AsyncClient(timeout=15) as http:
-                resp = await http.get(
-                    "https://api.open-meteo.com/v1/forecast",
-                    params={
-                        "latitude": lat,
-                        "longitude": lng,
-                        "current": "temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,weather_code,precipitation",
-                        "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code,sunrise,sunset",
-                        "timezone": "auto",
-                        "forecast_days": 7,
-                    },
-                )
-                data = resp.json()
+        cache_key = {"lat": round(float(lat), 3), "lng": round(float(lng), 3)}
 
+        async def _fetch() -> dict:
+            return await http_client.fetch_json(
+                "https://api.open-meteo.com/v1/forecast",
+                namespace="open-meteo",
+                params={
+                    "latitude": lat,
+                    "longitude": lng,
+                    "current": "temperature_2m,relative_humidity_2m,apparent_temperature,wind_speed_10m,wind_direction_10m,weather_code,precipitation",
+                    "daily": "temperature_2m_max,temperature_2m_min,precipitation_sum,weather_code,sunrise,sunset",
+                    "timezone": "auto",
+                    "forecast_days": 7,
+                },
+            )
+
+        try:
+            data = await cache.get_or_fetch(
+                namespace="open-meteo-weather",
+                key=cache_key,
+                ttl_seconds=3600,
+                fetch_fn=_fetch,
+            )
+        except http_client.HTTPError as e:
+            return {"error": str(e), "code": e.code}
+        except Exception as e:
+            return {"error": str(e)}
+
+        try:
             current = data.get("current", {})
             weather_code = current.get("weather_code", 0)
             result = {
@@ -112,18 +126,32 @@ class WeatherServer:
 
     async def _get_air_quality(self, args: dict) -> dict:
         lat, lng = args.get("lat", 0), args.get("lng", 0)
-        try:
-            async with httpx.AsyncClient(timeout=15) as http:
-                resp = await http.get(
-                    "https://air-quality-api.open-meteo.com/v1/air-quality",
-                    params={
-                        "latitude": lat,
-                        "longitude": lng,
-                        "current": "european_aqi,pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide,carbon_monoxide",
-                    },
-                )
-                data = resp.json()
+        cache_key = {"lat": round(float(lat), 3), "lng": round(float(lng), 3)}
 
+        async def _fetch() -> dict:
+            return await http_client.fetch_json(
+                "https://air-quality-api.open-meteo.com/v1/air-quality",
+                namespace="open-meteo",
+                params={
+                    "latitude": lat,
+                    "longitude": lng,
+                    "current": "european_aqi,pm10,pm2_5,nitrogen_dioxide,ozone,sulphur_dioxide,carbon_monoxide",
+                },
+            )
+
+        try:
+            data = await cache.get_or_fetch(
+                namespace="open-meteo-air",
+                key=cache_key,
+                ttl_seconds=3600,
+                fetch_fn=_fetch,
+            )
+        except http_client.HTTPError as e:
+            return {"error": str(e), "code": e.code}
+        except Exception as e:
+            return {"error": str(e)}
+
+        try:
             current = data.get("current", {})
             aqi = current.get("european_aqi", 0)
             if aqi <= 20:

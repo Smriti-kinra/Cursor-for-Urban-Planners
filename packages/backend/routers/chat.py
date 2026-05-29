@@ -32,6 +32,7 @@ from mcp_servers.overture_server import OvertureServer
 from mcp_servers.google_places_server import GooglePlacesServer
 from mcp_servers.google_environment_server import GoogleEnvironmentServer
 from tools.utility import UtilityServer
+from tools.config import get_model as _get_model
 
 try:
     from shapely.geometry import shape as _shape
@@ -41,16 +42,6 @@ except ImportError:
 router = APIRouter()
 
 _client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-_MODEL_CONFIG_PATH = _BACKEND_DIR / "model_config.json"
-_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-
-
-def _get_model() -> str:
-    try:
-        data = json.loads(_MODEL_CONFIG_PATH.read_text())
-        return data.get("model") or _DEFAULT_MODEL
-    except Exception:
-        return _DEFAULT_MODEL
 
 _servers = {
     "osm": OSMServer(),

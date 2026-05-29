@@ -1,16 +1,21 @@
-"""Server-side proxy for Nominatim geocoding.
+"""Server-side geocoding proxy for the renderer search bar.
 
-Browsers can't set the `User-Agent` header from JS, which violates OSM's
-usage policy and triggers rate limiting. The renderer should call this
-endpoint instead of hitting Nominatim directly.
+Tries Google Geocoding first (when ``GOOGLE_MAPS_API_KEY`` is set), then
+falls back to Nominatim. Browsers can't set the ``User-Agent`` header from
+JS, which violates OSM's usage policy and triggers rate limiting — so the
+renderer always calls this endpoint instead of hitting either upstream
+directly.
+
+Response shape stays stable across upstreams so the UI does not branch:
+``{"results": [{display_name, lat, lon, type, class, importance}]}``.
 """
 
 from __future__ import annotations
 
-import json
-
-import httpx
 from fastapi import APIRouter, Query
+
+from tools.google import GoogleUnavailable, geocode_query as google_geocode_query, has_key as has_google_key
+from tools import http as http_client
 
 router = APIRouter()
 
@@ -18,21 +23,27 @@ router = APIRouter()
 @router.get("")
 async def geocode(query: str = Query(..., description="Address or place name"), limit: int = 5):
     limit = max(1, min(int(limit), 20))
-    try:
-        async with httpx.AsyncClient(timeout=15) as http:
-            resp = await http.get(
-                "https://nominatim.openstreetmap.org/search",
-                params={"q": query, "format": "json", "limit": limit, "addressdetails": 1},
-                headers={"User-Agent": "CursorUrbanPlanners/1.0"},
-            )
-        if resp.status_code != 200 or not (resp.text or "").strip():
-            return {"error": f"Nominatim returned status {resp.status_code} with empty body.",
-                    "results": []}
+
+    # Tier 1: Google Geocoding (when key is set). Falls through silently on any
+    # GoogleUnavailable — missing key, network blip, or non-OK status.
+    if has_google_key():
         try:
-            data = json.loads(resp.text)
-        except json.JSONDecodeError:
-            return {"error": "Nominatim returned a non-JSON response (rate-limit page).",
-                    "results": []}
+            results = await google_geocode_query(query, limit=limit)
+            if results:
+                return {"results": results}
+        except GoogleUnavailable:
+            pass
+
+    # Tier 2: Nominatim (this server-side proxy is the reason the route exists —
+    # browsers cannot set the User-Agent header that OSM's usage policy requires).
+    try:
+        data = await http_client.fetch_json(
+            "https://nominatim.openstreetmap.org/search",
+            namespace="nominatim",
+            params={"q": query, "format": "json", "limit": limit, "addressdetails": 1},
+        )
+        if not isinstance(data, list):
+            return {"error": "Nominatim returned an unexpected response.", "results": []}
         return {
             "results": [
                 {
@@ -46,7 +57,7 @@ async def geocode(query: str = Query(..., description="Address or place name"), 
                 for r in data
             ]
         }
-    except httpx.RequestError as e:
-        return {"error": f"Network error: {e}", "results": []}
+    except http_client.HTTPError as e:
+        return {"error": str(e), "results": []}
     except Exception as e:
         return {"error": f"Unexpected error: {e}", "results": []}

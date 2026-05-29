@@ -17,19 +17,11 @@ from pydantic import BaseModel
 _BACKEND_DIR = Path(__file__).parent.parent
 sys.path.insert(0, str(_BACKEND_DIR))
 
+from tools.config import get_model as _get_model
+
 router = APIRouter()
 
 _client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
-_MODEL_CONFIG_PATH = _BACKEND_DIR / "model_config.json"
-_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
-
-
-def _get_model() -> str:
-    try:
-        data = json.loads(_MODEL_CONFIG_PATH.read_text())
-        return data.get("model") or _DEFAULT_MODEL
-    except Exception:
-        return _DEFAULT_MODEL
 
 
 class ReportRequest(BaseModel):
