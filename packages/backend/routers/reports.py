@@ -210,7 +210,7 @@ async def stream_report(request: ReportRequest):
     async def generate():
         try:
             got_text = False
-            async with await _client.responses.create(
+            async with _client.responses.create(
                 model="o4-mini-deep-research",
                 input=prompt,
                 instructions=STREAM_SYSTEM,
@@ -222,13 +222,18 @@ async def stream_report(request: ReportRequest):
                     event_type = getattr(event, "type", None)
 
                     if event_type == "response.web_search_call.searching":
-                        query = getattr(event, "query", "") or ""
+                        action = getattr(event, "action", None)
+                        query = (
+                            getattr(event, "query", None)
+                            or (getattr(action, "query", None) if action else None)
+                            or ""
+                        )
                         if query:
                             data = json.dumps({"action": "search", "query": query})
                             yield f"event: tool_call\ndata: {data}\n\n"
 
                     elif event_type == "response.output_text.done":
-                        text = getattr(event, "text", "") or ""
+                        text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
                         if text:
                             got_text = True
                             data = json.dumps({"markdown": text})

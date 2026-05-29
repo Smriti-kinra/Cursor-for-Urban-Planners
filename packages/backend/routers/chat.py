@@ -264,7 +264,9 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
 
     try:
         got_text = False
-        async with await _client.responses.create(
+        last_heartbeat = asyncio.get_event_loop().time()
+
+        async with _client.responses.create(
             model="o4-mini-deep-research",
             input=prompt,
             instructions=_RESEARCH_SYSTEM,
@@ -273,18 +275,33 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
             stream=True,
         ) as stream:
             async for event in stream:
+                # Send a heartbeat if >30 s have passed since the last WS message
+                now = asyncio.get_event_loop().time()
+                if now - last_heartbeat > 30:
+                    try:
+                        await ws.send_text(json.dumps({"type": "research_heartbeat"}))
+                    except Exception:
+                        pass
+                    last_heartbeat = now
+
                 event_type = getattr(event, "type", None)
 
                 if event_type == "response.web_search_call.searching":
-                    query = getattr(event, "query", "") or ""
+                    action = getattr(event, "action", None)
+                    query = (
+                        getattr(event, "query", None)
+                        or (getattr(action, "query", None) if action else None)
+                        or ""
+                    )
                     if query:
                         await ws.send_text(json.dumps({
                             "type": "research_step",
                             "query": query,
                         }))
+                        last_heartbeat = asyncio.get_event_loop().time()
 
                 elif event_type == "response.output_text.done":
-                    text = getattr(event, "text", "") or ""
+                    text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
                     if text:
                         got_text = True
                         annotations = []
@@ -298,6 +315,7 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
                             "markdown": text,
                             "citations": annotations,
                         }))
+                        last_heartbeat = asyncio.get_event_loop().time()
 
         if not got_text:
             await ws.send_text(json.dumps({
