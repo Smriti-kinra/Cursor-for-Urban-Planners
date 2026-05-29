@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter
+from fastapi.responses import StreamingResponse
 from openai import AsyncOpenAI
 from pydantic import BaseModel
 
@@ -95,3 +96,149 @@ async def generate_report(request: ReportRequest):
         return ReportResponse(markdown=text or "# Error\n\nNo content generated.")
     except Exception as e:
         return ReportResponse(markdown=f"# Error\n\n{str(e)}")
+
+
+STREAM_SYSTEM = (
+    "You are a professional urban planning report writer. "
+    "Generate a well-structured, data-driven report in clean Markdown. "
+    "Use the provided conversation, map data, and artifacts as your primary source. "
+    "Enrich your analysis with publicly available information about the location. "
+    "Respond ONLY with the Markdown report. Always respond in English."
+)
+
+STREAM_REPORT_PROMPT = """Generate a comprehensive urban planning report based on the data below.
+
+Structure the report with these sections:
+
+# Urban Planning Report
+
+## Executive Summary
+(2-3 paragraph overview of the planning discussion, location, and key findings)
+
+## Site Analysis
+(Geographic context, existing conditions, basemap and layer data, drawn features, placed markers)
+
+## Key Findings
+(Main points from the conversation and analysis, enriched with current public data)
+
+## Recommendations
+(Actionable next steps based on the discussion and research)
+
+## Appendix
+(Data sources, layer descriptions, methodology notes, web sources consulted)
+
+Be specific and professional. Reference the actual map data, drawn geometries, and conversation details provided.
+---
+"""
+
+
+def _build_stream_prompt(request: ReportRequest) -> str:
+    parts = [STREAM_REPORT_PROMPT]
+
+    if request.map_context:
+        ctx = request.map_context
+        center = ctx.get("center", [])
+        zoom = ctx.get("zoom", "")
+        bounds = ctx.get("bounds", {})
+        basemap = ctx.get("basemap", "")
+        bookmarks = ctx.get("bookmarks", [])
+        layers = ctx.get("layers", [])
+
+        loc_lines = [f"**Center:** {center}", f"**Zoom:** {zoom}", f"**Basemap:** {basemap}"]
+        if bounds:
+            loc_lines.append(
+                f"**Bounds:** W={bounds.get('west')}, S={bounds.get('south')}, "
+                f"E={bounds.get('east')}, N={bounds.get('north')}"
+            )
+        parts.append("## Map Context\n" + "\n".join(loc_lines))
+
+        if bookmarks:
+            bm_lines = [
+                f"- {b['name']}: bounds W={b['west']}, S={b['south']}, E={b['east']}, N={b['north']}"
+                for b in bookmarks
+            ]
+            parts.append("### Bookmarks\n" + "\n".join(bm_lines))
+
+        if layers:
+            layer_lines = []
+            for layer in layers:
+                name = layer.get("name", "unnamed")
+                count = layer.get("featureCount", 0)
+                geom_types = ", ".join(layer.get("geometryTypes", []))
+                props = ", ".join(layer.get("properties", []))
+                visible = layer.get("visible", True)
+                line = f"- **{name}** ({count} features, {geom_types}, visible={visible})"
+                if props:
+                    line += f"\n  Properties: {props}"
+                geo = layer.get("geometry_data")
+                if geo:
+                    if isinstance(geo, list):
+                        line += f"\n  Coordinates: {json.dumps(geo)}"
+                    elif isinstance(geo, dict) and "bbox" in geo:
+                        line += f"\n  Bounding box: {geo['bbox']}"
+                layer_lines.append(line)
+            parts.append("### Layers\n" + "\n".join(layer_lines))
+
+    if request.chat_history:
+        lines = []
+        for m in request.chat_history:
+            role = "User" if m.get("role") == "user" else "Assistant"
+            content = m.get("content", "")
+            if content:
+                lines.append(f"**{role}:** {content}")
+        if lines:
+            parts.append("## Conversation\n" + "\n\n".join(lines))
+
+    if request.artifacts:
+        items = []
+        for a in request.artifacts:
+            t = a.get("artifact_type", "note")
+            title = a.get("title", "")
+            content = a.get("content", "")
+            items.append(f"- [{t}] **{title}**: {content[:500]}")
+        parts.append("## Artifacts\n" + "\n".join(items))
+
+    return "\n\n".join(parts)
+
+
+@router.post("/stream")
+async def stream_report(request: ReportRequest):
+    prompt = _build_stream_prompt(request)
+
+    async def generate():
+        try:
+            stream = await _client.responses.create(
+                model="o4-mini-deep-research",
+                input=prompt,
+                tools=[{"type": "web_search_preview"}],
+                max_tool_calls=20,
+                stream=True,
+            )
+            async for event in stream:
+                event_type = getattr(event, "type", None)
+
+                # Web search tool call events
+                if event_type == "response.web_search_call.searching":
+                    query = getattr(event, "query", "") or ""
+                    data = json.dumps({"action": "search", "query": query})
+                    yield f"event: tool_call\ndata: {data}\n\n"
+
+                elif event_type == "response.web_search_call.completed":
+                    pass  # already announced at searching
+
+                # Output text delta — accumulate until done
+                elif event_type == "response.output_text.done":
+                    text = getattr(event, "text", "") or ""
+                    if text:
+                        data = json.dumps({"markdown": text})
+                        yield f"event: message\ndata: {data}\n\n"
+
+        except Exception as exc:
+            data = json.dumps({"detail": str(exc)})
+            yield f"event: error\ndata: {data}\n\n"
+
+    return StreamingResponse(
+        generate(),
+        media_type="text/event-stream",
+        headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+    )
