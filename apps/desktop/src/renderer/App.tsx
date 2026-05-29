@@ -1,6 +1,6 @@
 import { useState, useEffect, useRef, useCallback, useMemo } from 'react'
 import * as turf from '@turf/turf'
-import type { Feature, FeatureCollection, Polygon, MultiPolygon } from 'geojson'
+import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from 'geojson'
 import MapView, { type MapViewHandle } from './components/MapView'
 import FileTree from './components/FileTree'
 import ChatPanel from './components/ChatPanel'
@@ -592,12 +592,15 @@ function App() {
     }
     if (action.type === 'add_geojson') {
       const { geojson, name, color } = action.payload
+      const geometryTypes = ['Point','MultiPoint','LineString','MultiLineString','Polygon','MultiPolygon','GeometryCollection']
       const data: FeatureCollection =
         geojson && 'type' in geojson && geojson.type === 'FeatureCollection'
-          ? geojson
+          ? (geojson as FeatureCollection)
           : geojson && 'type' in geojson && geojson.type === 'Feature'
-            ? { type: 'FeatureCollection', features: [geojson] }
-            : { type: 'FeatureCollection', features: [] }
+            ? { type: 'FeatureCollection', features: [geojson as Feature] }
+            : geojson && 'type' in geojson && geometryTypes.includes(geojson.type as string)
+              ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: geojson as Geometry, properties: {} }] }
+              : { type: 'FeatureCollection', features: [] }
       upsertLayer(name || 'AI Layer', data, color)
       return
     }

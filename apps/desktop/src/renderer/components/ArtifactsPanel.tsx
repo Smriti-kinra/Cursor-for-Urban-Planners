@@ -63,15 +63,17 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
       setEditingContent(false)
       return
     }
+    const controller = new AbortController()
     setLoadingFull(true)
-    fetch(`${API_BASE}/${selectedId}`)
+    fetch(`${API_BASE}/${selectedId}`, { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: Artifact | null) => {
-        setFullArtifact(data)
+        if (data) setFullArtifact(data)
         setLoadingFull(false)
         setEditingContent(false)
       })
       .catch(() => setLoadingFull(false))
+    return () => controller.abort()
   }, [selectedId])
 
   const createArtifact = async (): Promise<void> => {
@@ -134,18 +136,6 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
       fetchArtifacts()
     } catch {
       /* backend may not be available */
-    }
-  }
-
-  const handleAddToMap = async (id: number, artifactTitle: string): Promise<void> => {
-    try {
-      const res = await fetch(`${API_BASE}/${id}`)
-      if (!res.ok) return
-      const data: Artifact = await res.json()
-      const geojson = JSON.parse(data.content)
-      onAddToMap(geojson, artifactTitle)
-    } catch {
-      /* parse error or network error */
     }
   }
 
@@ -311,7 +301,14 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
           <div className="artifact-actions">
             <button
               className="add-to-map-btn"
-              onClick={() => handleAddToMap(id, aTitle)}
+              onClick={() => {
+                try {
+                  const geojson = JSON.parse(fullArtifact!.content)
+                  onAddToMap(geojson, fullArtifact!.title)
+                } catch {
+                  console.error('Invalid GeoJSON content')
+                }
+              }}
             >
               Add to map
             </button>
