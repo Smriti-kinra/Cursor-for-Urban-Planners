@@ -28,6 +28,9 @@ from mcp_servers.gis_server import GISServer
 from mcp_servers.weather_server import WeatherServer
 from mcp_servers.zoning_server import ZoningServer
 from mcp_servers.demographics_server import DemographicsServer
+from mcp_servers.overture_server import OvertureServer
+from mcp_servers.google_places_server import GooglePlacesServer
+from mcp_servers.google_environment_server import GoogleEnvironmentServer
 from tools.utility import UtilityServer
 
 try:
@@ -55,14 +58,16 @@ _servers = {
     "weather": WeatherServer(),
     "zoning": ZoningServer(),
     "demographics": DemographicsServer(),
+    "overture": OvertureServer(),
+    "google_places": GooglePlacesServer(),
+    "google_env": GoogleEnvironmentServer(),
     "utility": UtilityServer(db_path=DB_PATH),
 }
 
 # ── Action tool names (sent directly to frontend as map actions) ──────────────
 
 _ACTION_TOOLS = {
-    "fly_to", "fit_bounds",
-    "add_marker", "add_markers", "clear_markers",
+    "fly_to", "fit_bounds", "add_marker", "add_markers", "clear_markers",
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
     "highlight_features", "set_layer_style", "toggle_layer", "remove_layer",
     "save_bookmark", "go_to_bookmark", "export_region_clip",
@@ -91,14 +96,23 @@ SYSTEM_PROMPT = (
     "- Search: web_search, geocode\n"
     "- OSM: osm_search (amenities, buildings, roads), "
     "osm_boundary (city/district/state boundary polygons), "
+    "osm_boundary_union (merge multiple boundaries into ONE polygon — server-side, no coordinate echoing), "
     "osm_reverse_geocode, osm_route_overview\n"
-    "- Weather: get_weather, get_air_quality\n"
+    "- Google Places (PREFER for commercial POIs — fresher and brand-named): "
+    "places_autocomplete, place_details, nearby_places, "
+    "nearby_places_in_polygon (polygon-clipped), places_density\n"
+    "- Overture Maps (fallback for places; building footprints): "
+    "overture_places_search, overture_buildings_search\n"
+    "- Google Environment: get_elevation (terrain), get_air_quality_google "
+    "(per-pollutant), get_solar_building (rooftop solar potential)\n"
+    "- Weather: get_weather, get_air_quality (Open-Meteo fallback)\n"
     "- GIS: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
     "gis_point_in_polygon, gis_bounding_box, gis_union\n"
     "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
     "- Demographics: get_demographics\n"
-    "- Artifacts: create_artifact\n\n"
+    "- Artifacts: create_artifact (format: markdown/table/geojson), list_artifacts, get_artifact\n"
+    "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n\n"
     "MAP CONTEXT:\n"
     "The current map state is appended to every message. It includes:\n"
     "- bounds: current viewport (west,south,east,north) when available.\n"
@@ -107,8 +121,16 @@ SYSTEM_PROMPT = (
     "IMPORTANT RULES:\n"
     "1. Do NOT add markers unless the user explicitly asks for markers or pins.\n"
     "2. Do NOT repeat a tool call you already made. Call each tool ONCE per distinct item.\n"
-    "3. osm_search and osm_boundary results are AUTO-DISPLAYED on the map. "
-    "Do NOT call add_geojson for data that was already returned by these tools.\n"
+    "3. osm_search, osm_boundary, overture_places_search, overture_buildings_search, "
+    "nearby_places, and nearby_places_in_polygon results are AUTO-DISPLAYED on the map. "
+    "Do NOT call add_geojson for data that was already returned by these tools. For "
+    "COMMERCIAL POIs (restaurants, hotels, retail, services, schools, hospitals) PREFER "
+    "nearby_places (Google) — it has the freshest brand names and category data. When the "
+    "user asks for POIs INSIDE a drawn polygon / region / sector boundary (any non-circular "
+    "area), use nearby_places_in_polygon — it returns only places that fall within the "
+    "polygon. Use overture_places_search only when the Google tools return empty or "
+    "upstream_unavailable. Use osm_search for non-commercial OSM-tagged features (water, "
+    "infrastructure, hand-mapped local data).\n"
     "4. When using osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches.\n"
     "5. Only call the tools the user's request requires. Do not add extra actions.\n"
     "6. When the user asks to navigate somewhere, use fly_to. Do not add markers unless asked.\n"
@@ -118,7 +140,18 @@ SYSTEM_PROMPT = (
     "(a) name variants like 'Sector 30 A' / 'Sector 30 B' (Chandigarh sectors are often split), "
     "(b) other place_type values, (c) osm_search(feature_type='place', feature_value='suburb') near "
     "the city center. Do not give up after one failed call.\n"
-    "8. When finished, stop calling tools and respond with a brief summary of what you did."
+    "8. When finished, stop calling tools and respond with a brief summary of what you did.\n"
+    "9. SINGLE POLYGON ACROSS MULTIPLE PLACES: when the user asks for ONE polygon/region/boundary "
+    "spanning multiple cities/districts/sectors (e.g. 'mark Chandigarh, Panchkula and Mohali as one "
+    "polygon', 'tricity area', 'merge X and Y'), call osm_boundary_union with all places in a single "
+    "call. Do NOT call osm_boundary multiple times and then try gis_union — gis_union requires you to "
+    "echo every coordinate as arguments, which is slow and unreliable.\n"
+    "10. AIR QUALITY: prefer get_air_quality_google (per-pollutant breakdown, AQI, health "
+    "recommendations). Fall back to get_air_quality (Open-Meteo) only if Google returns "
+    "upstream_unavailable.\n"
+    "11. AMBIGUOUS PLACE NAMES: if the user types a partial or ambiguous place name, call "
+    "places_autocomplete first to get candidate place_ids, then place_details on the best match "
+    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster."
 )
 
 # ── Build OpenAI tool definitions ─────────────────────────────────────────────
@@ -295,6 +328,67 @@ async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
                     "features": features_summary,
                 }
 
+            # Auto-display overture_places_search and overture_buildings_search
+            elif name in ("overture_places_search", "overture_buildings_search") \
+                    and "geojson" in result and result.get("count", 0) > 0:
+                if name == "overture_places_search":
+                    label = f"Overture: {args.get('category') or args.get('query') or 'places'}"
+                else:
+                    label = "Overture: buildings"
+                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                features_summary = []
+                for f in result["geojson"].get("features", [])[:50]:
+                    props = f.get("properties", {})
+                    geom = f.get("geometry", {})
+                    entry = {"name": props.get("name", "") or props.get("id", "")}
+                    if "category" in props:
+                        entry["category"] = props["category"]
+                    if "height" in props and props["height"] is not None:
+                        entry["height_m"] = props["height"]
+                    if geom.get("type") == "Point":
+                        entry["lat"] = geom["coordinates"][1]
+                        entry["lng"] = geom["coordinates"][0]
+                    features_summary.append(entry)
+                result = {
+                    "count": result["count"],
+                    "displayed_on_map": True,
+                    "features": features_summary,
+                }
+
+            # Auto-display nearby_places (Google) — same shape as Overture, so
+            # the trim/summarize step mirrors that branch. Also covers the
+            # polygon-clipped variant.
+            elif name in ("nearby_places", "nearby_places_in_polygon") \
+                    and "geojson" in result and result.get("count", 0) > 0:
+                types_label = ",".join(args.get("included_types") or []) or "places"
+                suffix = " (in polygon)" if name == "nearby_places_in_polygon" else ""
+                label = f"Google: {types_label}{suffix}"
+                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                features_summary = []
+                for f in result["geojson"].get("features", [])[:50]:
+                    props = f.get("properties", {})
+                    geom = f.get("geometry", {})
+                    entry = {
+                        "name": props.get("name", "") or props.get("id", ""),
+                        "primary_type": props.get("primary_type"),
+                        "address": props.get("address"),
+                    }
+                    if geom.get("type") == "Point":
+                        entry["lat"] = geom["coordinates"][1]
+                        entry["lng"] = geom["coordinates"][0]
+                    features_summary.append(entry)
+                trimmed = {
+                    "count": result["count"],
+                    "displayed_on_map": True,
+                    "features": features_summary,
+                }
+                # Preserve polygon-clip meta so the LLM can warn when the
+                # bounding-circle was capped or when filtering dropped many.
+                for k in ("truncated_search", "upstream_count", "search_radius_meters", "centroid"):
+                    if k in result:
+                        trimmed[k] = result[k]
+                result = trimmed
+
             # Auto-display osm_boundary on map. Keep geometry/centroid/bbox in
             # the model-visible result so follow-up tools (gis_area, gis_buffer,
             # gis_point_in_polygon) can chain on the boundary.
@@ -323,6 +417,42 @@ async def _execute_tool(name: str, args: dict, ws: WebSocket) -> str:
                         pass
                 if geom:
                     model_result["geometry"] = geom
+                result = model_result
+
+            # Auto-display merged boundary union. Only the summary (centroid,
+            # bbox, area, place lists) goes back to the model — the merged
+            # geometry can be huge and is already on the map as a layer.
+            elif name == "osm_boundary_union" and "geojson" in result:
+                label = result.get("name") or args.get("layer_name") or "Merged region"
+                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                model_result: dict = {
+                    "name": label,
+                    "displayed_on_map": True,
+                    "layer_name": label,
+                    "places_resolved": result.get("places_resolved", []),
+                    "places_failed": result.get("places_failed", []),
+                }
+                feats = result["geojson"].get("features") or []
+                geom = feats[0].get("geometry") if feats else None
+                if geom and _shape is not None:
+                    try:
+                        g = _shape(geom)
+                        if not g.is_empty:
+                            minx, miny, maxx, maxy = g.bounds
+                            c = g.centroid
+                            model_result["centroid"] = {"lat": round(c.y, 6), "lng": round(c.x, 6)}
+                            model_result["bbox"] = {
+                                "south": round(miny, 6), "west": round(minx, 6),
+                                "north": round(maxy, 6), "east": round(maxx, 6),
+                            }
+                    except Exception:
+                        pass
+                if geom:
+                    try:
+                        from tools.geo import area_breakdown
+                        model_result["area"] = area_breakdown(geom)
+                    except Exception:
+                        pass
                 result = model_result
 
             # Auto-display route

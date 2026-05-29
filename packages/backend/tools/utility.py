@@ -138,13 +138,32 @@ class UtilityServer:
             ),
             ToolDeclaration(
                 name="create_artifact",
-                description="Save a note, analysis, or report as a project artifact",
+                description=(
+                    "Save a note, analysis, report, or geospatial dataset as a project artifact. "
+                    "Supported formats: 'markdown' (default), 'table', 'geojson'. "
+                    "Do NOT use format='image' — images are created from the map export UI only."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
                         "title": {"type": "string"},
-                        "content": {"type": "string"},
-                        "artifact_type": {"type": "string", "description": "note, analysis, report, or sketch"},
+                        "content": {
+                            "type": "string",
+                            "description": (
+                                "For markdown: the markdown text. "
+                                "For table: JSON string '{\"columns\":[...],\"rows\":[[...]]}'. "
+                                "For geojson: a GeoJSON Feature or FeatureCollection JSON string."
+                            ),
+                        },
+                        "artifact_type": {
+                            "type": "string",
+                            "description": "Semantic label: note, analysis, report, or sketch",
+                        },
+                        "format": {
+                            "type": "string",
+                            "enum": ["markdown", "table", "geojson"],
+                            "description": "Payload format. Defaults to 'markdown'.",
+                        },
                     },
                     "required": ["title", "content", "artifact_type"],
                 },
@@ -152,9 +171,9 @@ class UtilityServer:
             ToolDeclaration(
                 name="list_artifacts",
                 description=(
-                    "List previously saved artifacts. Returns id, title, artifact_type, "
-                    "created_at, updated_at, and a short content preview. Use this to "
-                    "reference or extend prior analyses."
+                    "List previously saved artifacts. Returns id, title, artifact_type, format, "
+                    "meta, created_at, updated_at, and a short content preview. "
+                    "Use this to reference or extend prior analyses."
                 ),
                 parameters={
                     "type": "object",
@@ -162,6 +181,10 @@ class UtilityServer:
                         "artifact_type": {
                             "type": "string",
                             "description": "Optional filter by type (note, analysis, report, sketch).",
+                        },
+                        "format": {
+                            "type": "string",
+                            "description": "Optional filter by format (markdown, table, image, geojson).",
                         },
                         "limit": {
                             "type": "number",
@@ -172,7 +195,11 @@ class UtilityServer:
             ),
             ToolDeclaration(
                 name="get_artifact",
-                description="Read the full content of a saved artifact by id.",
+                description=(
+                    "Read the full content of a saved artifact by id. "
+                    "For geojson artifacts, the returned 'content' field contains the GeoJSON string — "
+                    "pass it to add_geojson to re-add it to the map."
+                ),
                 parameters={
                     "type": "object",
                     "properties": {
@@ -306,6 +333,8 @@ class UtilityServer:
             return {"error": str(e)}
 
     def _create_artifact(self, args: dict) -> dict:
+        if args.get("format") == "image":
+            return {"error": "format='image' is not supported for AI artifact creation. Images must be created from the map export UI."}
         try:
             from tools.artifact_store import save_artifact
             fmt = args.get("format", "markdown")
@@ -326,21 +355,26 @@ class UtilityServer:
             limit = int(args.get("limit", 20))
             limit = max(1, min(limit, 100))
             artifact_type = args.get("artifact_type")
+            fmt = args.get("format")
             conn = sqlite3.connect(str(self._db_path), timeout=5.0)
             conn.row_factory = sqlite3.Row
+
+            conditions = []
+            params: list = []
             if artifact_type:
-                rows = conn.execute(
-                    "SELECT id, title, artifact_type, content, created_at, updated_at "
-                    "FROM artifacts WHERE artifact_type = ? "
-                    "ORDER BY updated_at DESC LIMIT ?",
-                    (artifact_type, limit),
-                ).fetchall()
-            else:
-                rows = conn.execute(
-                    "SELECT id, title, artifact_type, content, created_at, updated_at "
-                    "FROM artifacts ORDER BY updated_at DESC LIMIT ?",
-                    (limit,),
-                ).fetchall()
+                conditions.append("artifact_type = ?")
+                params.append(artifact_type)
+            if fmt:
+                conditions.append("format = ?")
+                params.append(fmt)
+
+            where = f"WHERE {' AND '.join(conditions)}" if conditions else ""
+            params.append(limit)
+            rows = conn.execute(
+                f"SELECT id, title, artifact_type, format, meta, content, created_at, updated_at "
+                f"FROM artifacts {where} ORDER BY updated_at DESC LIMIT ?",
+                params,
+            ).fetchall()
             conn.close()
             return {
                 "artifacts": [
@@ -348,6 +382,8 @@ class UtilityServer:
                         "id": r["id"],
                         "title": r["title"],
                         "artifact_type": r["artifact_type"],
+                        "format": r["format"],
+                        "meta": r["meta"],
                         "preview": (r["content"] or "")[:200],
                         "created_at": r["created_at"],
                         "updated_at": r["updated_at"],
@@ -365,7 +401,7 @@ class UtilityServer:
             conn = sqlite3.connect(str(self._db_path), timeout=5.0)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
-                "SELECT id, title, artifact_type, content, created_at, updated_at "
+                "SELECT id, title, artifact_type, format, meta, content, created_at, updated_at "
                 "FROM artifacts WHERE id = ?",
                 (artifact_id,),
             ).fetchone()
