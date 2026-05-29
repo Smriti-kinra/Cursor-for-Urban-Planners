@@ -124,13 +124,16 @@ export default function ArtifactsPanel({ revision, onAddToMap, chatHistory = [],
                 setReportError(payload.detail ?? 'Unknown error')
                 setReportPhase('error')
               } else if (currentEvent === 'done') {
-                if (reportPhase !== 'done') setReportPhase('done')
+                setReportPhase((prev) => (prev !== 'done' ? 'done' : prev))
               }
             } catch { /* malformed SSE line */ }
             currentEvent = ''
           }
         }
       }
+      // Guard against stream closing without a terminal event
+      setReportPhase((prev) => (prev === 'running' ? 'error' : prev))
+      setReportError((prev) => prev || 'Stream ended unexpectedly.')
     } catch (err: unknown) {
       if ((err as { name?: string }).name !== 'AbortError') {
         setReportError(String(err))
@@ -152,7 +155,7 @@ export default function ArtifactsPanel({ revision, onAddToMap, chatHistory = [],
     a.href = url
     a.download = `urban-planning-report-${Date.now()}.md`
     a.click()
-    URL.revokeObjectURL(url)
+    setTimeout(() => URL.revokeObjectURL(url), 150)
   }, [reportMarkdown])
 
   const downloadPdf = useCallback(async () => {
