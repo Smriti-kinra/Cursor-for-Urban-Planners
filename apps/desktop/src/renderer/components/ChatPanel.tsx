@@ -45,6 +45,101 @@ function pickSuggestions(n: number): string[] {
 
 const BACKEND_WS = 'ws://localhost:8765/api/chat/ws'
 
+// ── ResearchBubble ────────────────────────────────────────────────────────────
+
+interface ResearchBubbleProps {
+  phase: 'running' | 'done'
+  steps: string[]
+  markdown: string
+  citations: Array<{url: string; title: string}>
+  expanded: boolean
+  onToggleExpand: () => void
+  onDownloadMd: () => void
+  onDownloadPdf: () => void
+}
+
+function ResearchBubble({
+  phase,
+  steps,
+  markdown,
+  citations,
+  expanded,
+  onToggleExpand,
+  onDownloadMd,
+  onDownloadPdf,
+}: ResearchBubbleProps) {
+  const summaryLines = markdown.split('\n').filter(Boolean).slice(0, 3)
+
+  return (
+    <div className="research-bubble">
+      <div className="research-bubble-header">
+        {phase === 'running' ? (
+          <>
+            <span className="research-icon spinning">⟳</span>
+            <span className="research-title">Deep Research</span>
+          </>
+        ) : (
+          <>
+            <span className="research-icon done">✓</span>
+            <span className="research-title">Deep Research Complete</span>
+            <span className="research-count">{steps.length} searches</span>
+          </>
+        )}
+      </div>
+
+      <div className="research-steps">
+        {steps.map((step, i) => {
+          const isLast = i === steps.length - 1
+          const isDone = phase === 'done' || !isLast
+          return (
+            <div key={i} className={`research-step ${isDone ? 'done' : 'active'}`}>
+              <span className="step-icon">{isDone ? '✓' : '⟳'}</span>
+              <span className="step-text">Searching: {step}</span>
+            </div>
+          )
+        })}
+      </div>
+
+      {phase === 'done' && markdown && (
+        <div className="research-report">
+          <div className="research-summary">
+            {summaryLines.map((line, i) => (
+              <p key={i} className="summary-line">{line.replace(/^#+\s*/, '')}</p>
+            ))}
+          </div>
+
+          <div className="research-actions">
+            <button className="research-toggle" onClick={onToggleExpand}>
+              {expanded ? '▲ Hide full report' : '▼ View full report'}
+            </button>
+            <button className="research-dl-btn" onClick={onDownloadMd}>Download .md</button>
+            <button className="research-dl-btn pdf" onClick={onDownloadPdf}>Download PDF</button>
+          </div>
+
+          {expanded && (
+            <div className="research-full-report">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {markdown}
+              </ReactMarkdown>
+            </div>
+          )}
+
+          {citations.length > 0 && (
+            <div className="research-citations">
+              <span className="citations-label">Sources:</span>
+              {citations.map((c, i) => (
+                <a key={i} href={c.url} target="_blank" rel="noreferrer" className="citation-link">
+                  {c.title || c.url}
+                </a>
+              ))}
+            </div>
+          )}
+        </div>
+      )}
+    </div>
+  )
+}
+
 interface ChatPanelProps {
   conversations: Conversation[]
   activeConversation: Conversation | null
@@ -102,6 +197,16 @@ export default function ChatPanel({
   const [isSwitchingModel, setIsSwitchingModel] = useState(false)
   const [chatError, setChatError] = useState<ChatErrorMessage | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>(() => pickSuggestions(3))
+
+  // Deep research state
+  type ResearchPhase = 'idle' | 'running' | 'done'
+  const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
+  const [researchSteps, setResearchSteps] = useState<string[]>([])
+  const [researchMarkdown, setResearchMarkdown] = useState('')
+  const [researchCitations, setResearchCitations] = useState<Array<{url: string; title: string}>>([])
+  const [researchExpanded, setResearchExpanded] = useState(false)
+  const reportMdRef = useRef('')
+
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
   const textareaRef = useRef<HTMLTextAreaElement>(null)
@@ -162,6 +267,9 @@ export default function ChatPanel({
       payload?: unknown
       code?: string
       message?: string
+      query?: string
+      markdown?: string
+      citations?: Array<{url: string; title: string}>
     }
     try {
       data = JSON.parse(event.data)
@@ -193,6 +301,29 @@ export default function ChatPanel({
       setIsStreaming(false)
       setToolStatus(null)
       inFlightRef.current = null
+    } else if (data.type === 'research_start') {
+      setResearchPhase('running')
+      setResearchSteps([])
+      setResearchMarkdown('')
+      setResearchCitations([])
+      setResearchExpanded(false)
+      reportMdRef.current = ''
+      setToolStatus('Deep Research in progress…')
+    } else if (data.type === 'research_step') {
+      const q = data.query ?? ''
+      if (q) setResearchSteps((prev) => [...prev, q])
+    } else if (data.type === 'research_heartbeat') {
+      // keep-alive ping — no UI update needed
+    } else if (data.type === 'research_report') {
+      const md = data.markdown ?? ''
+      reportMdRef.current = md
+      setResearchMarkdown(md)
+      setResearchCitations(data.citations ?? [])
+      setResearchPhase('done')
+      setToolStatus(null)
+    } else if (data.type === 'research_done') {
+      setResearchPhase((prev) => (prev !== 'done' ? 'done' : prev))
+      setToolStatus(null)
     } else if (data.type === 'end') {
       setIsStreaming(false)
       setToolStatus(null)
@@ -225,6 +356,68 @@ export default function ChatPanel({
       })
     })
   }, [handleWsMessage])
+
+  const downloadResearchMd = useCallback(() => {
+    const md = reportMdRef.current
+    if (!md) return
+    const blob = new Blob([md], { type: 'text/markdown' })
+    const url = URL.createObjectURL(blob)
+    const a = document.createElement('a')
+    a.href = url
+    a.download = `urban-planning-report-${Date.now()}.md`
+    a.click()
+    setTimeout(() => URL.revokeObjectURL(url), 150)
+  }, [])
+
+  const downloadResearchPdf = useCallback(async () => {
+    const md = reportMdRef.current
+    if (!md) return
+    const { jsPDF } = await import('jspdf')
+    const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
+    const pageWidth = doc.internal.pageSize.getWidth()
+    const margin = 48
+    const maxLineWidth = pageWidth - margin * 2
+    let y = margin
+
+    const checkY = (needed: number) => {
+      if (y + needed > doc.internal.pageSize.getHeight() - margin) {
+        doc.addPage()
+        y = margin
+      }
+    }
+
+    for (const rawLine of md.split('\n')) {
+      const line = rawLine.trimEnd()
+      if (line.startsWith('# ')) {
+        checkY(28); doc.setFontSize(20); doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(2), margin, y); y += 28
+      } else if (line.startsWith('## ')) {
+        checkY(22); doc.setFontSize(16); doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(3), margin, y); y += 22
+      } else if (line.startsWith('### ')) {
+        checkY(18); doc.setFontSize(13); doc.setFont('helvetica', 'bold')
+        doc.text(line.slice(4), margin, y); y += 18
+      } else if (line === '') {
+        y += 8
+      } else {
+        doc.setFontSize(11); doc.setFont('helvetica', 'normal')
+        const wrapped = doc.splitTextToSize(line.replace(/^\s*[-*]\s+/, '• '), maxLineWidth)
+        for (const wl of wrapped) {
+          checkY(14); doc.text(wl, margin, y); y += 14
+        }
+      }
+    }
+    doc.save(`urban-planning-report-${Date.now()}.pdf`)
+  }, [])
+
+  useEffect(() => {
+    setResearchPhase('idle')
+    setResearchSteps([])
+    setResearchMarkdown('')
+    setResearchCitations([])
+    setResearchExpanded(false)
+    reportMdRef.current = ''
+  }, [activeConversation?.id])
 
   const sendMessageDirect = async (text: string): Promise<void> => {
     if (!text.trim() || isStreaming || !activeConversation) return
@@ -483,6 +676,23 @@ export default function ChatPanel({
             </div>
           </div>
         ))}
+        {researchPhase !== 'idle' && (
+          <div className="chat-msg assistant">
+            <div className="chat-msg-role">Assistant</div>
+            <div className="chat-msg-body">
+              <ResearchBubble
+                phase={researchPhase as 'running' | 'done'}
+                steps={researchSteps}
+                markdown={researchMarkdown}
+                citations={researchCitations}
+                expanded={researchExpanded}
+                onToggleExpand={() => setResearchExpanded((v) => !v)}
+                onDownloadMd={downloadResearchMd}
+                onDownloadPdf={downloadResearchPdf}
+              />
+            </div>
+          </div>
+        )}
         {toolStatus && (
           <div className="chat-tool-status">
             <span className="tool-dot" />

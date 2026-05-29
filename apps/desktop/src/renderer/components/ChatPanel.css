@@ -657,3 +657,179 @@
   opacity: 0.4;
   cursor: not-allowed;
 }
+
+/* ── Research Bubble ─────────────────────────────────────────────────────── */
+
+.research-bubble {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  padding: 4px 0;
+}
+
+.research-bubble-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-weight: 600;
+  font-size: 13px;
+}
+
+.research-icon {
+  font-size: 14px;
+}
+
+.research-icon.spinning {
+  display: inline-block;
+  animation: research-spin 1s linear infinite;
+}
+
+@keyframes research-spin {
+  to { transform: rotate(360deg); }
+}
+
+.research-icon.done {
+  color: #4ade80;
+}
+
+.research-title {
+  color: #e2e8f0;
+}
+
+.research-count {
+  font-size: 11px;
+  color: #6b7280;
+  font-weight: 400;
+}
+
+.research-steps {
+  display: flex;
+  flex-direction: column;
+  gap: 3px;
+  max-height: 180px;
+  overflow-y: auto;
+  padding-left: 2px;
+}
+
+.research-step {
+  display: flex;
+  align-items: flex-start;
+  gap: 6px;
+  font-size: 12px;
+  color: #9ca3af;
+  line-height: 1.4;
+}
+
+.research-step.done .step-icon {
+  color: #4ade80;
+  flex-shrink: 0;
+}
+
+.research-step.active {
+  color: #e2e8f0;
+}
+
+.research-step.active .step-icon {
+  display: inline-block;
+  animation: research-spin 1s linear infinite;
+  flex-shrink: 0;
+}
+
+.step-text {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.research-report {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  margin-top: 4px;
+}
+
+.research-summary {
+  background: rgba(255,255,255,0.04);
+  border-left: 3px solid #3b82f6;
+  padding: 8px 10px;
+  border-radius: 0 4px 4px 0;
+}
+
+.summary-line {
+  font-size: 12px;
+  color: #d1d5db;
+  margin: 0;
+  line-height: 1.5;
+}
+
+.research-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  flex-wrap: wrap;
+}
+
+.research-toggle {
+  background: none;
+  border: none;
+  color: #60a5fa;
+  font-size: 12px;
+  cursor: pointer;
+  padding: 0;
+  text-decoration: underline;
+}
+
+.research-dl-btn {
+  padding: 4px 10px;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 600;
+  background: #374151;
+  color: #e2e8f0;
+}
+
+.research-dl-btn.pdf {
+  background: #1d4ed8;
+  color: #fff;
+}
+
+.research-dl-btn:hover { opacity: 0.85; }
+
+.research-full-report {
+  max-height: 480px;
+  overflow-y: auto;
+  font-size: 13px;
+  line-height: 1.6;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 10px;
+}
+
+.research-citations {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  font-size: 11px;
+  border-top: 1px solid rgba(255,255,255,0.08);
+  padding-top: 8px;
+}
+
+.citations-label {
+  color: #6b7280;
+  font-weight: 600;
+}
+
+.citation-link {
+  color: #60a5fa;
+  text-decoration: none;
+  max-width: 200px;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.citation-link:hover {
+  text-decoration: underline;
+}
