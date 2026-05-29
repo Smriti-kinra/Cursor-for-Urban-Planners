@@ -128,6 +128,7 @@ Structure the report with these sections:
 (Data sources, layer descriptions, methodology notes, web sources consulted)
 
 Be specific and professional. Reference the actual map data, drawn geometries, and conversation details provided.
+
 ---
 """
 
@@ -154,7 +155,7 @@ def _build_stream_prompt(request: ReportRequest) -> str:
 
         if bookmarks:
             bm_lines = [
-                f"- {b['name']}: bounds W={b['west']}, S={b['south']}, E={b['east']}, N={b['north']}"
+                f"- {b.get('name', '')}: bounds W={b.get('west')}, S={b.get('south')}, E={b.get('east')}, N={b.get('north')}"
                 for b in bookmarks
             ]
             parts.append("### Bookmarks\n" + "\n".join(bm_lines))
@@ -195,7 +196,8 @@ def _build_stream_prompt(request: ReportRequest) -> str:
             t = a.get("artifact_type", "note")
             title = a.get("title", "")
             content = a.get("content", "")
-            items.append(f"- [{t}] **{title}**: {content[:500]}")
+            truncated = content[:500] + ("…" if len(content) > 500 else "")
+            items.append(f"- [{t}] **{title}**: {truncated}")
         parts.append("## Artifacts\n" + "\n".join(items))
 
     return "\n\n".join(parts)
@@ -207,31 +209,36 @@ async def stream_report(request: ReportRequest):
 
     async def generate():
         try:
-            stream = await _client.responses.create(
+            got_text = False
+            async with await _client.responses.create(
                 model="o4-mini-deep-research",
                 input=prompt,
+                instructions=STREAM_SYSTEM,
                 tools=[{"type": "web_search_preview"}],
                 max_tool_calls=20,
                 stream=True,
-            )
-            async for event in stream:
-                event_type = getattr(event, "type", None)
+            ) as stream:
+                async for event in stream:
+                    event_type = getattr(event, "type", None)
 
-                # Web search tool call events
-                if event_type == "response.web_search_call.searching":
-                    query = getattr(event, "query", "") or ""
-                    data = json.dumps({"action": "search", "query": query})
-                    yield f"event: tool_call\ndata: {data}\n\n"
+                    if event_type == "response.web_search_call.searching":
+                        query = getattr(event, "query", "") or ""
+                        if query:
+                            data = json.dumps({"action": "search", "query": query})
+                            yield f"event: tool_call\ndata: {data}\n\n"
 
-                elif event_type == "response.web_search_call.completed":
-                    pass  # already announced at searching
+                    elif event_type == "response.output_text.done":
+                        text = getattr(event, "text", "") or ""
+                        if text:
+                            got_text = True
+                            data = json.dumps({"markdown": text})
+                            yield f"event: message\ndata: {data}\n\n"
 
-                # Output text delta — accumulate until done
-                elif event_type == "response.output_text.done":
-                    text = getattr(event, "text", "") or ""
-                    if text:
-                        data = json.dumps({"markdown": text})
-                        yield f"event: message\ndata: {data}\n\n"
+            if not got_text:
+                data = json.dumps({"detail": "No report text was generated."})
+                yield f"event: error\ndata: {data}\n\n"
+            else:
+                yield "event: done\ndata: {}\n\n"
 
         except Exception as exc:
             data = json.dumps({"detail": str(exc)})
