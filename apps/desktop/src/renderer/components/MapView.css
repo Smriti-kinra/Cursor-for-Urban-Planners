@@ -183,3 +183,36 @@
   font-weight: 600;
 }
 
+/* ── Right-click context menu ── */
+
+.map-context-menu {
+  position: absolute;
+  z-index: 1000;
+  min-width: 200px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  overflow: hidden;
+  padding: 4px;
+}
+
+.map-context-menu .ctx-item {
+  display: block;
+  width: 100%;
+  text-align: left;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 8px 10px;
+  font-size: 13px;
+  font-family: inherit;
+  border-radius: 4px;
+  cursor: pointer;
+}
+
+.map-context-menu .ctx-item:hover {
+  background: var(--accent);
+  color: var(--bg-surface);
+}
+

@@ -30,6 +30,9 @@ interface MapViewProps {
     layerName: string,
     style: { fillColor?: string; lineColor?: string; opacity?: number },
   ) => void
+  onAddMarker?: (lng: number, lat: number) => void
+  onOpenStreetView?: (lng: number, lat: number) => void
+  onAskChat?: (lng: number, lat: number) => void
 }
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
@@ -43,6 +46,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onBasemapChange,
     onActionsProcessed,
     onLayerStyleChange,
+    onAddMarker,
+    onOpenStreetView,
+    onAskChat,
   },
   ref,
 ) {
@@ -52,6 +58,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onBoundsChangeRef.current = onBoundsChange
   const onLayerStyleChangeRef = useRef(onLayerStyleChange)
   onLayerStyleChangeRef.current = onLayerStyleChange
+  const onAddMarkerRef = useRef(onAddMarker)
+  onAddMarkerRef.current = onAddMarker
+  const onOpenStreetViewRef = useRef(onOpenStreetView)
+  onOpenStreetViewRef.current = onOpenStreetView
+  const onAskChatRef = useRef(onAskChat)
+  onAskChatRef.current = onAskChat
   const ownLayerIds = useRef(new Set<string>())
   // Per-source revision token: setData() is only called when layer.data changes.
   const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
@@ -62,6 +74,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const [searchResults, setSearchResults] = useState<NominatimSearchResult[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [showBasemaps, setShowBasemaps] = useState(false)
+  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
 
   // ── Initialize map ──
 
@@ -109,6 +122,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         north: b.getNorth(),
       })
     })
+
+    map.on('contextmenu', (e) => {
+      e.preventDefault?.()
+      setCtxMenu({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat })
+    })
+    map.on('movestart', () => setCtxMenu(null))
 
     mapRef.current = map
 
@@ -458,6 +477,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onActionsProcessed()
   }, [mapActions, mapReady, layers]) // eslint-disable-line react-hooks/exhaustive-deps
 
+  // ── Context menu dismissal (Escape / outside click) ──
+
+  useEffect(() => {
+    if (!ctxMenu) return
+    const close = () => setCtxMenu(null)
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setCtxMenu(null) }
+    window.addEventListener('click', close)
+    window.addEventListener('keydown', onKey)
+    return () => {
+      window.removeEventListener('click', close)
+      window.removeEventListener('keydown', onKey)
+    }
+  }, [ctxMenu])
+
   // ── Geocoding search ──
 
   const handleSearch = async () => {
@@ -567,6 +600,34 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               {info.name}
             </button>
           ))}
+        </div>
+      )}
+
+      {/* ── Right-click context menu ── */}
+      {ctxMenu && (
+        <div
+          className="map-context-menu"
+          style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          onClick={(e) => e.stopPropagation()}
+        >
+          <button
+            className="ctx-item"
+            onClick={() => { onAddMarkerRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
+          >
+            📍 Add marker here
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => { onOpenStreetViewRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
+          >
+            🛣 Street View
+          </button>
+          <button
+            className="ctx-item"
+            onClick={() => { onAskChatRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
+          >
+            💬 Ask chat about this place
+          </button>
         </div>
       )}
 
