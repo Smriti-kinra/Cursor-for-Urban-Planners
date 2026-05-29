@@ -160,6 +160,7 @@ interface ChatPanelProps {
   mapContext: MapContext
   onMapAction: (action: MapAction) => void
   documentImage?: DocumentImage | null
+  injectedMessage?: { text: string; nonce: number } | null
 }
 
 function CodePre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
@@ -197,6 +198,7 @@ export default function ChatPanel({
   mapContext,
   onMapAction,
   documentImage,
+  injectedMessage,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -250,6 +252,22 @@ export default function ChatPanel({
       }, 0)
     }
   }, [activeConversation?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  const lastInjectedNonceRef = useRef<number>(0)
+
+  useEffect(() => {
+    if (!injectedMessage) return
+    if (injectedMessage.nonce === lastInjectedNonceRef.current) return
+    lastInjectedNonceRef.current = injectedMessage.nonce
+    if (isStreaming) return
+    if (!activeConversation) {
+      // No conversation yet — stash it; the activeConversation effect will send.
+      pendingInputRef.current = injectedMessage.text
+      onCreateConversation()
+      return
+    }
+    sendMessageDirect(injectedMessage.text)
+  }, [injectedMessage]) // eslint-disable-line react-hooks/exhaustive-deps
 
   useEffect(() => {
     Promise.all([
