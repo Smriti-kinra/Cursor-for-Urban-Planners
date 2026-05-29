@@ -56,7 +56,11 @@ def init_db() -> None:
         current = conn.execute("PRAGMA user_version").fetchone()[0]
         for version, sql in enumerate(_MIGRATIONS, start=1):
             if version > current:
-                conn.executescript(sql)
+                try:
+                    conn.executescript(sql)
+                except sqlite3.OperationalError as e:
+                    if "duplicate column name" not in str(e).lower():
+                        raise
                 conn.execute(f"PRAGMA user_version = {version}")
                 conn.commit()
     finally:

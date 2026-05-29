@@ -17,10 +17,10 @@ import math
 import sqlite3
 from pathlib import Path
 
-import httpx
-
 from llm.base import ToolDeclaration
+from tools import cache, http as http_client
 from tools.geo import area_breakdown
+from tools.google import GoogleUnavailable, geocode_query as google_geocode_query, has_key as has_google_key
 
 
 def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -28,6 +28,46 @@ def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     dlon, dlat = math.radians(lon2 - lon1), math.radians(lat2 - lat1)
     a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
     return R * 2 * math.asin(math.sqrt(a))
+
+
+def _photon_to_results(payload: dict) -> list[dict]:
+    out: list[dict] = []
+    for feat in (payload or {}).get("features", []) or []:
+        geom = feat.get("geometry") or {}
+        coords = geom.get("coordinates") or []
+        if len(coords) < 2:
+            continue
+        lng, lat = coords[0], coords[1]
+        props = feat.get("properties") or {}
+        parts = [
+            props.get("name"),
+            props.get("housenumber"),
+            props.get("street"),
+            props.get("postcode"),
+            props.get("city") or props.get("locality"),
+            props.get("state"),
+            props.get("country"),
+        ]
+        display_name = ", ".join(p for p in parts if p)
+        out.append({
+            "display_name": display_name or props.get("name", ""),
+            "lat": str(lat),
+            "lon": str(lng),
+        })
+    return out
+
+
+def _nominatim_to_results(payload: list) -> list[dict]:
+    if not isinstance(payload, list):
+        return []
+    return [
+        {
+            "display_name": r.get("display_name", ""),
+            "lat": r.get("lat"),
+            "lon": r.get("lon"),
+        }
+        for r in payload
+    ]
 
 
 class UtilityServer:
@@ -175,22 +215,64 @@ class UtilityServer:
             return {"error": str(e)}
 
     async def _geocode(self, query: str) -> dict:
-        try:
-            async with httpx.AsyncClient() as http:
-                resp = await http.get(
-                    "https://nominatim.openstreetmap.org/search",
-                    params={"q": query, "format": "json", "limit": 5},
-                    headers={"User-Agent": "CursorUrbanPlanners/1.0"},
+        query = (query or "").strip()
+        if not query:
+            return {"error": "Empty query"}
+        limit = 5
+        cache_key = {"q": query.lower(), "limit": limit}
+
+        async def _fetch() -> list[dict]:
+            # Google Geocoding (highest accuracy, especially for India). Only
+            # attempted when GOOGLE_MAPS_API_KEY is set; otherwise skip silently.
+            if has_google_key():
+                try:
+                    google_results = await google_geocode_query(query, limit=limit)
+                    if google_results:
+                        # Slim down to the shape stored historically (str lat/lon)
+                        # so cached entries from the Google tier are interchangeable
+                        # with cached entries from the Photon/Nominatim tiers.
+                        return [
+                            {
+                                "display_name": r["display_name"],
+                                "lat": str(r["lat"]),
+                                "lon": str(r["lon"]),
+                            }
+                            for r in google_results
+                        ]
+                except GoogleUnavailable:
+                    pass
+
+            try:
+                photon = await http_client.fetch_json(
+                    "https://photon.komoot.io/api/",
+                    namespace="photon",
+                    params={"q": query, "limit": limit},
                 )
-                results = resp.json()
-                return {
-                    "results": [
-                        {"display_name": r.get("display_name", ""), "lat": r.get("lat"), "lon": r.get("lon")}
-                        for r in results
-                    ]
-                }
+                results = _photon_to_results(photon)
+                if results:
+                    return results
+            except http_client.HTTPError:
+                pass
+
+            nominatim = await http_client.fetch_json(
+                "https://nominatim.openstreetmap.org/search",
+                namespace="nominatim",
+                params={"q": query, "format": "json", "limit": limit},
+            )
+            return _nominatim_to_results(nominatim)
+
+        try:
+            results = await cache.get_or_fetch(
+                namespace="geocode",
+                key=cache_key,
+                ttl_seconds=86_400 * 7,
+                fetch_fn=_fetch,
+            )
+        except http_client.HTTPError as e:
+            return {"error": str(e), "code": e.code}
         except Exception as e:
             return {"error": str(e)}
+        return {"results": results}
 
     def _measure_distance(self, points: list) -> dict:
         if len(points) < 2:
@@ -225,15 +307,17 @@ class UtilityServer:
 
     def _create_artifact(self, args: dict) -> dict:
         try:
-            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
-            cursor = conn.execute(
-                "INSERT INTO artifacts (title, content, artifact_type) VALUES (?, ?, ?)",
-                (args.get("title", "Untitled"), args.get("content", ""), args.get("artifact_type", "note")),
+            from tools.artifact_store import save_artifact
+            fmt = args.get("format", "markdown")
+            result = save_artifact(
+                title=args.get("title", "Untitled"),
+                artifact_type=args.get("artifact_type", "note"),
+                format=fmt,
+                content=args.get("content", ""),
             )
-            conn.commit()
-            artifact_id = cursor.lastrowid
-            conn.close()
-            return {"status": "created", "id": artifact_id}
+            return {"status": "created", "id": result["id"]}
+        except ValueError as e:
+            return {"error": str(e)}
         except Exception as e:
             return {"error": str(e)}
 

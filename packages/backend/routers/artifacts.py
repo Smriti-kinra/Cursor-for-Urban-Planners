@@ -12,13 +12,15 @@ router = APIRouter()
 @router.get("")
 async def list_artifacts():
     conn = get_connection()
-    rows = conn.execute(
-        "SELECT id, title, artifact_type, format, meta, "
-        "SUBSTR(content, 1, 200) as preview, file_path, created_at, updated_at "
-        "FROM artifacts ORDER BY updated_at DESC"
-    ).fetchall()
-    conn.close()
-    return [dict(r) for r in rows]
+    try:
+        rows = conn.execute(
+            "SELECT id, title, artifact_type, format, meta, "
+            "SUBSTR(content, 1, 200) as preview, file_path, created_at, updated_at "
+            "FROM artifacts ORDER BY updated_at DESC"
+        ).fetchall()
+        return [dict(r) for r in rows]
+    finally:
+        conn.close()
 
 
 @router.post("", status_code=201)
@@ -125,51 +127,54 @@ async def download_artifact(artifact_id: int):
 @router.put("/{artifact_id}")
 async def update_artifact(artifact_id: int, update: ArtifactUpdate):
     conn = get_connection()
-    existing = conn.execute(
-        "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
-    ).fetchone()
-    if not existing:
+    try:
+        existing = conn.execute(
+            "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone()
+        if not existing:
+            raise HTTPException(status_code=404, detail="Artifact not found")
+
+        fields, values = [], []
+        if update.title is not None:
+            fields.append("title = ?")
+            values.append(update.title)
+        if update.content is not None and existing["format"] != "image":
+            fields.append("content = ?")
+            values.append(update.content)
+        if update.artifact_type is not None:
+            fields.append("artifact_type = ?")
+            values.append(update.artifact_type)
+        if update.meta is not None:
+            fields.append("meta = ?")
+            values.append(
+                json.dumps(update.meta) if not isinstance(update.meta, str) else update.meta
+            )
+
+        if fields:
+            fields.append("updated_at = CURRENT_TIMESTAMP")
+            values.append(artifact_id)
+            conn.execute(
+                f"UPDATE artifacts SET {', '.join(fields)} WHERE id = ?", values
+            )
+            conn.commit()
+
+        row = conn.execute(
+            "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone()
+        return dict(row)
+    finally:
         conn.close()
-        raise HTTPException(status_code=404, detail="Artifact not found")
-
-    fields, values = [], []
-    if update.title is not None:
-        fields.append("title = ?")
-        values.append(update.title)
-    if update.content is not None and existing["format"] != "image":
-        fields.append("content = ?")
-        values.append(update.content)
-    if update.artifact_type is not None:
-        fields.append("artifact_type = ?")
-        values.append(update.artifact_type)
-    if update.meta is not None:
-        fields.append("meta = ?")
-        values.append(
-            json.dumps(update.meta) if isinstance(update.meta, dict) else update.meta
-        )
-
-    if fields:
-        fields.append("updated_at = CURRENT_TIMESTAMP")
-        values.append(artifact_id)
-        conn.execute(
-            f"UPDATE artifacts SET {', '.join(fields)} WHERE id = ?", values
-        )
-        conn.commit()
-
-    row = conn.execute(
-        "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
-    ).fetchone()
-    conn.close()
-    return dict(row)
 
 
 @router.delete("/{artifact_id}")
 async def delete_artifact_http(artifact_id: int):
     conn = get_connection()
-    existing = conn.execute(
-        "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
-    ).fetchone()
-    conn.close()
+    try:
+        existing = conn.execute(
+            "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
+        ).fetchone()
+    finally:
+        conn.close()
     if not existing:
         raise HTTPException(status_code=404, detail="Artifact not found")
     delete_artifact(artifact_id)

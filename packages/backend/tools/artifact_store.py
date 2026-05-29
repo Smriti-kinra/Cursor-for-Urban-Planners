@@ -154,7 +154,10 @@ def save_artifact(
             (title, final_content, artifact_type, format, meta_json),
         )
         artifact_id = cursor.lastrowid
-        conn.commit()
+        # For image format, defer commit until after file write so we don't
+        # leave an orphaned row if the disk write fails.
+        if format != "image":
+            conn.commit()
 
         file_path_rel: Optional[str] = None
 
@@ -188,7 +191,11 @@ def save_artifact(
 
             filename = f"{artifact_id}.{ext}"
             file_path_full = ARTIFACTS_DIR / filename
-            file_path_full.write_bytes(file_bytes)
+            try:
+                file_path_full.write_bytes(file_bytes)
+            except OSError:
+                conn.rollback()
+                raise
             # store as relative path from ARTIFACTS_DIR parent (backend dir)
             file_path_rel = str(Path("artifacts_store") / filename)
 
