@@ -47,6 +47,8 @@ const BACKEND_WS = 'ws://localhost:8765/api/chat/ws'
 
 // ── ResearchBubble ────────────────────────────────────────────────────────────
 
+type ResearchPhase = 'idle' | 'running' | 'done'
+
 interface ResearchBubbleProps {
   phase: 'running' | 'done'
   steps: string[]
@@ -68,6 +70,14 @@ function ResearchBubble({
   onDownloadMd,
   onDownloadPdf,
 }: ResearchBubbleProps) {
+  const stepsRef = useRef<HTMLDivElement>(null)
+
+  useEffect(() => {
+    if (stepsRef.current) {
+      stepsRef.current.scrollTop = stepsRef.current.scrollHeight
+    }
+  }, [steps.length])
+
   const summaryLines = markdown.split('\n').filter(Boolean).slice(0, 3)
 
   return (
@@ -87,7 +97,7 @@ function ResearchBubble({
         )}
       </div>
 
-      <div className="research-steps">
+      <div className="research-steps" ref={stepsRef}>
         {steps.map((step, i) => {
           const isLast = i === steps.length - 1
           const isDone = phase === 'done' || !isLast
@@ -199,7 +209,6 @@ export default function ChatPanel({
   const [suggestions, setSuggestions] = useState<string[]>(() => pickSuggestions(3))
 
   // Deep research state
-  type ResearchPhase = 'idle' | 'running' | 'done'
   const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
   const [researchSteps, setResearchSteps] = useState<string[]>([])
   const [researchMarkdown, setResearchMarkdown] = useState('')
@@ -681,7 +690,7 @@ export default function ChatPanel({
             <div className="chat-msg-role">Assistant</div>
             <div className="chat-msg-body">
               <ResearchBubble
-                phase={researchPhase as 'running' | 'done'}
+                phase={researchPhase}
                 steps={researchSteps}
                 markdown={researchMarkdown}
                 citations={researchCitations}
