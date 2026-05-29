@@ -41,6 +41,12 @@ _MIGRATIONS: list[str] = [
         updated_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     );
     """,
+    # 1 → 2 : typed artifacts
+    """
+    ALTER TABLE artifacts ADD COLUMN format TEXT NOT NULL DEFAULT 'markdown';
+    ALTER TABLE artifacts ADD COLUMN file_path TEXT;
+    ALTER TABLE artifacts ADD COLUMN meta TEXT;
+    """,
 ]
 
 
