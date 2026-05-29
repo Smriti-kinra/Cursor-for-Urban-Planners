@@ -61,3 +61,36 @@ async def geocode(query: str = Query(..., description="Address or place name"), 
         return {"error": str(e), "results": []}
     except Exception as e:
         return {"error": f"Unexpected error: {e}", "results": []}
+
+
+@router.get("/reverse")
+async def reverse_geocode(lat: float = Query(...), lng: float = Query(...)):
+    """Resolve coordinates to a human address. Nominatim ``/reverse``; the
+    server-side proxy exists because browsers cannot set the ``User-Agent``
+    that OSM's usage policy requires. (Google reverse is not wired here yet —
+    Nominatim is sufficient for a marker label and always keyless.)"""
+    try:
+        data = await http_client.fetch_json(
+            "https://nominatim.openstreetmap.org/reverse",
+            namespace="nominatim",
+            params={
+                "lat": lat,
+                "lon": lng,
+                "format": "json",
+                "addressdetails": 1,
+                "zoom": 18,
+            },
+        )
+        if not isinstance(data, dict) or "display_name" not in data:
+            return {"display_name": None, "lat": lat, "lon": lng}
+        return {
+            "display_name": data.get("display_name"),
+            "lat": float(data["lat"]) if data.get("lat") else lat,
+            "lon": float(data["lon"]) if data.get("lon") else lng,
+            "type": data.get("type"),
+            "class": data.get("category") or data.get("class"),
+        }
+    except http_client.HTTPError as e:
+        return {"error": str(e), "display_name": None, "lat": lat, "lon": lng}
+    except Exception as e:
+        return {"error": f"Unexpected error: {e}", "display_name": None, "lat": lat, "lon": lng}
