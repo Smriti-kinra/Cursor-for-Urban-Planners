@@ -26,6 +26,9 @@ importers:
       maplibre-gl:
         specifier: ^5.20.2
         version: 5.20.2
+      pannellum:
+        specifier: ^2.5.7
+        version: 2.5.7
       pdfjs-dist:
         specifier: ^5.7.284
         version: 5.7.284
@@ -2287,6 +2290,9 @@ packages:
 
   pako@2.1.0:
     resolution: {integrity: sha512-w+eufiZ1WuJYgPXbV/PO3NCMEc3xqylkKHzp8bxp1uW4qaSNQUkwmLLEc3kKsfz8lpV1F8Ht3U1Cm+9Srog2ug==}
+
+  pannellum@2.5.7:
+    resolution: {integrity: sha512-AHMRYdLPxetwhBg4lO5EgoZ55C/e+wrJF2WaFQIQA18HSVcvLvsdXEjDL7WpD8MPIFwNnH9qoUDsUqP8cF4pgA==}
 
   parse-entities@4.0.2:
     resolution: {integrity: sha512-GG2AQYWoLgL877gQIKeRPGO1xF9+eG1ujIb5soS5gPvLQ1y2o8FL90w2QWNdf9I361Mpp7726c+lj3U0qK1uGw==}
@@ -6255,6 +6261,8 @@ snapshots:
   package-json-from-dist@1.0.1: {}
 
   pako@2.1.0: {}
+
+  pannellum@2.5.7: {}
 
   parse-entities@4.0.2:
     dependencies:
