@@ -7,6 +7,8 @@ import ChatPanel from './components/ChatPanel'
 import StreetViewDialog from './components/StreetViewDialog'
 import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
+import SymbologyPanel from './components/SymbologyPanel'
+import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
@@ -23,7 +25,14 @@ import {
   MapBookmark,
   BoundaryGeometry,
   LayerGeometryData,
+  LayerStyleSpec,
 } from './types'
+import {
+  computeBreaks,
+  buildCategories,
+  rampColorsForClasses,
+  DEFAULT_RAMP,
+} from './lib/classify'
 
 type AppMode = 'map' | 'document'
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
@@ -39,6 +48,7 @@ function App() {
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
+  const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
   const [mapViewState, setMapViewState] = useState<MapViewState>({
@@ -606,9 +616,90 @@ function App() {
     [],
   )
 
+  // Build a LayerStyleSpec from a `style_layer` action payload, reading the
+  // layer's feature values to compute category palettes / numeric breaks.
+  // Shared by the AI action path and (indirectly) the manual SymbologyPanel.
+  const buildStyleSpec = useCallback(
+    (
+      layer: GeoJSONLayer,
+      p: Extract<MapAction, { type: 'style_layer' }>['payload'],
+    ): LayerStyleSpec => {
+      const feats = layer.data?.features || []
+      // Carry forward existing labels unless the payload changes them.
+      const prevLabel = layer.styleSpec?.label
+      const spec: LayerStyleSpec = {
+        mode: p.mode,
+        opacity: p.opacity ?? layer.styleSpec?.opacity,
+        label: prevLabel,
+      }
+
+      if (p.mode === 'categorized' && p.property) {
+        const values = feats.map((f) => String(f.properties?.[p.property!] ?? ''))
+        spec.property = p.property
+        spec.categories = p.categories?.length
+          ? p.categories
+          : buildCategories(values, p.property, p.ramp || 'category')
+        spec.otherColor = layer.color
+        spec.rampName = p.ramp || 'category'
+      } else if (p.mode === 'graduated' && p.property) {
+        const nums = feats
+          .map((f) => Number(f.properties?.[p.property!]))
+          .filter((n) => Number.isFinite(n))
+        const classes = Math.max(2, Math.min(p.classes ?? 5, 9))
+        const method = p.classification || 'quantile'
+        const breaks = computeBreaks(nums, classes, method)
+        const rampName = p.ramp || DEFAULT_RAMP
+        spec.property = p.property
+        spec.breaks = breaks
+        // rampColors length must equal breaks.length + 1 (one color per bucket).
+        spec.rampColors = rampColorsForClasses(rampName, breaks.length + 1)
+        spec.classification = method
+        spec.rampName = rampName
+      }
+
+      // Label changes (independent of color mode).
+      if (p.label_property !== undefined || p.label_enabled !== undefined ||
+          p.label_size !== undefined || p.label_color !== undefined) {
+        const property = p.label_property ?? prevLabel?.property ?? ''
+        spec.label = {
+          enabled: p.label_enabled ?? (p.label_property ? true : prevLabel?.enabled ?? false),
+          property,
+          size: p.label_size ?? prevLabel?.size,
+          color: p.label_color ?? prevLabel?.color,
+          haloColor: prevLabel?.haloColor,
+        }
+      }
+
+      return spec
+    },
+    [],
+  )
+
+  // Direct UI path: SymbologyPanel writes a fully-formed styleSpec onto a layer.
+  const handleSymbologyChange = useCallback((layerId: string, styleSpec: LayerStyleSpec) => {
+    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, styleSpec } : l)))
+  }, [])
+
+  const stylingLayer = useMemo(
+    () => layers.find((l) => l.id === stylingLayerId) ?? null,
+    [layers, stylingLayerId],
+  )
+
   // ── Map action handler (intercepts layer ops, queues the rest) ──
 
   const handleMapAction = useCallback((action: MapAction) => {
+    if (action.type === 'style_layer') {
+      const p = action.payload
+      setLayers((prev) =>
+        prev.map((l) =>
+          l.name.toLowerCase() === p.layer_name?.toLowerCase()
+            ? { ...l, styleSpec: buildStyleSpec(l, p) }
+            : l,
+        ),
+      )
+      setActiveLeftTab('layers')
+      return
+    }
     if (action.type === 'save_bookmark') {
       const { name, south, west, north, east, zoom } = action.payload
       const bounds =
@@ -788,7 +879,7 @@ function App() {
       return
     }
     setMapActions((prev) => [...prev, action])
-  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom])
+  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom, buildStyleSpec])
 
   // ── Right-click map actions ──
 
@@ -895,6 +986,20 @@ function App() {
           } catch { /* ignore */ }
         }
 
+        const s = l.styleSpec
+        const style = s
+          ? {
+              mode: s.mode,
+              property: s.property,
+              categoryCount: s.categories?.length,
+              classes: s.breaks ? s.breaks.length + 1 : undefined,
+              ramp: s.rampName,
+              labels: (s.label?.enabled
+                ? { property: s.label.property }
+                : false) as false | { property: string },
+            }
+          : { mode: 'simple' as const, labels: false as const }
+
         return {
           name: l.name,
           featureCount,
@@ -902,6 +1007,7 @@ function App() {
           properties,
           visible: l.visible,
           ...(geometry_data ? { geometry_data } : {}),
+          style,
         }
       }),
       basemap,
@@ -1001,6 +1107,7 @@ function App() {
             ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
             ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
+            ...(l.styleSpec !== undefined ? { styleSpec: l.styleSpec } : {}),
           })),
           conversations,
           activeConversationId,
@@ -1093,6 +1200,7 @@ function App() {
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
               ...(info.lineColor !== undefined ? { lineColor: info.lineColor } : {}),
               ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
+              ...(info.styleSpec !== undefined ? { styleSpec: info.styleSpec } : {}),
             })
           } catch {
             /* skip invalid files */
@@ -1202,7 +1310,23 @@ function App() {
             <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
           )}
           {activeLeftTab === 'layers' && (
-            <LayerPanel layers={layers} onToggle={toggleLayer} onRemove={removeLayer} onZoomTo={zoomToLayer} />
+            <>
+              <LayerPanel
+                layers={layers}
+                onToggle={toggleLayer}
+                onRemove={removeLayer}
+                onZoomTo={zoomToLayer}
+                onStyle={(id) => setStylingLayerId((cur) => (cur === id ? null : id))}
+                activeStyleId={stylingLayerId}
+              />
+              {stylingLayer && (
+                <SymbologyPanel
+                  layer={stylingLayer}
+                  onChange={handleSymbologyChange}
+                  onClose={() => setStylingLayerId(null)}
+                />
+              )}
+            </>
           )}
           {activeLeftTab === 'bookmarks' && (
             <BookmarkPanel
@@ -1261,6 +1385,7 @@ function App() {
                   onAskChat={handleRightClickAskChat}
                 />
               </ErrorBoundary>
+              <Legend layers={layers} />
             </div>
           ) : (
             <ErrorBoundary label="Document">

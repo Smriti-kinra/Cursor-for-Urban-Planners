@@ -60,7 +60,7 @@ _servers = {
 _ACTION_TOOLS = {
     "fly_to", "fit_bounds", "add_marker", "add_markers", "clear_markers",
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
-    "highlight_features", "set_layer_style", "toggle_layer", "remove_layer",
+    "highlight_features", "set_layer_style", "style_layer", "toggle_layer", "remove_layer",
     "save_bookmark", "go_to_bookmark", "export_region_clip",
 }
 
@@ -82,7 +82,7 @@ SYSTEM_PROMPT = (
     "AVAILABLE TOOLS:\n"
     "- Navigate: fly_to, fit_bounds\n"
     "- Markers: add_marker, add_markers, clear_markers\n"
-    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style\n"
+    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
     "- Search: web_search, geocode\n"
     "- OSM: osm_search (amenities, buildings, roads), "
@@ -144,7 +144,15 @@ SYSTEM_PROMPT = (
     "upstream_unavailable.\n"
     "11. AMBIGUOUS PLACE NAMES: if the user types a partial or ambiguous place name, call "
     "places_autocomplete first to get candidate place_ids, then place_details on the best match "
-    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster."
+    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster.\n"
+    "12. STYLING A LAYER: to color a layer BY a property value, use style_layer — "
+    "mode='categorized' for a string property (zone_code, land_use, route_name), "
+    "mode='graduated' for a numeric property (population, density, area). You pass only "
+    "the property and (optionally) ramp/classes; the app computes breaks and the palette. "
+    "To put text on the map, pass label_property (e.g. the station/zone/route name). Use "
+    "set_layer_style ONLY for a single flat color across the whole layer. Each layer in the "
+    "map context carries a 'style' summary — do NOT re-issue a style_layer call that already "
+    "matches the active mode/property."
 )
 
 # ── Deep research helpers ──────────────────────────────────────────────────────
@@ -412,13 +420,55 @@ def _build_tools() -> list[dict]:
             },
             "required": ["layer_name", "property_name", "property_value"],
         }),
-        ("set_layer_style", "Change the visual style of a loaded map layer", {
+        ("set_layer_style", "Apply ONE flat fill/line color to an entire layer", {
             "type": "object",
             "properties": {
                 "layer_name": {"type": "string"}, "fill_color": {"type": "string"},
                 "line_color": {"type": "string"}, "opacity": {"type": "number"},
             },
             "required": ["layer_name"],
+        }),
+        ("style_layer", (
+            "Apply DATA-DRIVEN symbology to a loaded layer: categorized colors by a "
+            "string property (e.g. zone_code, route_name), graduated/choropleth colors "
+            "by a numeric property (e.g. population, density), and/or text labels drawn "
+            "from a property. The frontend computes the class breaks and category "
+            "palette — you only pass mode, property, and optionally ramp/classes. "
+            "Prefer this over set_layer_style whenever the user wants to color BY a "
+            "property or show labels."
+        ), {
+            "type": "object",
+            "properties": {
+                "layer_name": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["simple", "categorized", "graduated"],
+                    "description": "categorized=color by string property; graduated=choropleth by numeric property; simple=clear data-driven styling.",
+                },
+                "property": {"type": "string", "description": "Feature property to drive color. Required for categorized/graduated."},
+                "classification": {
+                    "type": "string",
+                    "enum": ["equal-interval", "quantile"],
+                    "description": "Graduated only. Default quantile.",
+                },
+                "classes": {"type": "number", "description": "Graduated bucket count (2-9, default 5)."},
+                "ramp": {"type": "string", "description": "Color ramp name: YlOrRd, Blues, Greens, Purples, Reds (graduated) or category (categorized)."},
+                "categories": {
+                    "type": "array",
+                    "description": "Optional explicit value->color overrides for categorized mode.",
+                    "items": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}, "color": {"type": "string"}},
+                        "required": ["value", "color"],
+                    },
+                },
+                "opacity": {"type": "number"},
+                "label_property": {"type": "string", "description": "Property to draw as on-map text. Omit to leave labels unchanged."},
+                "label_enabled": {"type": "boolean", "description": "Turn labels on/off."},
+                "label_size": {"type": "number"},
+                "label_color": {"type": "string"},
+            },
+            "required": ["layer_name", "mode"],
         }),
         ("toggle_layer", "Show or hide a map layer", {
             "type": "object",

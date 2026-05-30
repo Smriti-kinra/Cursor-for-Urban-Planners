@@ -1,6 +1,6 @@
 import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
 import maplibregl from 'maplibre-gl'
-import type { DataDrivenPropertyValueSpecification } from 'maplibre-gl'
+import type { DataDrivenPropertyValueSpecification, ExpressionSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import * as turf from '@turf/turf'
 import type { Feature, FeatureCollection } from 'geojson'
@@ -15,6 +15,75 @@ interface NominatimSearchResult {
 
 export type MapViewHandle = {
   getCanvas: () => HTMLCanvasElement | null
+}
+
+// Labels are the most expensive layer type. Above this feature count we skip
+// the symbol layer entirely to keep the map responsive.
+const LABEL_FEATURE_CAP = 3000
+
+// ── Data-driven paint expressions ──
+//
+// Translate a layer's styleSpec into a MapLibre color expression. Always wrap
+// in coalesce(get(fillColor|strokeColor), <expr>) so a per-feature color
+// override still wins over categorized/graduated styling.
+
+type ColorExpr = DataDrivenPropertyValueSpecification<string>
+
+function categorizedExpr(spec: NonNullable<GeoJSONLayer['styleSpec']>, fallback: string): unknown {
+  const match: unknown[] = ['match', ['to-string', ['get', spec.property!]]]
+  for (const c of spec.categories!) match.push(c.value, c.color)
+  match.push(spec.otherColor || fallback) // default for unmatched values
+  return match
+}
+
+function graduatedExpr(spec: NonNullable<GeoJSONLayer['styleSpec']>, fallback: string): unknown {
+  const colors = spec.rampColors!
+  const step: unknown[] = ['step', ['to-number', ['get', spec.property!], 0], colors[0]]
+  spec.breaks!.forEach((b, i) => step.push(b, colors[i + 1] ?? colors[colors.length - 1]))
+  return step
+}
+
+function dataDrivenColor(
+  spec: GeoJSONLayer['styleSpec'],
+  overrideProp: 'fillColor' | 'strokeColor',
+  scalar: string,
+): ColorExpr {
+  if (spec && spec.mode === 'categorized' && spec.property && spec.categories?.length) {
+    return ['coalesce', ['get', overrideProp], categorizedExpr(spec, scalar)] as ColorExpr
+  }
+  if (
+    spec && spec.mode === 'graduated' && spec.property &&
+    spec.breaks?.length && spec.rampColors?.length
+  ) {
+    return ['coalesce', ['get', overrideProp], graduatedExpr(spec, scalar)] as ColorExpr
+  }
+  return ['coalesce', ['get', overrideProp], scalar] as ColorExpr
+}
+
+function fillColorExpression(layer: GeoJSONLayer): ColorExpr {
+  return dataDrivenColor(layer.styleSpec, 'fillColor', layer.fillColor || layer.color)
+}
+
+function lineColorExpression(layer: GeoJSONLayer): ColorExpr {
+  return dataDrivenColor(layer.styleSpec, 'strokeColor', layer.lineColor || layer.color)
+}
+
+function fillOpacityValue(layer: GeoJSONLayer): number {
+  return layer.styleSpec?.opacity ?? layer.opacity ?? 0.3
+}
+
+function labelsActive(layer: GeoJSONLayer): boolean {
+  const l = layer.styleSpec?.label
+  return Boolean(
+    l?.enabled && l.property &&
+    (layer.data?.features?.length ?? 0) <= LABEL_FEATURE_CAP,
+  )
+}
+
+/** text-field value for a layer's label symbol layer ('' = nothing drawn). */
+function labelField(layer: GeoJSONLayer): ExpressionSpecification | string {
+  const l = layer.styleSpec?.label
+  return labelsActive(layer) ? (['get', l!.property] as ExpressionSpecification) : ''
 }
 
 interface MapViewProps {
@@ -87,6 +156,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       container: containerRef.current,
       style: {
         version: 8,
+        // Glyphs are required for any symbol/text layer (feature labels).
+        // demotiles serves free PBF font ranges with no API key, matching the
+        // keyless raster-tile approach. Offline → labels just don't draw.
+        glyphs: 'https://demotiles.maplibre.org/font/{fontstack}/{range}.pbf',
         sources: {
           basemap: { type: 'raster', tiles, tileSize: 256, attribution },
         },
@@ -153,7 +226,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     for (const id of ownLayerIds.current) {
       if (!desiredIds.has(id)) {
-        for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
+        for (const suffix of ['-fill', '-outline', '-line', '-circle', '-label']) {
           if (map.getLayer(`${id}${suffix}`)) map.removeLayer(`${id}${suffix}`)
         }
         if (map.getSource(id)) map.removeSource(id)
@@ -163,8 +236,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
 
     for (const layer of layers) {
-      const fillColor = layer.fillColor || layer.color
-      const lineColor = layer.lineColor || layer.color
       const fillOpacity = layer.opacity ?? 0.3
 
       if (!map.getSource(layer.id)) {
@@ -182,7 +253,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'fill-color': ['coalesce', ['get', 'fillColor'], fillColor] as DataDrivenPropertyValueSpecification<string>,
+            'fill-color': fillColorExpression(layer),
             'fill-opacity': ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -198,7 +269,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPolygon'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
+            'line-color': lineColorExpression(layer),
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -214,7 +285,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiLineString'],
           ],
           paint: {
-            'line-color': ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
+            'line-color': lineColorExpression(layer),
             'line-width': 2,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -230,12 +301,39 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             ['==', ['geometry-type'], 'MultiPoint'],
           ],
           paint: {
-            'circle-color': fillColor,
+            'circle-color': fillColorExpression(layer),
             'circle-radius': 6,
             'circle-stroke-color': '#ffffff',
             'circle-stroke-width': 1.5,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
+        })
+
+        // Text labels (symbol layer). Requires the glyphs URL on the style.
+        // minzoom keeps low-zoom views uncluttered; collision detection
+        // (text-allow-overlap:false + text-optional) drops labels that don't fit.
+        const labelSpec = layer.styleSpec?.label
+        map.addLayer({
+          id: `${layer.id}-label`,
+          type: 'symbol',
+          source: layer.id,
+          minzoom: 10,
+          layout: {
+            'text-field': labelField(layer),
+            // Must be a stack the glyphs endpoint actually serves. demotiles
+            // provides 'Noto Sans Regular' (NOT 'Open Sans Regular' → 404).
+            'text-font': ['Noto Sans Regular'],
+            'text-size': labelSpec?.size ?? 12,
+            'text-anchor': 'center',
+            'text-allow-overlap': false,
+            'text-optional': true,
+            visibility: layer.visible && labelsActive(layer) ? 'visible' : 'none',
+          },
+          paint: {
+            'text-color': labelSpec?.color ?? '#1f2937',
+            'text-halo-color': labelSpec?.haloColor ?? '#ffffff',
+            'text-halo-width': 1.2,
+          },
         })
 
         try {
@@ -261,29 +359,33 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
         }
         if (map.getLayer(`${layer.id}-fill`)) {
-          map.setPaintProperty(
-            `${layer.id}-fill`, 'fill-color',
-            ['coalesce', ['get', 'fillColor'], fillColor] as DataDrivenPropertyValueSpecification<string>,
-          )
+          map.setPaintProperty(`${layer.id}-fill`, 'fill-color', fillColorExpression(layer))
           map.setPaintProperty(
             `${layer.id}-fill`, 'fill-opacity',
             ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
           )
         }
         if (map.getLayer(`${layer.id}-outline`)) {
-          map.setPaintProperty(
-            `${layer.id}-outline`, 'line-color',
-            ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
-          )
+          map.setPaintProperty(`${layer.id}-outline`, 'line-color', lineColorExpression(layer))
         }
         if (map.getLayer(`${layer.id}-line`)) {
-          map.setPaintProperty(
-            `${layer.id}-line`, 'line-color',
-            ['coalesce', ['get', 'strokeColor'], lineColor] as DataDrivenPropertyValueSpecification<string>,
-          )
+          map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
         }
         if (map.getLayer(`${layer.id}-circle`)) {
-          map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColor)
+          map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
+        }
+        // Labels: re-apply field/size/color and visibility (gated by enabled +
+        // feature cap, AND the layer's own visibility).
+        if (map.getLayer(`${layer.id}-label`)) {
+          const labelSpec = layer.styleSpec?.label
+          map.setLayoutProperty(`${layer.id}-label`, 'text-field', labelField(layer))
+          map.setLayoutProperty(`${layer.id}-label`, 'text-size', labelSpec?.size ?? 12)
+          map.setLayoutProperty(
+            `${layer.id}-label`, 'visibility',
+            layer.visible && labelsActive(layer) ? 'visible' : 'none',
+          )
+          map.setPaintProperty(`${layer.id}-label`, 'text-color', labelSpec?.color ?? '#1f2937')
+          map.setPaintProperty(`${layer.id}-label`, 'text-halo-color', labelSpec?.haloColor ?? '#ffffff')
         }
       }
     }

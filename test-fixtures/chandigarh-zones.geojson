@@ -1,0 +1,19 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    { "type": "Feature", "properties": { "name": "Sector 17", "zone_code": "C1", "population": 8200 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.776,30.738],[76.786,30.738],[76.786,30.746],[76.776,30.746],[76.776,30.738]]] } },
+    { "type": "Feature", "properties": { "name": "Sector 22", "zone_code": "R2", "population": 24500 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.766,30.738],[76.776,30.738],[76.776,30.746],[76.766,30.746],[76.766,30.738]]] } },
+    { "type": "Feature", "properties": { "name": "Sector 34", "zone_code": "MX", "population": 15800 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.766,30.728],[76.776,30.728],[76.776,30.738],[76.766,30.738],[76.766,30.728]]] } },
+    { "type": "Feature", "properties": { "name": "Industrial Area Ph-1", "zone_code": "I1", "population": 3100 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.796,30.718],[76.812,30.718],[76.812,30.730],[76.796,30.730],[76.796,30.718]]] } },
+    { "type": "Feature", "properties": { "name": "Leisure Valley", "zone_code": "G", "population": 400 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.776,30.728],[76.786,30.728],[76.786,30.738],[76.776,30.738],[76.776,30.728]]] } },
+    { "type": "Feature", "properties": { "name": "Sector 15", "zone_code": "R1", "population": 19200 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.756,30.746],[76.766,30.746],[76.766,30.754],[76.756,30.754],[76.756,30.746]]] } },
+    { "type": "Feature", "properties": { "name": "PGI Campus", "zone_code": "INST", "population": 6700 },
+      "geometry": { "type": "Polygon", "coordinates": [[[76.766,30.762],[76.778,30.762],[76.778,30.772],[76.766,30.772],[76.766,30.762]]] } }
+  ]
+}
