@@ -22,6 +22,7 @@ import {
   MapContext,
   ProjectData,
   LAYER_COLORS,
+  BASEMAPS,
   MapBookmark,
   BoundaryGeometry,
   LayerGeometryData,
@@ -33,6 +34,8 @@ import {
   rampColorsForClasses,
   DEFAULT_RAMP,
 } from './lib/classify'
+import { composeFigure } from './lib/compose-figure'
+import { buildLegendEntries } from './lib/legend-data'
 
 type AppMode = 'map' | 'document'
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
@@ -78,6 +81,9 @@ function App() {
   const bookmarksRef = useRef<MapBookmark[]>([])
   const mapBoundsRef = useRef<typeof mapBounds>(null)
   const saveProjectRef = useRef<(force?: boolean) => Promise<void>>(async () => {})
+  // Lets the export handlers (defined before suggestExportTitle) read its
+  // latest value without a forward-reference dependency.
+  const suggestExportTitleRef = useRef<() => string>(() => 'Map')
 
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
@@ -382,10 +388,49 @@ function App() {
     [mapViewState.zoom],
   )
 
-  const handleExportMapPng = useCallback(() => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    canvas.toBlob((blob) => {
+  // Compose a decorated figure (title block, scale bar, north arrow, legend,
+  // attribution) from the live map canvas + current view state. Single source
+  // for all four export paths so decorations are always baked into the output.
+  const composeMapFigure = useCallback(
+    (title: string): HTMLCanvasElement | null => {
+      const canvas = mapViewRef.current?.getCanvas()
+      if (!canvas) return null
+      return composeFigure(canvas, {
+        title: title || 'Map',
+        centerLat: mapViewState.center[1],
+        zoom: mapViewState.zoom,
+        bearing: mapViewState.bearing,
+        legend: buildLegendEntries(layers),
+        attribution: BASEMAPS[basemap]?.attribution || '',
+      })
+    },
+    [mapViewState, layers, basemap],
+  )
+
+  // Fit a composed canvas onto a landscape A4 PDF page, full-bleed minus margin.
+  const composedToPdf = useCallback(async (figure: HTMLCanvasElement) => {
+    const { jsPDF } = await import('jspdf')
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const img = figure.toDataURL('image/png')
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const margin = 24
+    const maxW = pageW - margin * 2
+    const maxH = pageH - margin * 2
+    const aspect = figure.height > 0 ? figure.width / figure.height : maxW / maxH
+    let drawW = maxW
+    let drawH = drawW / aspect
+    if (drawH > maxH) { drawH = maxH; drawW = drawH * aspect }
+    const drawX = (pageW - drawW) / 2
+    const drawY = (pageH - drawH) / 2
+    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
+    return pdf
+  }, [])
+
+  const handleExportMapPng = useCallback((title?: string) => {
+    const figure = composeMapFigure(title || suggestExportTitleRef.current())
+    if (!figure) return
+    figure.toBlob((blob) => {
       if (!blob) return
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -393,50 +438,19 @@ function App() {
       a.click()
       URL.revokeObjectURL(a.href)
     })
-  }, [])
+  }, [composeMapFigure])
 
-  const handleExportPdf = useCallback(async () => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    const { jsPDF } = await import('jspdf')
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-    const img = canvas.toDataURL('image/png')
-
-    // A4 landscape ~842 × 595pt. Fit the canvas (in DPR-aware logical
-    // pixels) into the page below the title, preserving aspect ratio.
-    const pageW = pdf.internal.pageSize.getWidth()
-    const pageH = pdf.internal.pageSize.getHeight()
-    const margin = 40
-    const titleSpace = 30
-    const maxW = pageW - margin * 2
-    const maxH = pageH - margin - titleSpace - margin
-    const dpr = window.devicePixelRatio || 1
-    const logicalW = canvas.width / dpr
-    const logicalH = canvas.height / dpr
-    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
-    let drawW = maxW
-    let drawH = drawW / aspect
-    if (drawH > maxH) {
-      drawH = maxH
-      drawW = drawH * aspect
-    }
-    const drawX = (pageW - drawW) / 2
-    const drawY = margin + titleSpace
-
-    pdf.setFontSize(14)
-    pdf.text('Map export — Cursor for Urban Planners', margin, margin + 18)
-    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
-
-    const footer = `Viewport export — ${new Date().toISOString()}`
-    pdf.setFontSize(9)
-    pdf.text(footer, margin, pageH - 18)
+  const handleExportPdf = useCallback(async (title?: string) => {
+    const figure = composeMapFigure(title || suggestExportTitleRef.current())
+    if (!figure) return
+    const pdf = await composedToPdf(figure)
     pdf.save(`map-report-${Date.now()}.pdf`)
-  }, [])
+  }, [composeMapFigure, composedToPdf])
 
   const handleSavePngToArtifact = useCallback(async (title: string) => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    canvas.toBlob(async (blob) => {
+    const figure = composeMapFigure(title)
+    if (!figure) return
+    figure.toBlob(async (blob) => {
       if (!blob) return
       const form = new FormData()
       form.append('title', title)
@@ -451,35 +465,12 @@ function App() {
         /* backend unavailable */
       }
     })
-  }, [])
+  }, [composeMapFigure])
 
   const handleSavePdfToArtifact = useCallback(async (title: string) => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    const { jsPDF } = await import('jspdf')
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-    const img = canvas.toDataURL('image/png')
-    const pageW = pdf.internal.pageSize.getWidth()
-    const pageH = pdf.internal.pageSize.getHeight()
-    const margin = 40
-    const titleSpace = 30
-    const maxW = pageW - margin * 2
-    const maxH = pageH - margin - titleSpace - margin
-    const dpr = window.devicePixelRatio || 1
-    const logicalW = canvas.width / dpr
-    const logicalH = canvas.height / dpr
-    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
-    let drawW = maxW
-    let drawH = drawW / aspect
-    if (drawH > maxH) { drawH = maxH; drawW = drawH * aspect }
-    const drawX = (pageW - drawW) / 2
-    const drawY = margin + titleSpace
-    pdf.setFontSize(14)
-    pdf.text(title, margin, margin + 18)
-    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
-    const footer = `Viewport export — ${new Date().toISOString()}`
-    pdf.setFontSize(9)
-    pdf.text(footer, margin, pageH - 18)
+    const figure = composeMapFigure(title)
+    if (!figure) return
+    const pdf = await composedToPdf(figure)
     const pdfBytes = pdf.output('arraybuffer')
     const blob = new Blob([pdfBytes], { type: 'application/pdf' })
     const form = new FormData()
@@ -494,13 +485,15 @@ function App() {
     } catch {
       /* backend unavailable */
     }
-  }, [])
+  }, [composeMapFigure, composedToPdf])
 
   const suggestExportTitle = useCallback((): string => {
     const topLayer = layers.length > 0 ? layers[layers.length - 1].name : null
     const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     return topLayer ? `${topLayer} — ${date}` : `Map export — ${date}`
   }, [layers])
+
+  suggestExportTitleRef.current = suggestExportTitle
 
   const handleExportLayerFile = useCallback((layerId: string) => {
     const layer = layers.find((l) => l.id === layerId)

@@ -13,9 +13,9 @@ interface NominatimResult {
 interface ExportPanelProps {
   layers: GeoJSONLayer[]
   workspacePath: string | null
-  onExportMapPng: () => void
+  onExportMapPng: (title?: string) => void
   onExportLayer: (layerId: string) => void
-  onExportPdf: () => void
+  onExportPdf: (title?: string) => void
   onExportClippedRegion: (name: string) => void
   onPreviewBoundary: (geom: BoundaryGeometry | null) => void
   onSaveByRegion: (displayName: string, boundaryGeom: BoundaryGeometry) => void
@@ -93,23 +93,16 @@ export default function ExportPanel({
   return (
     <div className="export-panel">
       <p className="export-hint">
-        Export map or layer data. PNG captures the current map view. GeoJSON uses your workspace folder when open.
+        Exports bake in a title, legend, scale bar, and north arrow. Set a figure
+        title below — it&apos;s used for downloads and saved artifacts alike.
       </p>
-      <div className="export-actions">
-        <button type="button" className="export-btn primary" onClick={onExportMapPng}>
-          Save map as PNG
-        </button>
-        <button type="button" className="export-btn" onClick={onExportPdf}>
-          Map + title as PDF
-        </button>
-      </div>
 
-      <h4 className="export-sub">Save to artifacts</h4>
+      <h4 className="export-sub">Figure title</h4>
       <div className="export-artifact-save">
         <input
           type="text"
           className="export-input"
-          placeholder="Artifact title"
+          placeholder="e.g. Proposed MRTS corridors"
           value={artifactTitle}
           onChange={(e) => setArtifactTitle(e.target.value)}
         />
@@ -120,24 +113,44 @@ export default function ExportPanel({
         >
           Suggest name
         </button>
-        <div className="export-artifact-btns">
-          <button
-            type="button"
-            className="export-btn primary"
-            disabled={!artifactTitle.trim()}
-            onClick={() => onSavePngToArtifact(artifactTitle.trim())}
-          >
-            Save PNG to artifacts
-          </button>
-          <button
-            type="button"
-            className="export-btn"
-            disabled={!artifactTitle.trim()}
-            onClick={() => onSavePdfToArtifact(artifactTitle.trim())}
-          >
-            Save PDF to artifacts
-          </button>
-        </div>
+      </div>
+
+      <h4 className="export-sub">Download figure</h4>
+      <div className="export-actions">
+        <button
+          type="button"
+          className="export-btn primary"
+          onClick={() => onExportMapPng(artifactTitle.trim() || undefined)}
+        >
+          Download PNG
+        </button>
+        <button
+          type="button"
+          className="export-btn"
+          onClick={() => onExportPdf(artifactTitle.trim() || undefined)}
+        >
+          Download PDF
+        </button>
+      </div>
+
+      <h4 className="export-sub">Save figure to artifacts</h4>
+      <div className="export-artifact-btns">
+        <button
+          type="button"
+          className="export-btn primary"
+          disabled={!artifactTitle.trim()}
+          onClick={() => onSavePngToArtifact(artifactTitle.trim())}
+        >
+          Save PNG
+        </button>
+        <button
+          type="button"
+          className="export-btn"
+          disabled={!artifactTitle.trim()}
+          onClick={() => onSavePdfToArtifact(artifactTitle.trim())}
+        >
+          Save PDF
+        </button>
       </div>
 
       <h4 className="export-sub">Layers as GeoJSON</h4>
