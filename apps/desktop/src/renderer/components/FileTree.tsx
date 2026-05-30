@@ -28,17 +28,23 @@ function TreeNode({ entry, depth, onFileClick }: TreeNodeProps) {
     }
   }
 
-  const isGeoJSON = !entry.isDirectory && entry.name.toLowerCase().endsWith('.geojson')
+  const lower = entry.name.toLowerCase()
+  const isGeoJSON = !entry.isDirectory && (lower.endsWith('.geojson') || lower.endsWith('.json'))
+  // Vector formats that need backend conversion before they become a layer.
+  const isConvertible =
+    !entry.isDirectory &&
+    /\.(shp|gpkg|kml|kmz|gpx|csv)$/.test(lower)
+  const isGeoFile = isGeoJSON || isConvertible
 
   return (
     <div className="tree-node">
       <div
-        className={`tree-item ${entry.isDirectory ? 'directory' : 'file'} ${isGeoJSON ? 'geojson' : ''}`}
+        className={`tree-item ${entry.isDirectory ? 'directory' : 'file'} ${isGeoFile ? 'geojson' : ''}`}
         style={{ paddingLeft: `${depth * 16 + 8}px` }}
         onClick={toggle}
       >
         <span className="tree-icon">
-          {entry.isDirectory ? (expanded ? '▾' : '▸') : isGeoJSON ? '◈' : '·'}
+          {entry.isDirectory ? (expanded ? '▾' : '▸') : isGeoFile ? '◈' : '·'}
         </span>
         <span className="tree-name">{entry.name}</span>
       </div>

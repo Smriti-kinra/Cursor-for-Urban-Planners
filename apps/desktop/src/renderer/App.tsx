@@ -49,6 +49,8 @@ function App() {
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
   const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
+  const [convertingFile, setConvertingFile] = useState<string | null>(null)
+  const [convertError, setConvertError] = useState<string | null>(null)
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
   const [mapViewState, setMapViewState] = useState<MapViewState>({
@@ -202,13 +204,50 @@ function App() {
     } catch { /* ignore invalid geometry */ }
   }, [layers])
 
-  const handleFileClick = useCallback(
-    (entry: FileEntry) => {
-      if (entry.name.toLowerCase().endsWith('.geojson')) {
-        addLayer(entry.name.replace(/\.geojson$/i, ''), entry.path)
+  // Convert a non-GeoJSON vector file (shapefile/GPKG/KML/KMZ/GPX/CSV) to a
+  // workspace-local .geojson via the backend, then load it as a layer. Requires
+  // an open workspace (the backend writes the converted file inside it).
+  const convertAndAddLayer = useCallback(
+    async (entry: FileEntry) => {
+      if (!workspacePath) {
+        setConvertError('Open a workspace folder before importing this file type.')
+        return
+      }
+      setConvertingFile(entry.name)
+      setConvertError(null)
+      try {
+        const resp = await fetch('http://localhost:8765/api/files/convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: entry.path, workspace: workspacePath }),
+        })
+        const data = await resp.json()
+        if (data.error) {
+          setConvertError(`${entry.name}: ${data.error}`)
+          return
+        }
+        if (data.path) {
+          await addLayer(data.name || entry.name, data.path)
+        }
+      } catch {
+        setConvertError(`Could not reach the backend to convert ${entry.name}.`)
+      } finally {
+        setConvertingFile(null)
       }
     },
-    [addLayer],
+    [workspacePath, addLayer],
+  )
+
+  const handleFileClick = useCallback(
+    (entry: FileEntry) => {
+      const lower = entry.name.toLowerCase()
+      if (lower.endsWith('.geojson') || lower.endsWith('.json')) {
+        addLayer(entry.name.replace(/\.(geojson|json)$/i, ''), entry.path)
+      } else if (/\.(shp|gpkg|kml|kmz|gpx|csv)$/.test(lower)) {
+        void convertAndAddLayer(entry)
+      }
+    },
+    [addLayer, convertAndAddLayer],
   )
 
   // ── Admin boundary save ──
@@ -1307,7 +1346,17 @@ function App() {
             </button>
           </div>
           {activeLeftTab === 'files' && (
-            <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
+            <>
+              {convertingFile && (
+                <div className="import-status">Importing {convertingFile}…</div>
+              )}
+              {convertError && (
+                <div className="import-status import-error" onClick={() => setConvertError(null)}>
+                  {convertError}
+                </div>
+              )}
+              <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
+            </>
           )}
           {activeLeftTab === 'layers' && (
             <>

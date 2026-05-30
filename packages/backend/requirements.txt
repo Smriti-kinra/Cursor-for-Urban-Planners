@@ -7,6 +7,10 @@ duckduckgo-search>=6.0,<8
 httpx>=0.27,<0.29
 shapely>=2.0,<3
 pyproj>=3.6,<4
+# duckdb + its `spatial` extension power vector ingestion (tools/vector_convert.py:
+# shapefile/GPKG/KML/KMZ/GPX/CSV -> WGS84 GeoJSON). The extension is auto-downloaded
+# at runtime via `INSTALL spatial`; for the offline PyInstaller build it must be
+# pre-cached/bundled (see ~/.duckdb/extensions) or first import will need network.
 duckdb>=1.1,<2
 mcp>=1.0,<2
 Pillow>=10.0,<12
