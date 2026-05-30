@@ -8,6 +8,7 @@ import StreetViewDialog from './components/StreetViewDialog'
 import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
 import SymbologyPanel from './components/SymbologyPanel'
+import AttributeTable from './components/AttributeTable'
 import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
@@ -52,6 +53,7 @@ function App() {
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
   const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
+  const [attrLayerId, setAttrLayerId] = useState<string | null>(null)
   const [convertingFile, setConvertingFile] = useState<string | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
 
@@ -87,6 +89,7 @@ function App() {
 
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
+  const userShapeCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
   const isSavingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -715,6 +718,59 @@ function App() {
   const stylingLayer = useMemo(
     () => layers.find((l) => l.id === stylingLayerId) ?? null,
     [layers, stylingLayerId],
+  )
+
+  // ── Manual drawing → real layer ──
+  // A user finished drawing in MapView. Promote the geometry to a layer (so it
+  // persists, appears in mapContext, and can be styled), then open the
+  // attribute editor so they can tag it (e.g. set zone_code) before styling.
+  const handleDrawComplete = useCallback(
+    (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => {
+      let geometry: Geometry
+      if (type === 'point') {
+        geometry = { type: 'Point', coordinates: coordinates[0] }
+      } else if (type === 'line') {
+        geometry = { type: 'LineString', coordinates }
+      } else {
+        const ring =
+          coordinates[0][0] !== coordinates[coordinates.length - 1][0] ||
+          coordinates[0][1] !== coordinates[coordinates.length - 1][1]
+            ? [...coordinates, coordinates[0]]
+            : coordinates
+        geometry = { type: 'Polygon', coordinates: [ring] }
+      }
+      userShapeCounterRef.current += 1
+      const label = type === 'point' ? 'Point' : type === 'line' ? 'Line' : 'Polygon'
+      const name = `Drawn ${label} ${userShapeCounterRef.current}`
+      const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const color = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
+      colorIndexRef.current++
+      const layer: GeoJSONLayer = {
+        id,
+        name,
+        filePath: '',
+        visible: true,
+        color,
+        data: {
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry, properties: { name, source: 'user_draw' } }],
+        },
+      }
+      setLayers((prev) => [...prev, layer])
+      setActiveLeftTab('layers')
+      setAttrLayerId(id) // open the attribute editor on the new layer
+    },
+    [],
+  )
+
+  // Attribute editor writes an edited FeatureCollection back onto a layer.
+  const handleAttributesChange = useCallback((layerId: string, data: FeatureCollection) => {
+    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, data } : l)))
+  }, [])
+
+  const attrLayer = useMemo(
+    () => layers.find((l) => l.id === attrLayerId) ?? null,
+    [layers, attrLayerId],
   )
 
   // ── Map action handler (intercepts layer ops, queues the rest) ──
@@ -1358,14 +1414,23 @@ function App() {
                 onToggle={toggleLayer}
                 onRemove={removeLayer}
                 onZoomTo={zoomToLayer}
-                onStyle={(id) => setStylingLayerId((cur) => (cur === id ? null : id))}
+                onStyle={(id) => { setStylingLayerId((cur) => (cur === id ? null : id)); setAttrLayerId(null) }}
                 activeStyleId={stylingLayerId}
+                onAttributes={(id) => { setAttrLayerId((cur) => (cur === id ? null : id)); setStylingLayerId(null) }}
+                activeAttrId={attrLayerId}
               />
               {stylingLayer && (
                 <SymbologyPanel
                   layer={stylingLayer}
                   onChange={handleSymbologyChange}
                   onClose={() => setStylingLayerId(null)}
+                />
+              )}
+              {attrLayer && (
+                <AttributeTable
+                  layer={attrLayer}
+                  onChange={handleAttributesChange}
+                  onClose={() => setAttrLayerId(null)}
                 />
               )}
             </>
@@ -1425,6 +1490,7 @@ function App() {
                   onAddMarker={handleRightClickAddMarker}
                   onOpenStreetView={handleRightClickStreetView}
                   onAskChat={handleRightClickAskChat}
+                  onDrawComplete={handleDrawComplete}
                 />
               </ErrorBoundary>
               <Legend layers={layers} />

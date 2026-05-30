@@ -8,6 +8,8 @@ interface LayerPanelProps {
   onZoomTo: (id: string) => void
   onStyle?: (id: string) => void
   activeStyleId?: string | null
+  onAttributes?: (id: string) => void
+  activeAttrId?: string | null
 }
 
 export default function LayerPanel({
@@ -17,6 +19,8 @@ export default function LayerPanel({
   onZoomTo,
   onStyle,
   activeStyleId,
+  onAttributes,
+  activeAttrId,
 }: LayerPanelProps) {
   if (layers.length === 0) {
     return (
@@ -43,6 +47,15 @@ export default function LayerPanel({
             {layer.name}
           </span>
           <span className="layer-count">{layer.data?.features?.length || 0}</span>
+          {onAttributes && (
+            <button
+              className={`layer-style ${activeAttrId === layer.id ? 'active' : ''}`}
+              onClick={() => onAttributes(layer.id)}
+              title="Edit attributes"
+            >
+              ✎
+            </button>
+          )}
           {onStyle && (
             <button
               className={`layer-style ${activeStyleId === layer.id ? 'active' : ''}`}

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState, forwardRef, useImperativeHandle } from 'react'
+import { useEffect, useRef, useState, useCallback, forwardRef, useImperativeHandle } from 'react'
 import maplibregl from 'maplibre-gl'
 import type { DataDrivenPropertyValueSpecification, ExpressionSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
@@ -102,7 +102,13 @@ interface MapViewProps {
   onAddMarker?: (lng: number, lat: number) => void
   onOpenStreetView?: (lng: number, lat: number) => void
   onAskChat?: (lng: number, lat: number) => void
+  /** A user finished drawing a shape. Coordinates are [lng,lat]; for 'point'
+   *  the array holds a single pair, for 'line'/'polygon' the full vertex list
+   *  (polygon ring is not yet closed). */
+  onDrawComplete?: (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => void
 }
+
+type DrawMode = 'point' | 'line' | 'polygon' | null
 
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
@@ -118,6 +124,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onAddMarker,
     onOpenStreetView,
     onAskChat,
+    onDrawComplete,
   },
   ref,
 ) {
@@ -133,6 +140,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onOpenStreetViewRef.current = onOpenStreetView
   const onAskChatRef = useRef(onAskChat)
   onAskChatRef.current = onAskChat
+  const onDrawCompleteRef = useRef(onDrawComplete)
+  onDrawCompleteRef.current = onDrawComplete
+  // Drawing state lives in refs so the map event handlers (bound once) always
+  // read the current values. drawMode is mirrored to React state for the UI.
+  const drawModeRef = useRef<DrawMode>(null)
+  const drawVerticesRef = useRef<number[][]>([])
   const ownLayerIds = useRef(new Set<string>())
   // Per-source revision token: setData() is only called when layer.data changes.
   const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
@@ -144,6 +157,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const [showSearch, setShowSearch] = useState(false)
   const [showBasemaps, setShowBasemaps] = useState(false)
   const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+  const [drawMode, setDrawMode] = useState<DrawMode>(null)
+  const [drawCount, setDrawCount] = useState(0) // vertices placed in the current draft
 
   // ── Initialize map ──
 
@@ -593,6 +608,156 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
   }, [ctxMenu])
 
+  // ── Drawing tool ──
+  //
+  // A dedicated `__draw__` source + layers hold the in-progress draft. It is
+  // NOT in `layers`, so the layer-sync effect never touches it. On finish the
+  // geometry is handed to onDrawComplete, which promotes it to a real layer.
+
+  const DRAW_SRC = '__draw__'
+
+  const redrawDraft = useCallback(() => {
+    const map = mapRef.current
+    if (!map) return
+    const src = map.getSource(DRAW_SRC) as maplibregl.GeoJSONSource | undefined
+    if (!src) return
+    const verts = drawVerticesRef.current
+    const mode = drawModeRef.current
+    const features: Feature[] = []
+    // Vertices as points.
+    for (const v of verts) {
+      features.push({ type: 'Feature', geometry: { type: 'Point', coordinates: v }, properties: {} })
+    }
+    // Draft line / polygon outline.
+    if (mode === 'line' && verts.length >= 2) {
+      features.push({ type: 'Feature', geometry: { type: 'LineString', coordinates: verts }, properties: {} })
+    } else if (mode === 'polygon' && verts.length >= 2) {
+      const ring = verts.length >= 3 ? [...verts, verts[0]] : verts
+      features.push({
+        type: 'Feature',
+        geometry: verts.length >= 3
+          ? { type: 'Polygon', coordinates: [ring] }
+          : { type: 'LineString', coordinates: verts },
+        properties: {},
+      })
+    }
+    src.setData({ type: 'FeatureCollection', features })
+  }, [])
+
+  const finishDraw = useCallback(() => {
+    const mode = drawModeRef.current
+    const verts = drawVerticesRef.current
+    if (!mode) return
+    const min = mode === 'point' ? 1 : mode === 'line' ? 2 : 3
+    if (verts.length >= min) {
+      onDrawCompleteRef.current?.(mode, verts)
+    }
+    drawModeRef.current = null
+    drawVerticesRef.current = []
+    setDrawMode(null)
+    setDrawCount(0)
+    redrawDraft()
+    const map = mapRef.current
+    if (map) { map.getCanvas().style.cursor = ''; map.doubleClickZoom.enable() }
+  }, [redrawDraft])
+
+  const cancelDraw = useCallback(() => {
+    drawModeRef.current = null
+    drawVerticesRef.current = []
+    setDrawMode(null)
+    setDrawCount(0)
+    redrawDraft()
+    const map = mapRef.current
+    if (map) { map.getCanvas().style.cursor = ''; map.doubleClickZoom.enable() }
+  }, [redrawDraft])
+
+  const startDraw = useCallback((mode: Exclude<DrawMode, null>) => {
+    // Toggle off if the same tool is reselected.
+    if (drawModeRef.current === mode) { cancelDraw(); return }
+    drawModeRef.current = mode
+    drawVerticesRef.current = []
+    setDrawMode(mode)
+    setDrawCount(0)
+    redrawDraft()
+    const map = mapRef.current
+    if (map) {
+      map.getCanvas().style.cursor = 'crosshair'
+      // Stop dblclick (used to finish a shape) from also zooming the map.
+      map.doubleClickZoom.disable()
+    }
+  }, [cancelDraw, redrawDraft])
+
+  // Set up the draft source/layers + bind draw event handlers once the map is
+  // ready. Handlers read drawMode/vertices from refs, so they never go stale.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+    if (!map.getSource(DRAW_SRC)) {
+      map.addSource(DRAW_SRC, { type: 'geojson', data: { type: 'FeatureCollection', features: [] } })
+      map.addLayer({
+        id: '__draw__-fill', type: 'fill', source: DRAW_SRC,
+        filter: ['==', ['geometry-type'], 'Polygon'],
+        paint: { 'fill-color': '#2563eb', 'fill-opacity': 0.15 },
+      })
+      map.addLayer({
+        id: '__draw__-line', type: 'line', source: DRAW_SRC,
+        filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'Polygon']],
+        paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [2, 1] },
+      })
+      map.addLayer({
+        id: '__draw__-vertex', type: 'circle', source: DRAW_SRC,
+        filter: ['==', ['geometry-type'], 'Point'],
+        paint: {
+          'circle-radius': 5, 'circle-color': '#ffffff',
+          'circle-stroke-color': '#2563eb', 'circle-stroke-width': 2,
+        },
+      })
+    }
+
+    const onClick = (e: maplibregl.MapMouseEvent) => {
+      const mode = drawModeRef.current
+      if (!mode) return
+      const pt = [e.lngLat.lng, e.lngLat.lat]
+      if (mode === 'point') {
+        drawVerticesRef.current = [pt]
+        finishDraw()
+        return
+      }
+      drawVerticesRef.current = [...drawVerticesRef.current, pt]
+      setDrawCount(drawVerticesRef.current.length)
+      redrawDraft()
+    }
+    const onDblClick = (e: maplibregl.MapMouseEvent) => {
+      if (!drawModeRef.current || drawModeRef.current === 'point') return
+      e.preventDefault()
+      finishDraw()
+    }
+
+    map.on('click', onClick)
+    map.on('dblclick', onDblClick)
+    return () => {
+      map.off('click', onClick)
+      map.off('dblclick', onDblClick)
+    }
+  }, [mapReady, finishDraw, redrawDraft])
+
+  // Keyboard: Enter finishes, Escape cancels, Backspace removes last vertex.
+  useEffect(() => {
+    if (!drawMode) return
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Enter') { e.preventDefault(); finishDraw() }
+      else if (e.key === 'Escape') { e.preventDefault(); cancelDraw() }
+      else if (e.key === 'Backspace') {
+        e.preventDefault()
+        drawVerticesRef.current = drawVerticesRef.current.slice(0, -1)
+        setDrawCount(drawVerticesRef.current.length)
+        redrawDraft()
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [drawMode, finishDraw, cancelDraw, redrawDraft])
+
   // ── Geocoding search ──
 
   const handleSearch = async () => {
@@ -645,6 +810,30 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           🔍
         </button>
 
+        <div className="toolbar-divider" />
+
+        <button
+          className={`toolbar-btn ${drawMode === 'point' ? 'active' : ''}`}
+          onClick={() => startDraw('point')}
+          title="Draw point"
+        >
+          📍
+        </button>
+        <button
+          className={`toolbar-btn ${drawMode === 'line' ? 'active' : ''}`}
+          onClick={() => startDraw('line')}
+          title="Draw line"
+        >
+          ╱
+        </button>
+        <button
+          className={`toolbar-btn ${drawMode === 'polygon' ? 'active' : ''}`}
+          onClick={() => startDraw('polygon')}
+          title="Draw polygon"
+        >
+          ⬠
+        </button>
+
         <div className="toolbar-spacer" />
 
         <button
@@ -658,6 +847,27 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           🗺
         </button>
       </div>
+
+      {/* ── Draw helper bar ── */}
+      {drawMode && (
+        <div className="draw-bar">
+          <span className="draw-hint">
+            {drawMode === 'point'
+              ? 'Click the map to place a point.'
+              : `Click to add vertices (${drawCount}). Double-click or Enter to finish, Esc to cancel.`}
+          </span>
+          {drawMode !== 'point' && (
+            <button
+              className="draw-finish"
+              onClick={finishDraw}
+              disabled={drawCount < (drawMode === 'line' ? 2 : 3)}
+            >
+              Finish
+            </button>
+          )}
+          <button className="draw-cancel" onClick={cancelDraw}>Cancel</button>
+        </div>
+      )}
 
       {/* ── Search panel ── */}
       {showSearch && (
