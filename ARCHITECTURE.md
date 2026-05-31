@@ -183,7 +183,6 @@ Long-form notes and analyses the assistant generates (or you ask it to save) liv
 │   │   ├── chat.py                ★ Agentic loop, tool registry, action contract, deep research
 │   │   ├── files.py               Workspace listing + vector convert/probe
 │   │   ├── artifacts.py           Artifact CRUD + upload + download
-│   │   ├── reports.py             Markdown report generation (sync + streaming)
 │   │   ├── geocode.py             Forward + reverse geocode proxy
 │   │   └── streetview.py          Keyless Street View metadata + panorama
 │   ├── mcp_servers/               One class per domain (OSM, GIS, weather, zoning,
@@ -215,7 +214,7 @@ Electron main process (apps/desktop/src/main/index.ts)
 
 Renderer (Chromium) talks to:
   ├─ Backend  ws://localhost:8765/api/chat/ws    ← streaming chat & tool calls
-  ├─ Backend  http://localhost:8765/api/*        ← files, artifacts, reports, geocode, streetview
+  ├─ Backend  http://localhost:8765/api/*        ← files, artifacts, geocode, streetview
   └─ Electron main via window.electronAPI       ← OS access only
 ```
 
@@ -226,7 +225,7 @@ In **dev mode** (`pnpm dev`), Electron's `startBackend` is a no-op — `pnpm dev
 | Channel | Endpoint / API | Purpose |
 |---|---|---|
 | **WebSocket** | `ws://localhost:8765/api/chat/ws` | Streaming chat tokens, tool-use events, action dispatch, deep-research progress |
-| **HTTP** | `/api/files`, `/api/artifacts`, `/api/reports`, `/api/geocode`, `/api/streetview`, `/health` | File listing/convert, artifact CRUD/upload/download, reports, geocode, Street View |
+| **HTTP** | `/api/files`, `/api/artifacts`, `/api/geocode`, `/api/streetview`, `/health` | File listing/convert, artifact CRUD/upload/download, geocode, Street View |
 | **Electron IPC** | `window.electronAPI.*` | Local OS only — file picker, read dir, base64-read for vision, last-workspace, model switch |
 
 CORS is locked to loopback origins (`file://`, `app://`, `http(s)://localhost`, `127.0.0.1`, `[::1]`) — see `packages/backend/main.py`.
@@ -404,11 +403,11 @@ The artifacts table (see `database.py`) has: `id`, `title`, `content`, `artifact
 | GET | `/api/geocode?query=…` | Forward geocode (Google → Photon → Nominatim) |
 | GET | `/api/geocode/reverse?lat=…&lng=…` | Reverse geocode (Nominatim) |
 | GET | `/api/artifacts` · POST · POST `/upload` · GET `/{id}` · GET `/{id}/download` · PUT · DELETE | Artifact CRUD, multipart upload (images), native-format download |
-| POST | `/api/reports/generate` | Single-shot LLM Markdown report |
-| POST | `/api/reports/stream` | Streaming deep-research report (SSE) |
 | GET | `/api/streetview/meta?lat=…&lng=…` | Nearest panorama metadata (keyless, `streetlevel`) |
 | GET | `/api/streetview/pano?lat=…&lng=…` | Nearest panorama as equirectangular JPEG |
-| WS | `/api/chat/ws` | Chat + tool calls + map actions + deep research (the main loop) |
+| WS | `/api/chat/ws` | Chat + tool calls + map actions + deep-research report generation (the main loop) |
+
+> Report generation has **no HTTP endpoint** — it runs inside the chat WebSocket loop. When the model calls the `generate_report` tool, `chat.py:_run_deep_research` streams `research_*` events back over the same socket (see [Deep research](#deep-research) above).
 
 Every request is constrained to loopback origins by CORS.
 
@@ -433,7 +432,7 @@ Model switching writes `model_config.json` (dev: `packages/backend/`; prod: `Res
 
 | Variable | Read in | Gates |
 |---|---|---|
-| `OPENAI_API_KEY` | `routers/chat.py`, `routers/reports.py` | Chat assistant + report generation |
+| `OPENAI_API_KEY` | `routers/chat.py` | Chat assistant + deep-research report generation |
 | `OPENAI_MODEL` | `tools/config.py` | Default model when `model_config.json` is absent (`gpt-4o-mini`) |
 | `GOOGLE_MAPS_API_KEY` | `tools/google.py` | All Google Maps Platform calls + Google-first geocoding (optional) |
 | `CURSOR_URBAN_DB` | `database.py` | Overrides the artifacts SQLite path |

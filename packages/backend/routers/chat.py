@@ -269,10 +269,12 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
     """Run o4-mini-deep-research and stream progress back over the WebSocket.
 
     Sends these WS message types:
-      research_start  — emitted once before the API call
-      research_step   — one per web search (query string)
-      research_report — final markdown text + citations list
-      research_done   — terminal signal
+      research_start          — emitted once before the API call
+      research_step           — one per web search (query string)
+      research_reasoning_delta — incremental chunk of the model's reasoning summary
+      research_text_delta     — incremental chunk of the report as it is written
+      research_report         — final markdown text + citations list
+      research_done           — terminal signal
 
     Returns a short result string for the tool message inserted into history.
     """
@@ -280,60 +282,117 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
 
     prompt = _build_research_prompt(messages, map_context)
 
+    def _extract_query(obj) -> str:
+        """Pull the search query off a web_search_call item or its action.
+        The `searching` event itself carries no query — it rides on the
+        output item's `action.query`."""
+        if obj is None:
+            return ""
+        action = getattr(obj, "action", None)
+        q = getattr(action, "query", None) if action is not None else None
+        return q or getattr(obj, "query", "") or ""
+
     try:
         got_text = False
+        accumulated = ""           # report text assembled from output_text deltas
+        seen_queries: set[str] = set()
+        search_count = 0
         last_heartbeat = asyncio.get_event_loop().time()
 
-        async with _client.responses.create(
+        stream = await _client.responses.create(
             model="o4-mini-deep-research",
             input=prompt,
             instructions=_RESEARCH_SYSTEM,
             tools=[{"type": "web_search_preview"}],
             max_tool_calls=30,
+            reasoning={"summary": "auto"},  # emit reasoning_summary deltas
             stream=True,
-        ) as stream:
-            async for event in stream:
-                # Send a heartbeat if >30 s have passed since the last WS message
-                now = asyncio.get_event_loop().time()
-                if now - last_heartbeat > 30:
-                    try:
-                        await ws.send_text(json.dumps({"type": "research_heartbeat"}))
-                    except Exception:
-                        pass
-                    last_heartbeat = now
+        )
+        async for event in stream:
+            # Send a heartbeat if >30 s have passed since the last WS message
+            now = asyncio.get_event_loop().time()
+            if now - last_heartbeat > 30:
+                try:
+                    await ws.send_text(json.dumps({"type": "research_heartbeat"}))
+                except Exception:
+                    pass
+                last_heartbeat = now
 
-                event_type = getattr(event, "type", None)
+            event_type = getattr(event, "type", None)
 
-                if event_type == "response.web_search_call.searching":
-                    action = getattr(event, "action", None)
-                    query = (
-                        getattr(event, "query", None)
-                        or (getattr(action, "query", None) if action else None)
-                        or ""
-                    )
-                    if query:
-                        await ws.send_text(json.dumps({
-                            "type": "research_step",
-                            "query": query,
-                        }))
-                        last_heartbeat = asyncio.get_event_loop().time()
+            # A web_search_call item appears. The query is often absent in the
+            # stream for this model, so emit a step regardless — using the query
+            # text when present, a generic label otherwise.
+            if event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if item is not None and getattr(item, "type", None) == "web_search_call":
+                    search_count += 1
+                    query = _extract_query(item)
+                    await ws.send_text(json.dumps({
+                        "type": "research_step",
+                        "query": query or f"web search #{search_count}",
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
 
-                elif event_type == "response.output_text.done":
-                    text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
-                    if text:
-                        got_text = True
-                        annotations = []
-                        for item in getattr(event, "annotations", None) or []:
-                            url = getattr(item, "url", None)
-                            title = getattr(item, "title", None)
-                            if url:
-                                annotations.append({"url": url, "title": title or url})
-                        await ws.send_text(json.dumps({
-                            "type": "research_report",
-                            "markdown": text,
-                            "citations": annotations,
-                        }))
-                        last_heartbeat = asyncio.get_event_loop().time()
+            # Fallback: only fires if the item-added path didn't (older streams).
+            elif event_type == "response.web_search_call.searching":
+                query = _extract_query(event)
+                if query and query not in seen_queries:
+                    seen_queries.add(query)
+                    search_count += 1
+                    await ws.send_text(json.dumps({
+                        "type": "research_step", "query": query,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # The model's reasoning summary, streamed token-by-token.
+            elif event_type == "response.reasoning_summary_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    await ws.send_text(json.dumps({
+                        "type": "research_reasoning_delta", "delta": delta,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # The report itself, streamed token-by-token.
+            elif event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    accumulated += delta
+                    got_text = True
+                    await ws.send_text(json.dumps({
+                        "type": "research_text_delta", "delta": delta,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # Final text for a content part — capture annotations (citations)
+            # and the authoritative full text.
+            elif event_type == "response.output_text.done":
+                text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
+                if text:
+                    accumulated = text
+                got_text = got_text or bool(text)
+                annotations = []
+                for item in getattr(event, "annotations", None) or []:
+                    url = getattr(item, "url", None)
+                    title = getattr(item, "title", None)
+                    if url:
+                        annotations.append({"url": url, "title": title or url})
+                await ws.send_text(json.dumps({
+                    "type": "research_report",
+                    "markdown": accumulated,
+                    "citations": annotations,
+                }))
+                last_heartbeat = asyncio.get_event_loop().time()
+
+        # If the stream ended without an output_text.done (e.g. only deltas),
+        # still deliver whatever we accumulated as the final report.
+        if got_text and accumulated:
+            await ws.send_text(json.dumps({
+                "type": "research_report",
+                "markdown": accumulated,
+                "citations": [],
+            }))
 
         if not got_text:
             await ws.send_text(json.dumps({

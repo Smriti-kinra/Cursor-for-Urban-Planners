@@ -52,6 +52,7 @@ type ResearchPhase = 'idle' | 'running' | 'done'
 interface ResearchBubbleProps {
   phase: 'running' | 'done'
   steps: string[]
+  reasoning: string
   markdown: string
   citations: Array<{url: string; title: string}>
   expanded: boolean
@@ -63,6 +64,7 @@ interface ResearchBubbleProps {
 function ResearchBubble({
   phase,
   steps,
+  reasoning,
   markdown,
   citations,
   expanded,
@@ -71,6 +73,7 @@ function ResearchBubble({
   onDownloadPdf,
 }: ResearchBubbleProps) {
   const stepsRef = useRef<HTMLDivElement>(null)
+  const liveRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
     if (stepsRef.current) {
@@ -78,7 +81,12 @@ function ResearchBubble({
     }
   }, [steps.length])
 
-  const summaryLines = markdown.split('\n').filter(Boolean).slice(0, 3)
+  // Keep the live report view pinned to the bottom as tokens stream in.
+  useEffect(() => {
+    if (phase === 'running' && liveRef.current) {
+      liveRef.current.scrollTop = liveRef.current.scrollHeight
+    }
+  }, [markdown, reasoning, phase])
 
   return (
     <div className="research-bubble">
@@ -87,37 +95,64 @@ function ResearchBubble({
           <>
             <span className="research-icon spinning">⟳</span>
             <span className="research-title">Deep Research</span>
+            {steps.length > 0 && (
+              <span className="research-count">{steps.length} searches</span>
+            )}
           </>
         ) : (
           <>
             <span className="research-icon done">✓</span>
             <span className="research-title">Deep Research Complete</span>
-            <span className="research-count">{steps.length} searches</span>
+            <span className="research-count">
+              {steps.length} {steps.length === 1 ? 'search' : 'searches'}
+            </span>
           </>
         )}
       </div>
 
-      <div className="research-steps" ref={stepsRef}>
-        {steps.map((step, i) => {
-          const isLast = i === steps.length - 1
-          const isDone = phase === 'done' || !isLast
-          return (
-            <div key={i} className={`research-step ${isDone ? 'done' : 'active'}`}>
-              <span className="step-icon">{isDone ? '✓' : '⟳'}</span>
-              <span className="step-text">Searching: {step}</span>
+      {steps.length > 0 && (
+        <div className="research-steps" ref={stepsRef}>
+          {steps.map((step, i) => {
+            const isLast = i === steps.length - 1
+            const isDone = phase === 'done' || !isLast
+            const generic = /^web search #\d+$/.test(step)
+            return (
+              <div key={i} className={`research-step ${isDone ? 'done' : 'active'}`}>
+                <span className="step-icon">{isDone ? '✓' : '⟳'}</span>
+                <span className="step-text">
+                  {generic ? 'Searching the web…' : `Searching: ${step}`}
+                </span>
+              </div>
+            )
+          })}
+        </div>
+      )}
+
+      {/* Live view — reasoning + the report being written, streamed in. */}
+      {phase === 'running' && (reasoning || markdown) && (
+        <div className="research-live" ref={liveRef}>
+          {reasoning && !markdown && (
+            <p className="research-thinking">{reasoning}</p>
+          )}
+          {markdown && (
+            <div className="research-full-report streaming">
+              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+                {markdown}
+              </ReactMarkdown>
             </div>
-          )
-        })}
-      </div>
+          )}
+        </div>
+      )}
+
+      {/* Nothing has streamed back yet — reassure the user it's working. */}
+      {phase === 'running' && steps.length === 0 && !reasoning && !markdown && (
+        <p className="research-thinking">
+          Planning the research — searching the web and gathering sources. This can take a few minutes.
+        </p>
+      )}
 
       {phase === 'done' && markdown && (
         <div className="research-report">
-          <div className="research-summary">
-            {summaryLines.map((line, i) => (
-              <p key={i} className="summary-line">{line.replace(/^#+\s*/, '')}</p>
-            ))}
-          </div>
-
           <div className="research-actions">
             <button className="research-toggle" onClick={onToggleExpand}>
               {expanded ? '▲ Hide full report' : '▼ View full report'}
@@ -216,6 +251,7 @@ export default function ChatPanel({
   const [researchMarkdown, setResearchMarkdown] = useState('')
   const [researchCitations, setResearchCitations] = useState<Array<{url: string; title: string}>>([])
   const [researchExpanded, setResearchExpanded] = useState(false)
+  const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -295,6 +331,7 @@ export default function ChatPanel({
       code?: string
       message?: string
       query?: string
+      delta?: string
       markdown?: string
       citations?: Array<{url: string; title: string}>
     }
@@ -334,18 +371,29 @@ export default function ChatPanel({
       setResearchMarkdown('')
       setResearchCitations([])
       setResearchExpanded(false)
+      setResearchReasoning('')
       reportMdRef.current = ''
       setToolStatus('Deep Research in progress…')
     } else if (data.type === 'research_step') {
       const q = data.query ?? ''
       if (q) setResearchSteps((prev) => [...prev, q])
+    } else if (data.type === 'research_reasoning_delta') {
+      const d = data.delta ?? ''
+      if (d) setResearchReasoning((prev) => prev + d)
+    } else if (data.type === 'research_text_delta') {
+      const d = data.delta ?? ''
+      if (d) {
+        reportMdRef.current += d
+        setResearchMarkdown((prev) => prev + d)
+        setToolStatus(null)
+      }
     } else if (data.type === 'research_heartbeat') {
       // keep-alive ping — no UI update needed
     } else if (data.type === 'research_report') {
       const md = data.markdown ?? ''
       reportMdRef.current = md
       setResearchMarkdown(md)
-      setResearchCitations(data.citations ?? [])
+      if (data.citations && data.citations.length) setResearchCitations(data.citations)
       setResearchPhase('done')
       setToolStatus(null)
     } else if (data.type === 'research_done') {
@@ -402,36 +450,98 @@ export default function ChatPanel({
     const { jsPDF } = await import('jspdf')
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
     const pageWidth = doc.internal.pageSize.getWidth()
+    const pageHeight = doc.internal.pageSize.getHeight()
     const margin = 48
     const maxLineWidth = pageWidth - margin * 2
     let y = margin
 
     const checkY = (needed: number) => {
-      if (y + needed > doc.internal.pageSize.getHeight() - margin) {
+      if (y + needed > pageHeight - margin) {
         doc.addPage()
         y = margin
       }
     }
 
-    for (const rawLine of md.split('\n')) {
-      const line = rawLine.trimEnd()
-      if (line.startsWith('# ')) {
-        checkY(28); doc.setFontSize(20); doc.setFont('helvetica', 'bold')
-        doc.text(line.slice(2), margin, y); y += 28
+    // Strip inline markdown to plain text for jsPDF's core fonts:
+    // **bold**/__bold__ → bold, *italic*, `code`, [text](url) → text (url),
+    // and leftover emphasis/escape markers.
+    const stripInline = (s: string): string =>
+      s
+        .replace(/!\[[^\]]*\]\([^)]*\)/g, '')            // images → drop
+        .replace(/\[([^\]]+)\]\(([^)]+)\)/g, '$1 ($2)')  // links → text (url)
+        .replace(/`([^`]+)`/g, '$1')                      // inline code
+        .replace(/(\*\*|__)(.*?)\1/g, '$2')               // bold
+        .replace(/(\*|_)(.*?)\1/g, '$2')                  // italic
+        .replace(/~~(.*?)~~/g, '$2')                       // strikethrough
+        .replace(/\\([\\`*_{}[\]()#+\-.!])/g, '$1')        // escaped chars
+
+    const writeWrapped = (text: string, size: number, style: 'normal' | 'bold' | 'italic', lh: number, indent = 0) => {
+      doc.setFontSize(size); doc.setFont('helvetica', style)
+      const wrapped = doc.splitTextToSize(text, maxLineWidth - indent) as string[]
+      for (const wl of wrapped) {
+        checkY(lh); doc.text(wl, margin + indent, y); y += lh
+      }
+    }
+
+    const lines = md.split('\n')
+    for (let i = 0; i < lines.length; i++) {
+      const raw = lines[i].replace(/\s+$/, '')
+      const line = raw.trimStart()
+
+      // Markdown table → render as a bordered grid of cells.
+      const isTableRow = /^\|.*\|$/.test(line)
+      if (isTableRow) {
+        const rows: string[][] = []
+        while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
+          const cells = lines[i].trim().replace(/^\||\|$/g, '').split('|').map((c) => stripInline(c.trim()))
+          // Skip the |---|---| separator row.
+          if (!cells.every((c) => /^:?-{2,}:?$/.test(c) || c === '')) rows.push(cells)
+          i++
+        }
+        i-- // step back; outer loop will advance
+        if (rows.length) {
+          const cols = Math.max(...rows.map((r) => r.length))
+          const colW = (maxLineWidth) / cols
+          doc.setFontSize(9)
+          for (let r = 0; r < rows.length; r++) {
+            const isHeader = r === 0
+            doc.setFont('helvetica', isHeader ? 'bold' : 'normal')
+            // Measure tallest cell in the row for height.
+            const cellLines = rows[r].map((c) => doc.splitTextToSize(c, colW - 8) as string[])
+            const rowH = Math.max(14, ...cellLines.map((cl) => cl.length * 11 + 6))
+            checkY(rowH)
+            for (let c = 0; c < cols; c++) {
+              const x = margin + c * colW
+              doc.setDrawColor(200); doc.rect(x, y, colW, rowH)
+              const cl = cellLines[c] || ['']
+              cl.forEach((t, li) => doc.text(t, x + 4, y + 12 + li * 11))
+            }
+            y += rowH
+          }
+          y += 6
+        }
+        continue
+      }
+
+      if (line.startsWith('### ')) {
+        y += 6; writeWrapped(stripInline(line.slice(4)), 13, 'bold', 17)
       } else if (line.startsWith('## ')) {
-        checkY(22); doc.setFontSize(16); doc.setFont('helvetica', 'bold')
-        doc.text(line.slice(3), margin, y); y += 22
-      } else if (line.startsWith('### ')) {
-        checkY(18); doc.setFontSize(13); doc.setFont('helvetica', 'bold')
-        doc.text(line.slice(4), margin, y); y += 18
+        y += 8; writeWrapped(stripInline(line.slice(3)), 16, 'bold', 21)
+      } else if (line.startsWith('# ')) {
+        y += 8; writeWrapped(stripInline(line.slice(2)), 20, 'bold', 27)
+      } else if (/^>\s?/.test(line)) {
+        writeWrapped(stripInline(line.replace(/^>\s?/, '')), 11, 'italic', 14, 16)
+      } else if (/^(\s*)([-*+])\s+/.test(raw)) {
+        const depth = (raw.match(/^\s*/)?.[0].length ?? 0) >= 2 ? 16 : 0
+        writeWrapped('• ' + stripInline(line.replace(/^[-*+]\s+/, '')), 11, 'normal', 14, 12 + depth)
+      } else if (/^\d+\.\s+/.test(line)) {
+        writeWrapped(stripInline(line), 11, 'normal', 14, 12)
+      } else if (/^(-{3,}|\*{3,}|_{3,})$/.test(line)) {
+        checkY(12); doc.setDrawColor(220); doc.line(margin, y, pageWidth - margin, y); y += 12
       } else if (line === '') {
         y += 8
       } else {
-        doc.setFontSize(11); doc.setFont('helvetica', 'normal')
-        const wrapped = doc.splitTextToSize(line.replace(/^\s*[-*]\s+/, '• '), maxLineWidth)
-        for (const wl of wrapped) {
-          checkY(14); doc.text(wl, margin, y); y += 14
-        }
+        writeWrapped(stripInline(line), 11, 'normal', 14)
       }
     }
     doc.save(`urban-planning-report-${Date.now()}.pdf`)
@@ -443,6 +553,7 @@ export default function ChatPanel({
     setResearchMarkdown('')
     setResearchCitations([])
     setResearchExpanded(false)
+    setResearchReasoning('')
     reportMdRef.current = ''
   }, [activeConversation?.id])
 
@@ -683,26 +794,32 @@ export default function ChatPanel({
             </div>
           </div>
         )}
-        {messages.map((msg, i) => (
-          <div key={i} className={`chat-msg ${msg.role}`}>
-            <div className="chat-msg-role">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
-            <div className="chat-msg-body">
-              {msg.role === 'assistant' ? (
-                <ReactMarkdown
-                  remarkPlugins={[remarkGfm]}
-                  rehypePlugins={[rehypeHighlight]}
-                  components={{
-                    pre: CodePre,
-                  }}
-                >
-                  {msg.content}
-                </ReactMarkdown>
-              ) : (
-                <p>{msg.content}</p>
-              )}
+        {messages.map((msg, i) => {
+          // Don't render placeholder/empty assistant turns (e.g. a turn that
+          // only called a tool like generate_report) — they show as a blank
+          // "ASSISTANT" bubble. The research bubble below covers that case.
+          if (msg.role === 'assistant' && !msg.content.trim()) return null
+          return (
+            <div key={i} className={`chat-msg ${msg.role}`}>
+              <div className="chat-msg-role">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
+              <div className="chat-msg-body">
+                {msg.role === 'assistant' ? (
+                  <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    rehypePlugins={[rehypeHighlight]}
+                    components={{
+                      pre: CodePre,
+                    }}
+                  >
+                    {msg.content}
+                  </ReactMarkdown>
+                ) : (
+                  <p>{msg.content}</p>
+                )}
+              </div>
             </div>
-          </div>
-        ))}
+          )
+        })}
         {researchPhase !== 'idle' && (
           <div className="chat-msg assistant">
             <div className="chat-msg-role">Assistant</div>
@@ -710,6 +827,7 @@ export default function ChatPanel({
               <ResearchBubble
                 phase={researchPhase}
                 steps={researchSteps}
+                reasoning={researchReasoning}
                 markdown={researchMarkdown}
                 citations={researchCitations}
                 expanded={researchExpanded}
@@ -720,13 +838,15 @@ export default function ChatPanel({
             </div>
           </div>
         )}
-        {toolStatus && (
+        {/* Tool status + streaming dots are hidden while a research run owns
+            the screen — the ResearchBubble shows its own progress. */}
+        {toolStatus && researchPhase === 'idle' && (
           <div className="chat-tool-status">
             <span className="tool-dot" />
             {toolStatus}
           </div>
         )}
-        {isStreaming && !toolStatus && (
+        {isStreaming && !toolStatus && researchPhase === 'idle' && (
           <div className="chat-streaming">
             <span className="streaming-dot" />
             <span className="streaming-dot" />

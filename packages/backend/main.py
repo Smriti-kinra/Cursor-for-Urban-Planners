@@ -8,7 +8,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import files, chat, artifacts, reports, geocode, streetview
+from routers import files, chat, artifacts, geocode, streetview
 from tools import http as http_client
 
 
@@ -38,7 +38,6 @@ app.add_middleware(
 app.include_router(files.router, prefix="/api/files", tags=["files"])
 app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
-app.include_router(reports.router, prefix="/api/reports", tags=["reports"])
 app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
 app.include_router(streetview.router, prefix="/api/streetview", tags=["streetview"])
 

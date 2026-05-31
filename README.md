@@ -201,7 +201,7 @@ Electron main (apps/desktop/src/main/index.ts)
 
 Renderer (apps/desktop/src/renderer/) talks to:
   ├─ Backend over WebSocket  ws://localhost:8765/api/chat/ws   ← streaming chat + tool calls + map actions
-  ├─ Backend over HTTP       /api/files /api/artifacts /api/reports /api/geocode /api/streetview
+  ├─ Backend over HTTP       /api/files /api/artifacts /api/geocode /api/streetview
   └─ Electron main over IPC  (file dialogs, read directory, persist last-workspace, switch model)
 
 Backend (packages/backend/) talks to:
@@ -215,7 +215,7 @@ Backend (packages/backend/) talks to:
 | Channel | Used for |
 |---|---|
 | **WebSocket** (renderer ↔ backend) | Streaming chat, tool calls, map actions, and deep-research progress. |
-| **HTTP** (renderer ↔ backend) | List/convert workspace files, CRUD + upload/download on artifacts, Markdown reports, forward/reverse geocoding, Street View panoramas. |
+| **HTTP** (renderer ↔ backend) | List/convert workspace files, CRUD + upload/download on artifacts, forward/reverse geocoding, Street View panoramas. |
 | **Electron IPC** (renderer ↔ main) | Local OS only — file picker, read directory, base64 file read for vision, last-workspace, model switch. |
 
 ### Tech stack
@@ -252,7 +252,7 @@ Backend (packages/backend/) talks to:
 │   ├── main.py                    App + CORS + router includes
 │   ├── cli.py                     PyInstaller entry point (uvicorn launcher)
 │   ├── database.py                SQLite + migrations
-│   ├── routers/                   chat, files, artifacts, reports, geocode, streetview
+│   ├── routers/                   chat, files, artifacts, geocode, streetview
 │   ├── mcp_servers/               One class per domain (OSM, GIS, weather, zoning,
 │   │                              demographics, Overture, Google Places, Google env)
 │   └── tools/                     UtilityServer, geodesic geo helpers, vector_convert,
