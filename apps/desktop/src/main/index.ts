@@ -35,10 +35,13 @@ interface ModelConfig {
 }
 
 const ALL_MODELS: ModelConfig[] = [
+  { id: 'gpt-5.5', name: 'GPT-5.5', provider: 'openai', locked: false },
+  { id: 'gpt-5.4', name: 'GPT-5.4', provider: 'openai', locked: false },
+  { id: 'gpt-5.4-mini', name: 'GPT-5.4 Mini', provider: 'openai', locked: false },
   { id: 'gpt-5.4-nano', name: 'GPT-5.4 Nano', provider: 'openai', locked: false },
 ]
 
-const DEFAULT_MODEL = 'gpt-5.4-nano'
+const DEFAULT_MODEL = 'gpt-5.4-mini'
 
 // Store selected model in backend dir so Python can read it too
 const MODEL_CONFIG_PATH = isDev

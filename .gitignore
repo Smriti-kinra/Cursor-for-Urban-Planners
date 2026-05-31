@@ -14,3 +14,4 @@ __pycache__/
 .env
 .claude/settings.local.json
 project.json
+chandigarh_plan.pdf

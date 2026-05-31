@@ -8,7 +8,7 @@ from pathlib import Path
 
 _BACKEND_DIR = Path(__file__).parent.parent
 _MODEL_CONFIG_PATH = _BACKEND_DIR / "model_config.json"
-_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-4o-mini")
+_DEFAULT_MODEL = os.environ.get("OPENAI_MODEL", "gpt-5.4-mini")
 
 
 def get_model() -> str:
