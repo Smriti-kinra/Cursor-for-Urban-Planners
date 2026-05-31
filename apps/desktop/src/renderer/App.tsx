@@ -580,7 +580,7 @@ function App() {
   // live in React state (and project.json), not in a MapView ref that
   // disappears on reload.
   const appendMarkersToLayer = useCallback(
-    (markers: Array<{ lat: number; lng: number; label?: string; color?: string }>) => {
+    (markers: Array<{ lat: number; lng: number; label?: string; color?: string; description?: string }>) => {
       if (!markers.length) return
       const newFeatures: Feature[] = markers
         .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
@@ -589,6 +589,7 @@ function App() {
           geometry: { type: 'Point', coordinates: [m.lng, m.lat] },
           properties: {
             label: m.label || '',
+            ...(m.description ? { description: m.description } : {}),
             ...(m.color ? { fillColor: m.color, strokeColor: m.color } : {}),
             source: 'ai_marker',
           },

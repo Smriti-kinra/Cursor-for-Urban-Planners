@@ -86,6 +86,50 @@ function labelField(layer: GeoJSONLayer): ExpressionSpecification | string {
   return labelsActive(layer) ? (['get', l!.property] as ExpressionSpecification) : ''
 }
 
+// Property keys that look like a human-readable title, in preference order.
+const POPUP_TITLE_KEYS = ['label', 'name', 'title', 'display_name']
+// Internal bookkeeping props that should never surface in a hover popup.
+const POPUP_HIDDEN_KEYS = new Set([
+  'label', 'name', 'title', 'display_name', 'description',
+  'source', 'source_layer', 'fillColor', 'strokeColor',
+])
+
+function escapeHtml(value: unknown): string {
+  return String(value)
+    .replace(/&/g, '&amp;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;')
+    .replace(/"/g, '&quot;')
+}
+
+/**
+ * Build popup HTML for any feature's properties. Returns '' when there's
+ * nothing worth showing. Shared by every layer so AI markers, AI-drawn
+ * shapes, and user-drawn shapes all get a hover popup for free.
+ */
+function popupHtmlForProps(props: Record<string, unknown> | null): string {
+  if (!props) return ''
+  const titleKey = POPUP_TITLE_KEYS.find((k) => props[k] != null && String(props[k]).trim() !== '')
+  const title = titleKey ? String(props[titleKey]).trim() : ''
+  const description =
+    props.description != null && String(props.description).trim() !== ''
+      ? String(props.description).trim()
+      : ''
+  // Remaining attributes (e.g. zone_code, population) shown as key: value rows.
+  const rows = Object.entries(props)
+    .filter(([k, v]) => !POPUP_HIDDEN_KEYS.has(k) && v != null && String(v).trim() !== '')
+    .slice(0, 8)
+    .map(([k, v]) => `<div class="mv-popup-row"><span>${escapeHtml(k)}</span>: ${escapeHtml(v)}</div>`)
+    .join('')
+
+  if (!title && !description && !rows) return ''
+  return (
+    (title ? `<div class="mv-popup-title">${escapeHtml(title)}</div>` : '') +
+    (description ? `<div class="mv-popup-desc">${escapeHtml(description)}</div>` : '') +
+    rows
+  )
+}
+
 interface MapViewProps {
   layers: GeoJSONLayer[]
   basemap: string
@@ -147,6 +191,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const drawModeRef = useRef<DrawMode>(null)
   const drawVerticesRef = useRef<number[][]>([])
   const ownLayerIds = useRef(new Set<string>())
+  const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
   // Per-source revision token: setData() is only called when layer.data changes.
   const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
   const initBasemapRef = useRef(basemap)
@@ -740,6 +785,60 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.off('dblclick', onDblClick)
     }
   }, [mapReady, finishDraw, redrawDraft])
+
+  // ── Hover popups ──
+  // Any feature in one of our layers (AI markers, AI-drawn shapes, user-drawn
+  // shapes, loaded GeoJSON) shows a popup on hover built from its properties.
+  // Bound once; the handler reads the live layer set from ownLayerIds.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    const renderLayerIds = (): string[] => {
+      const ids: string[] = []
+      for (const baseId of ownLayerIds.current) {
+        for (const suffix of ['-fill', '-line', '-circle']) {
+          if (map.getLayer(`${baseId}${suffix}`)) ids.push(`${baseId}${suffix}`)
+        }
+      }
+      return ids
+    }
+
+    const hidePopup = () => {
+      hoverPopupRef.current?.remove()
+      hoverPopupRef.current = null
+      map.getCanvas().style.cursor = ''
+    }
+
+    const onMouseMove = (e: maplibregl.MapMouseEvent) => {
+      // Drawing takes over the cursor and clicks; don't fight it.
+      if (drawModeRef.current) return hidePopup()
+      const ids = renderLayerIds()
+      if (!ids.length) return hidePopup()
+      const feats = map.queryRenderedFeatures(e.point, { layers: ids })
+      const html = feats.length ? popupHtmlForProps(feats[0].properties) : ''
+      if (!html) return hidePopup()
+
+      map.getCanvas().style.cursor = 'pointer'
+      if (!hoverPopupRef.current) {
+        hoverPopupRef.current = new maplibregl.Popup({
+          closeButton: false,
+          closeOnClick: false,
+          offset: 12,
+          className: 'mv-hover-popup',
+        }).addTo(map)
+      }
+      hoverPopupRef.current.setLngLat(e.lngLat).setHTML(html)
+    }
+
+    map.on('mousemove', onMouseMove)
+    map.on('mouseout', hidePopup)
+    return () => {
+      map.off('mousemove', onMouseMove)
+      map.off('mouseout', hidePopup)
+      hidePopup()
+    }
+  }, [mapReady])
 
   // Keyboard: Enter finishes, Escape cancels, Backspace removes last vertex.
   useEffect(() => {

@@ -271,3 +271,47 @@
   color: var(--bg-surface);
 }
 
+
+/* ── Hover popups for AI/user features ── */
+.mv-hover-popup {
+  max-width: 280px;
+  z-index: 1200;
+}
+
+.mv-hover-popup .maplibregl-popup-content {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.4);
+  padding: 8px 10px;
+  font-size: 12px;
+  line-height: 1.4;
+}
+
+/* Color the popup tip to match the surface (default is white). */
+.mv-hover-popup .maplibregl-popup-tip {
+  border-top-color: var(--bg-surface);
+  border-bottom-color: var(--bg-surface);
+}
+
+.mv-hover-popup .mv-popup-title {
+  font-weight: 600;
+  font-size: 13px;
+  margin-bottom: 2px;
+}
+
+.mv-hover-popup .mv-popup-desc {
+  color: var(--text-secondary);
+  margin-bottom: 4px;
+  white-space: pre-wrap;
+}
+
+.mv-hover-popup .mv-popup-row {
+  color: var(--text-secondary);
+}
+
+.mv-hover-popup .mv-popup-row span {
+  color: var(--text-primary);
+  font-weight: 500;
+}

@@ -81,7 +81,7 @@ SYSTEM_PROMPT = (
     "Always respond in English regardless of the query language.\n\n"
     "AVAILABLE TOOLS:\n"
     "- Navigate: fly_to, fit_bounds\n"
-    "- Markers: add_marker, add_markers, clear_markers\n"
+    "- Markers: add_marker, add_markers (pass a 'description' to show info in a hover popup), clear_markers\n"
     "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
     "- Search: web_search, geocode\n"
@@ -444,15 +444,16 @@ def _build_tools() -> list[dict]:
             },
             "required": ["south", "west", "north", "east"],
         }),
-        ("add_marker", "Add a labeled marker pin on the map", {
+        ("add_marker", "Add a labeled marker pin on the map. Pass a description to show extra info in a popup when the user hovers the pin.", {
             "type": "object",
             "properties": {
                 "lat": {"type": "number"}, "lng": {"type": "number"},
                 "label": {"type": "string"}, "color": {"type": "string"},
+                "description": {"type": "string", "description": "Optional details shown in a popup on hover"},
             },
             "required": ["lat", "lng", "label"],
         }),
-        ("add_markers", "Add multiple markers at once", {
+        ("add_markers", "Add multiple markers at once. Each marker may include a description shown in a popup on hover.", {
             "type": "object",
             "properties": {
                 "markers": {
@@ -462,6 +463,7 @@ def _build_tools() -> list[dict]:
                         "properties": {
                             "lat": {"type": "number"}, "lng": {"type": "number"},
                             "label": {"type": "string"}, "color": {"type": "string"},
+                            "description": {"type": "string", "description": "Optional details shown in a popup on hover"},
                         },
                         "required": ["lat", "lng", "label"],
                     },

@@ -107,10 +107,21 @@ export type MapAction =
   | { type: 'fly_to'; payload: { lat: number; lng: number; zoom?: number } }
   | { type: 'fit_bounds'; payload: { south: number; west: number; north: number; east: number } }
   | { type: 'set_view'; payload: MapViewState }
-  | { type: 'add_marker'; payload: { lat: number; lng: number; label?: string; color?: string } }
+  | {
+      type: 'add_marker'
+      payload: { lat: number; lng: number; label?: string; color?: string; description?: string }
+    }
   | {
       type: 'add_markers'
-      payload: { markers: Array<{ lat: number; lng: number; label?: string; color?: string }> }
+      payload: {
+        markers: Array<{
+          lat: number
+          lng: number
+          label?: string
+          color?: string
+          description?: string
+        }>
+      }
     }
   | { type: 'clear_markers'; payload: Record<string, never> }
   | {
