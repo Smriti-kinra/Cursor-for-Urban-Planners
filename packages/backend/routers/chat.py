@@ -98,7 +98,11 @@ SYSTEM_PROMPT = (
     "(per-pollutant), get_solar_building (rooftop solar potential)\n"
     "- Weather: get_weather, get_air_quality (Open-Meteo fallback)\n"
     "- GIS: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
-    "gis_point_in_polygon, gis_bounding_box, gis_union\n"
+    "gis_point_in_polygon, gis_bounding_box, gis_union, "
+    "gis_intersection (overlap of A & B), gis_difference (A minus B), "
+    "gis_clip (crop a layer to a polygon), gis_dissolve (merge features, "
+    "optionally by a property), gis_nearest (closest feature to a point), "
+    "gis_spatial_join (tag points with the polygon they fall in)\n"
     "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
     "- Demographics: get_demographics\n"
@@ -152,7 +156,13 @@ SYSTEM_PROMPT = (
     "To put text on the map, pass label_property (e.g. the station/zone/route name). Use "
     "set_layer_style ONLY for a single flat color across the whole layer. Each layer in the "
     "map context carries a 'style' summary — do NOT re-issue a style_layer call that already "
-    "matches the active mode/property."
+    "matches the active mode/property.\n"
+    "13. SPATIAL ANALYSIS: pass GeoJSON geometry to the gis_* overlay tools. For data already "
+    "on the map, the map context includes each layer's geometry_data (full coords for small "
+    "layers) — use it as the tool input. gis_intersection/difference/clip/dissolve render their "
+    "result automatically (do NOT call add_geojson after). Use gis_clip to crop a layer to a "
+    "boundary, gis_dissolve with group_by to merge parcels into districts, gis_spatial_join to "
+    "tag points with their containing polygon, and gis_nearest for closest-feature queries."
 )
 
 # ── Deep research helpers ──────────────────────────────────────────────────────
@@ -725,6 +735,32 @@ async def _execute_tool(
                     "geojson": {"type": "FeatureCollection", "features": [result["geojson"]]},
                     "name": label,
                 })
+
+            # Auto-display overlay/relational ops. intersection/difference return
+            # a single Feature; clip/dissolve/spatial_join return a
+            # FeatureCollection. Normalize to an FC, render it, and collapse the
+            # model-visible result so huge geometry isn't echoed back.
+            elif name in (
+                "gis_intersection", "gis_difference", "gis_clip",
+                "gis_dissolve", "gis_spatial_join",
+            ) and "geojson" in result:
+                gj = result["geojson"]
+                fc = gj if gj.get("type") == "FeatureCollection" else {
+                    "type": "FeatureCollection", "features": [gj],
+                }
+                label = {
+                    "gis_intersection": "Intersection",
+                    "gis_difference": "Difference",
+                    "gis_clip": "Clipped",
+                    "gis_dissolve": "Dissolved",
+                    "gis_spatial_join": "Spatial join",
+                }[name]
+                await _send_action(ws, "add_geojson", {"geojson": fc, "name": label})
+                collapsed: dict = {"displayed_on_map": True, "layer_name": label}
+                for k in ("area", "kept", "group_count", "points", "joined", "intersects", "empty", "message"):
+                    if k in result:
+                        collapsed[k] = result[k]
+                result = collapsed
 
             return json.dumps(result)
 
