@@ -92,6 +92,7 @@ const POPUP_TITLE_KEYS = ['label', 'name', 'title', 'display_name']
 const POPUP_HIDDEN_KEYS = new Set([
   'label', 'name', 'title', 'display_name', 'description',
   'source', 'source_layer', 'fillColor', 'strokeColor',
+  'type', 'types',
 ])
 
 function escapeHtml(value: unknown): string {
