@@ -499,7 +499,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       // Proxy through the backend — browsers can't set the User-Agent that
       // Nominatim's usage policy requires.
       const resp = await fetch(
-        `http://localhost:8765/api/geocode?query=${encodeURIComponent(searchQuery)}&limit=5`,
+        `http://127.0.0.1:8765/api/geocode?query=${encodeURIComponent(searchQuery)}&limit=5`,
       )
       const data = await resp.json()
       const results: NominatimSearchResult[] = (data?.results || [])

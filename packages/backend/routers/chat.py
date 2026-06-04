@@ -144,7 +144,12 @@ SYSTEM_PROMPT = (
     "upstream_unavailable.\n"
     "11. AMBIGUOUS PLACE NAMES: if the user types a partial or ambiguous place name, call "
     "places_autocomplete first to get candidate place_ids, then place_details on the best match "
-    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster."
+    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster.\n"
+    "12. RESOLVING PLACES/POIS: When the user asks to locate, fly to, or search for a specific place, "
+    "landmark, or POI by name (e.g. 'Chandigarh Airport', 'Sukhna Lake'), if you do not have its "
+    "exact coordinates in the map context, ALWAYS call `geocode` with the place name first to resolve it "
+    "to coordinates. Do NOT try to guess coordinates or use the city center to run local searches "
+    "(like `osm_search` or `nearby_places`) unless you first geocoded the place."
 )
 
 # ── Deep research helpers ──────────────────────────────────────────────────────

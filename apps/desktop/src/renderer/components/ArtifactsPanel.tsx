@@ -5,7 +5,7 @@ import rehypeHighlight from 'rehype-highlight'
 import { Artifact } from '../types'
 import './ArtifactsPanel.css'
 
-const API_BASE = 'http://localhost:8765/api/artifacts'
+const API_BASE = 'http://127.0.0.1:8765/api/artifacts'
 
 /** Preview-only artifact returned by GET /api/artifacts (truncated content) */
 interface ArtifactPreview extends Omit<Artifact, 'content'> {

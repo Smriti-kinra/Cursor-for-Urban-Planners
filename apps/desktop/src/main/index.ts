@@ -92,7 +92,7 @@ function stopBackend(): void {
 async function waitForBackend(retries = 30, delay = 500): Promise<boolean> {
   for (let i = 0; i < retries; i++) {
     try {
-      const res = await fetch(`http://localhost:${BACKEND_PORT}/health`)
+      const res = await fetch(`http://127.0.0.1:${BACKEND_PORT}/health`)
       if (res.ok) return true
     } catch {
       /* not ready yet */

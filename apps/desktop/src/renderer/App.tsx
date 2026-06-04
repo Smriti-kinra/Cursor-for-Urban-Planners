@@ -396,7 +396,7 @@ function App() {
       form.append('content', '')
       form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.png`)
       try {
-        await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
+        await fetch('http://127.0.0.1:8765/api/artifacts/upload', { method: 'POST', body: form })
         setArtifactsRevision((n) => n + 1)
       } catch {
         /* backend unavailable */
@@ -440,7 +440,7 @@ function App() {
     form.append('content', '')
     form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.pdf`)
     try {
-      await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
+      await fetch('http://127.0.0.1:8765/api/artifacts/upload', { method: 'POST', body: form })
       setArtifactsRevision((n) => n + 1)
     } catch {
       /* backend unavailable */
@@ -797,7 +797,7 @@ function App() {
       // Place immediately with a coordinate label, then upgrade to the
       // reverse-geocoded address when it resolves. Never block the pin.
       appendMarkersToLayer([{ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}` }])
-      fetch(`http://localhost:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`)
+      fetch(`http://127.0.0.1:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`)
         .then((r) => r.json())
         .then((d: { display_name?: string | null }) => {
           if (!d?.display_name) return

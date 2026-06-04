@@ -25,7 +25,7 @@ interface StreetViewDialogProps {
   onClose: () => void
 }
 
-const API = 'http://localhost:8765/api/streetview'
+const API = 'http://127.0.0.1:8765/api/streetview'
 
 export default function StreetViewDialog({ target, onClose }: StreetViewDialogProps) {
   const [meta, setMeta] = useState<StreetViewMeta | null>(null)

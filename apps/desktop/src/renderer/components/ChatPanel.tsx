@@ -43,7 +43,7 @@ function pickSuggestions(n: number): string[] {
   return shuffled.slice(0, Math.max(1, Math.min(n, shuffled.length)))
 }
 
-const BACKEND_WS = 'ws://localhost:8765/api/chat/ws'
+const BACKEND_WS = 'ws://127.0.0.1:8765/api/chat/ws'
 
 // ── ResearchBubble ────────────────────────────────────────────────────────────
 
@@ -364,23 +364,34 @@ export default function ChatPanel({
         resolve(wsRef.current)
         return
       }
-      const ws = new WebSocket(BACKEND_WS)
-      historySentRef.current = false
-      ws.addEventListener('message', handleWsMessage)
-      ws.addEventListener('open', () => {
-        wsRef.current = ws
-        resolve(ws)
-      })
-      ws.addEventListener('error', () =>
-        reject(new Error('WebSocket connection failed')),
-      )
-      ws.addEventListener('close', () => {
-        wsRef.current = null
+
+      let attempts = 0
+      const tryConnect = () => {
+        attempts += 1
+        const ws = new WebSocket(BACKEND_WS)
         historySentRef.current = false
-        setIsStreaming(false)
-        setToolStatus(null)
-        inFlightRef.current = null
-      })
+        ws.addEventListener('message', handleWsMessage)
+        ws.addEventListener('open', () => {
+          wsRef.current = ws
+          resolve(ws)
+        })
+        ws.addEventListener('error', () => {
+          if (attempts < 2) {
+            setTimeout(tryConnect, 250)
+            return
+          }
+          reject(new Error('WebSocket connection failed'))
+        })
+        ws.addEventListener('close', () => {
+          wsRef.current = null
+          historySentRef.current = false
+          setIsStreaming(false)
+          setToolStatus(null)
+          inFlightRef.current = null
+        })
+      }
+
+      tryConnect()
     })
   }, [handleWsMessage])
 
