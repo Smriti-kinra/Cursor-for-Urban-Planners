@@ -1,0 +1,136 @@
+.attr-table {
+  border-top: 1px solid var(--border);
+  padding: 8px 10px 12px;
+  font-size: 12px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+}
+
+.attr-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.attr-title {
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.attr-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+}
+.attr-close:hover { color: var(--danger, #ef4444); }
+
+.attr-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.attr-addcol {
+  display: flex;
+  gap: 6px;
+  margin-bottom: 8px;
+}
+
+.attr-input {
+  flex: 1;
+  background: var(--bg-input, #1a1a26);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  border-radius: 4px;
+  padding: 4px 6px;
+  font-size: 12px;
+}
+
+.attr-btn {
+  background: var(--accent);
+  color: var(--bg-surface, #fff);
+  border: none;
+  border-radius: 4px;
+  padding: 4px 10px;
+  font-size: 12px;
+  cursor: pointer;
+}
+.attr-btn:disabled { opacity: 0.45; cursor: not-allowed; }
+
+.attr-scroll {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.attr-table table {
+  border-collapse: collapse;
+  width: 100%;
+}
+
+.attr-table th,
+.attr-table td {
+  border: 1px solid var(--border);
+  padding: 0;
+  text-align: left;
+}
+
+.attr-table th {
+  background: var(--bg-hover);
+  padding: 4px 6px;
+  font-weight: 600;
+  color: var(--text-secondary);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+}
+
+.attr-colname {
+  margin-right: 4px;
+}
+
+.attr-coldel {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+}
+.attr-coldel:hover { color: var(--danger, #ef4444); }
+
+.attr-rownum {
+  color: var(--text-muted);
+  text-align: right;
+  padding: 2px 6px;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-hover);
+}
+
+.attr-cell {
+  width: 100%;
+  min-width: 80px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 4px 6px;
+  font-size: 12px;
+}
+.attr-cell:focus {
+  outline: 1px solid var(--accent);
+  background: var(--bg-input, #1a1a26);
+}
+
+.attr-rowdel {
+  background: none;
+  border: none;
+  cursor: pointer;
+  font-size: 12px;
+  padding: 2px 4px;
+  opacity: 0.6;
+}
+.attr-rowdel:hover { opacity: 1; }

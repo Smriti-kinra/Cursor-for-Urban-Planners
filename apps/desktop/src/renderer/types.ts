@@ -10,6 +10,42 @@ export interface GeoJSONLayer {
   fillColor?: string
   lineColor?: string
   opacity?: number
+  styleSpec?: LayerStyleSpec
+}
+
+// ── Data-driven symbology + labels ──
+//
+// A serializable description of how a layer should be styled. Lives on the
+// layer (and in project.json). MapView translates it into MapLibre paint
+// expressions; Legend renders it; the `style_layer` action and SymbologyPanel
+// both write it.
+
+export type ClassificationMethod = 'equal-interval' | 'quantile'
+
+/** Text labels drawn on the map from a feature property. */
+export interface LabelSpec {
+  enabled: boolean
+  property: string
+  size?: number       // px, default 12
+  color?: string      // default '#1f2937'
+  haloColor?: string  // default '#ffffff'
+}
+
+export interface LayerStyleSpec {
+  mode: 'simple' | 'categorized' | 'graduated'
+  /** Property driving the color. Required for categorized/graduated. */
+  property?: string
+  // categorized — ordered so the legend is deterministic
+  categories?: Array<{ value: string; color: string }>
+  otherColor?: string
+  // graduated (choropleth) — `rampColors` length === breaks.length + 1
+  breaks?: number[]
+  rampColors?: string[]
+  classification?: ClassificationMethod
+  rampName?: string
+  // shared
+  opacity?: number
+  label?: LabelSpec
 }
 
 export interface MapViewState {
@@ -71,10 +107,21 @@ export type MapAction =
   | { type: 'fly_to'; payload: { lat: number; lng: number; zoom?: number } }
   | { type: 'fit_bounds'; payload: { south: number; west: number; north: number; east: number } }
   | { type: 'set_view'; payload: MapViewState }
-  | { type: 'add_marker'; payload: { lat: number; lng: number; label?: string; color?: string } }
+  | {
+      type: 'add_marker'
+      payload: { lat: number; lng: number; label?: string; color?: string; description?: string }
+    }
   | {
       type: 'add_markers'
-      payload: { markers: Array<{ lat: number; lng: number; label?: string; color?: string }> }
+      payload: {
+        markers: Array<{
+          lat: number
+          lng: number
+          label?: string
+          color?: string
+          description?: string
+        }>
+      }
     }
   | { type: 'clear_markers'; payload: Record<string, never> }
   | {
@@ -110,6 +157,23 @@ export type MapAction =
         fill_color?: string
         line_color?: string
         opacity?: number
+      }
+    }
+  | {
+      type: 'style_layer'
+      payload: {
+        layer_name: string
+        mode: 'simple' | 'categorized' | 'graduated'
+        property?: string
+        classification?: ClassificationMethod
+        classes?: number
+        ramp?: string
+        categories?: Array<{ value: string; color: string }>
+        opacity?: number
+        label_property?: string
+        label_enabled?: boolean
+        label_size?: number
+        label_color?: string
       }
     }
   | { type: 'toggle_layer'; payload: { layer_name: string; visible: boolean } }
@@ -168,6 +232,7 @@ export interface ProjectData {
     fillColor?: string
     lineColor?: string
     opacity?: number
+    styleSpec?: LayerStyleSpec
   }>
   conversations: Conversation[]
   activeConversationId: string | null
@@ -200,8 +265,20 @@ export interface MapContext {
     properties: string[]
     visible: boolean
     geometry_data?: LayerGeometryData
+    style?: LayerStyleSummary
   }>
   basemap: string
+}
+
+/** Compact view of a layer's active styling, sent to the LLM so it can avoid
+ *  re-issuing a style_layer call that matches what's already applied. */
+export interface LayerStyleSummary {
+  mode: 'simple' | 'categorized' | 'graduated'
+  property?: string
+  categoryCount?: number
+  classes?: number
+  ramp?: string
+  labels: false | { property: string }
 }
 
 /** A boundary geometry — what comes out of Nominatim's `polygon_geojson=1` */

@@ -60,7 +60,7 @@ _servers = {
 _ACTION_TOOLS = {
     "fly_to", "fit_bounds", "add_marker", "add_markers", "clear_markers",
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
-    "highlight_features", "set_layer_style", "toggle_layer", "remove_layer",
+    "highlight_features", "set_layer_style", "style_layer", "toggle_layer", "remove_layer",
     "save_bookmark", "go_to_bookmark", "export_region_clip",
 }
 
@@ -81,8 +81,8 @@ SYSTEM_PROMPT = (
     "Always respond in English regardless of the query language.\n\n"
     "AVAILABLE TOOLS:\n"
     "- Navigate: fly_to, fit_bounds\n"
-    "- Markers: add_marker, add_markers, clear_markers\n"
-    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style\n"
+    "- Markers: add_marker, add_markers (pass a 'description' to show info in a hover popup), clear_markers\n"
+    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
     "- Search: web_search, geocode\n"
     "- OSM: osm_search (amenities, buildings, roads), "
@@ -98,7 +98,11 @@ SYSTEM_PROMPT = (
     "(per-pollutant), get_solar_building (rooftop solar potential)\n"
     "- Weather: get_weather, get_air_quality (Open-Meteo fallback)\n"
     "- GIS: gis_buffer, gis_centroid, gis_area, gis_convex_hull, "
-    "gis_point_in_polygon, gis_bounding_box, gis_union\n"
+    "gis_point_in_polygon, gis_bounding_box, gis_union, "
+    "gis_intersection (overlap of A & B), gis_difference (A minus B), "
+    "gis_clip (crop a layer to a polygon), gis_dissolve (merge features, "
+    "optionally by a property), gis_nearest (closest feature to a point), "
+    "gis_spatial_join (tag points with the polygon they fall in)\n"
     "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
     "- Demographics: get_demographics\n"
@@ -144,7 +148,21 @@ SYSTEM_PROMPT = (
     "upstream_unavailable.\n"
     "11. AMBIGUOUS PLACE NAMES: if the user types a partial or ambiguous place name, call "
     "places_autocomplete first to get candidate place_ids, then place_details on the best match "
-    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster."
+    "to resolve to coordinates. Skip this for unambiguous queries — geocode is faster.\n"
+    "12. STYLING A LAYER: to color a layer BY a property value, use style_layer — "
+    "mode='categorized' for a string property (zone_code, land_use, route_name), "
+    "mode='graduated' for a numeric property (population, density, area). You pass only "
+    "the property and (optionally) ramp/classes; the app computes breaks and the palette. "
+    "To put text on the map, pass label_property (e.g. the station/zone/route name). Use "
+    "set_layer_style ONLY for a single flat color across the whole layer. Each layer in the "
+    "map context carries a 'style' summary — do NOT re-issue a style_layer call that already "
+    "matches the active mode/property.\n"
+    "13. SPATIAL ANALYSIS: pass GeoJSON geometry to the gis_* overlay tools. For data already "
+    "on the map, the map context includes each layer's geometry_data (full coords for small "
+    "layers) — use it as the tool input. gis_intersection/difference/clip/dissolve render their "
+    "result automatically (do NOT call add_geojson after). Use gis_clip to crop a layer to a "
+    "boundary, gis_dissolve with group_by to merge parcels into districts, gis_spatial_join to "
+    "tag points with their containing polygon, and gis_nearest for closest-feature queries."
 )
 
 # ── Deep research helpers ──────────────────────────────────────────────────────
@@ -251,10 +269,12 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
     """Run o4-mini-deep-research and stream progress back over the WebSocket.
 
     Sends these WS message types:
-      research_start  — emitted once before the API call
-      research_step   — one per web search (query string)
-      research_report — final markdown text + citations list
-      research_done   — terminal signal
+      research_start          — emitted once before the API call
+      research_step           — one per web search (query string)
+      research_reasoning_delta — incremental chunk of the model's reasoning summary
+      research_text_delta     — incremental chunk of the report as it is written
+      research_report         — final markdown text + citations list
+      research_done           — terminal signal
 
     Returns a short result string for the tool message inserted into history.
     """
@@ -262,60 +282,117 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
 
     prompt = _build_research_prompt(messages, map_context)
 
+    def _extract_query(obj) -> str:
+        """Pull the search query off a web_search_call item or its action.
+        The `searching` event itself carries no query — it rides on the
+        output item's `action.query`."""
+        if obj is None:
+            return ""
+        action = getattr(obj, "action", None)
+        q = getattr(action, "query", None) if action is not None else None
+        return q or getattr(obj, "query", "") or ""
+
     try:
         got_text = False
+        accumulated = ""           # report text assembled from output_text deltas
+        seen_queries: set[str] = set()
+        search_count = 0
         last_heartbeat = asyncio.get_event_loop().time()
 
-        async with _client.responses.create(
+        stream = await _client.responses.create(
             model="o4-mini-deep-research",
             input=prompt,
             instructions=_RESEARCH_SYSTEM,
             tools=[{"type": "web_search_preview"}],
             max_tool_calls=30,
+            reasoning={"summary": "auto"},  # emit reasoning_summary deltas
             stream=True,
-        ) as stream:
-            async for event in stream:
-                # Send a heartbeat if >30 s have passed since the last WS message
-                now = asyncio.get_event_loop().time()
-                if now - last_heartbeat > 30:
-                    try:
-                        await ws.send_text(json.dumps({"type": "research_heartbeat"}))
-                    except Exception:
-                        pass
-                    last_heartbeat = now
+        )
+        async for event in stream:
+            # Send a heartbeat if >30 s have passed since the last WS message
+            now = asyncio.get_event_loop().time()
+            if now - last_heartbeat > 30:
+                try:
+                    await ws.send_text(json.dumps({"type": "research_heartbeat"}))
+                except Exception:
+                    pass
+                last_heartbeat = now
 
-                event_type = getattr(event, "type", None)
+            event_type = getattr(event, "type", None)
 
-                if event_type == "response.web_search_call.searching":
-                    action = getattr(event, "action", None)
-                    query = (
-                        getattr(event, "query", None)
-                        or (getattr(action, "query", None) if action else None)
-                        or ""
-                    )
-                    if query:
-                        await ws.send_text(json.dumps({
-                            "type": "research_step",
-                            "query": query,
-                        }))
-                        last_heartbeat = asyncio.get_event_loop().time()
+            # A web_search_call item appears. The query is often absent in the
+            # stream for this model, so emit a step regardless — using the query
+            # text when present, a generic label otherwise.
+            if event_type == "response.output_item.added":
+                item = getattr(event, "item", None)
+                if item is not None and getattr(item, "type", None) == "web_search_call":
+                    search_count += 1
+                    query = _extract_query(item)
+                    await ws.send_text(json.dumps({
+                        "type": "research_step",
+                        "query": query or f"web search #{search_count}",
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
 
-                elif event_type == "response.output_text.done":
-                    text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
-                    if text:
-                        got_text = True
-                        annotations = []
-                        for item in getattr(event, "annotations", None) or []:
-                            url = getattr(item, "url", None)
-                            title = getattr(item, "title", None)
-                            if url:
-                                annotations.append({"url": url, "title": title or url})
-                        await ws.send_text(json.dumps({
-                            "type": "research_report",
-                            "markdown": text,
-                            "citations": annotations,
-                        }))
-                        last_heartbeat = asyncio.get_event_loop().time()
+            # Fallback: only fires if the item-added path didn't (older streams).
+            elif event_type == "response.web_search_call.searching":
+                query = _extract_query(event)
+                if query and query not in seen_queries:
+                    seen_queries.add(query)
+                    search_count += 1
+                    await ws.send_text(json.dumps({
+                        "type": "research_step", "query": query,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # The model's reasoning summary, streamed token-by-token.
+            elif event_type == "response.reasoning_summary_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    await ws.send_text(json.dumps({
+                        "type": "research_reasoning_delta", "delta": delta,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # The report itself, streamed token-by-token.
+            elif event_type == "response.output_text.delta":
+                delta = getattr(event, "delta", "") or ""
+                if delta:
+                    accumulated += delta
+                    got_text = True
+                    await ws.send_text(json.dumps({
+                        "type": "research_text_delta", "delta": delta,
+                    }))
+                    last_heartbeat = asyncio.get_event_loop().time()
+
+            # Final text for a content part — capture annotations (citations)
+            # and the authoritative full text.
+            elif event_type == "response.output_text.done":
+                text = getattr(event, "text", None) or getattr(event, "output_text", None) or ""
+                if text:
+                    accumulated = text
+                got_text = got_text or bool(text)
+                annotations = []
+                for item in getattr(event, "annotations", None) or []:
+                    url = getattr(item, "url", None)
+                    title = getattr(item, "title", None)
+                    if url:
+                        annotations.append({"url": url, "title": title or url})
+                await ws.send_text(json.dumps({
+                    "type": "research_report",
+                    "markdown": accumulated,
+                    "citations": annotations,
+                }))
+                last_heartbeat = asyncio.get_event_loop().time()
+
+        # If the stream ended without an output_text.done (e.g. only deltas),
+        # still deliver whatever we accumulated as the final report.
+        if got_text and accumulated:
+            await ws.send_text(json.dumps({
+                "type": "research_report",
+                "markdown": accumulated,
+                "citations": [],
+            }))
 
         if not got_text:
             await ws.send_text(json.dumps({
@@ -367,15 +444,16 @@ def _build_tools() -> list[dict]:
             },
             "required": ["south", "west", "north", "east"],
         }),
-        ("add_marker", "Add a labeled marker pin on the map", {
+        ("add_marker", "Add a labeled marker pin on the map. Pass a description to show extra info in a popup when the user hovers the pin.", {
             "type": "object",
             "properties": {
                 "lat": {"type": "number"}, "lng": {"type": "number"},
                 "label": {"type": "string"}, "color": {"type": "string"},
+                "description": {"type": "string", "description": "Optional details shown in a popup on hover"},
             },
             "required": ["lat", "lng", "label"],
         }),
-        ("add_markers", "Add multiple markers at once", {
+        ("add_markers", "Add multiple markers at once. Each marker may include a description shown in a popup on hover.", {
             "type": "object",
             "properties": {
                 "markers": {
@@ -385,6 +463,7 @@ def _build_tools() -> list[dict]:
                         "properties": {
                             "lat": {"type": "number"}, "lng": {"type": "number"},
                             "label": {"type": "string"}, "color": {"type": "string"},
+                            "description": {"type": "string", "description": "Optional details shown in a popup on hover"},
                         },
                         "required": ["lat", "lng", "label"],
                     },
@@ -412,13 +491,55 @@ def _build_tools() -> list[dict]:
             },
             "required": ["layer_name", "property_name", "property_value"],
         }),
-        ("set_layer_style", "Change the visual style of a loaded map layer", {
+        ("set_layer_style", "Apply ONE flat fill/line color to an entire layer", {
             "type": "object",
             "properties": {
                 "layer_name": {"type": "string"}, "fill_color": {"type": "string"},
                 "line_color": {"type": "string"}, "opacity": {"type": "number"},
             },
             "required": ["layer_name"],
+        }),
+        ("style_layer", (
+            "Apply DATA-DRIVEN symbology to a loaded layer: categorized colors by a "
+            "string property (e.g. zone_code, route_name), graduated/choropleth colors "
+            "by a numeric property (e.g. population, density), and/or text labels drawn "
+            "from a property. The frontend computes the class breaks and category "
+            "palette — you only pass mode, property, and optionally ramp/classes. "
+            "Prefer this over set_layer_style whenever the user wants to color BY a "
+            "property or show labels."
+        ), {
+            "type": "object",
+            "properties": {
+                "layer_name": {"type": "string"},
+                "mode": {
+                    "type": "string",
+                    "enum": ["simple", "categorized", "graduated"],
+                    "description": "categorized=color by string property; graduated=choropleth by numeric property; simple=clear data-driven styling.",
+                },
+                "property": {"type": "string", "description": "Feature property to drive color. Required for categorized/graduated."},
+                "classification": {
+                    "type": "string",
+                    "enum": ["equal-interval", "quantile"],
+                    "description": "Graduated only. Default quantile.",
+                },
+                "classes": {"type": "number", "description": "Graduated bucket count (2-9, default 5)."},
+                "ramp": {"type": "string", "description": "Color ramp name: YlOrRd, Blues, Greens, Purples, Reds (graduated) or category (categorized)."},
+                "categories": {
+                    "type": "array",
+                    "description": "Optional explicit value->color overrides for categorized mode.",
+                    "items": {
+                        "type": "object",
+                        "properties": {"value": {"type": "string"}, "color": {"type": "string"}},
+                        "required": ["value", "color"],
+                    },
+                },
+                "opacity": {"type": "number"},
+                "label_property": {"type": "string", "description": "Property to draw as on-map text. Omit to leave labels unchanged."},
+                "label_enabled": {"type": "boolean", "description": "Turn labels on/off."},
+                "label_size": {"type": "number"},
+                "label_color": {"type": "string"},
+            },
+            "required": ["layer_name", "mode"],
         }),
         ("toggle_layer", "Show or hide a map layer", {
             "type": "object",
@@ -675,6 +796,32 @@ async def _execute_tool(
                     "geojson": {"type": "FeatureCollection", "features": [result["geojson"]]},
                     "name": label,
                 })
+
+            # Auto-display overlay/relational ops. intersection/difference return
+            # a single Feature; clip/dissolve/spatial_join return a
+            # FeatureCollection. Normalize to an FC, render it, and collapse the
+            # model-visible result so huge geometry isn't echoed back.
+            elif name in (
+                "gis_intersection", "gis_difference", "gis_clip",
+                "gis_dissolve", "gis_spatial_join",
+            ) and "geojson" in result:
+                gj = result["geojson"]
+                fc = gj if gj.get("type") == "FeatureCollection" else {
+                    "type": "FeatureCollection", "features": [gj],
+                }
+                label = {
+                    "gis_intersection": "Intersection",
+                    "gis_difference": "Difference",
+                    "gis_clip": "Clipped",
+                    "gis_dissolve": "Dissolved",
+                    "gis_spatial_join": "Spatial join",
+                }[name]
+                await _send_action(ws, "add_geojson", {"geojson": fc, "name": label})
+                collapsed: dict = {"displayed_on_map": True, "layer_name": label}
+                for k in ("area", "kept", "group_count", "points", "joined", "intersects", "empty", "message"):
+                    if k in result:
+                        collapsed[k] = result[k]
+                result = collapsed
 
             return json.dumps(result)
 

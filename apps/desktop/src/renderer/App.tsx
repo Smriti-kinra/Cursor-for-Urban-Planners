@@ -7,6 +7,9 @@ import ChatPanel from './components/ChatPanel'
 import StreetViewDialog from './components/StreetViewDialog'
 import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
+import SymbologyPanel from './components/SymbologyPanel'
+import AttributeTable from './components/AttributeTable'
+import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
@@ -20,10 +23,20 @@ import {
   MapContext,
   ProjectData,
   LAYER_COLORS,
+  BASEMAPS,
   MapBookmark,
   BoundaryGeometry,
   LayerGeometryData,
+  LayerStyleSpec,
 } from './types'
+import {
+  computeBreaks,
+  buildCategories,
+  rampColorsForClasses,
+  DEFAULT_RAMP,
+} from './lib/classify'
+import { composeFigure } from './lib/compose-figure'
+import { buildLegendEntries } from './lib/legend-data'
 
 type AppMode = 'map' | 'document'
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
@@ -39,6 +52,10 @@ function App() {
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
+  const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
+  const [attrLayerId, setAttrLayerId] = useState<string | null>(null)
+  const [convertingFile, setConvertingFile] = useState<string | null>(null)
+  const [convertError, setConvertError] = useState<string | null>(null)
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
   const [mapViewState, setMapViewState] = useState<MapViewState>({
@@ -66,9 +83,13 @@ function App() {
   const bookmarksRef = useRef<MapBookmark[]>([])
   const mapBoundsRef = useRef<typeof mapBounds>(null)
   const saveProjectRef = useRef<(force?: boolean) => Promise<void>>(async () => {})
+  // Lets the export handlers (defined before suggestExportTitle) read its
+  // latest value without a forward-reference dependency.
+  const suggestExportTitleRef = useRef<() => string>(() => 'Map')
 
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
+  const userShapeCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
   const isSavingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
@@ -192,13 +213,50 @@ function App() {
     } catch { /* ignore invalid geometry */ }
   }, [layers])
 
-  const handleFileClick = useCallback(
-    (entry: FileEntry) => {
-      if (entry.name.toLowerCase().endsWith('.geojson')) {
-        addLayer(entry.name.replace(/\.geojson$/i, ''), entry.path)
+  // Convert a non-GeoJSON vector file (shapefile/GPKG/KML/KMZ/GPX/CSV) to a
+  // workspace-local .geojson via the backend, then load it as a layer. Requires
+  // an open workspace (the backend writes the converted file inside it).
+  const convertAndAddLayer = useCallback(
+    async (entry: FileEntry) => {
+      if (!workspacePath) {
+        setConvertError('Open a workspace folder before importing this file type.')
+        return
+      }
+      setConvertingFile(entry.name)
+      setConvertError(null)
+      try {
+        const resp = await fetch('http://localhost:8765/api/files/convert', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ path: entry.path, workspace: workspacePath }),
+        })
+        const data = await resp.json()
+        if (data.error) {
+          setConvertError(`${entry.name}: ${data.error}`)
+          return
+        }
+        if (data.path) {
+          await addLayer(data.name || entry.name, data.path)
+        }
+      } catch {
+        setConvertError(`Could not reach the backend to convert ${entry.name}.`)
+      } finally {
+        setConvertingFile(null)
       }
     },
-    [addLayer],
+    [workspacePath, addLayer],
+  )
+
+  const handleFileClick = useCallback(
+    (entry: FileEntry) => {
+      const lower = entry.name.toLowerCase()
+      if (lower.endsWith('.geojson') || lower.endsWith('.json')) {
+        addLayer(entry.name.replace(/\.(geojson|json)$/i, ''), entry.path)
+      } else if (/\.(shp|gpkg|kml|kmz|gpx|csv)$/.test(lower)) {
+        void convertAndAddLayer(entry)
+      }
+    },
+    [addLayer, convertAndAddLayer],
   )
 
   // ── Admin boundary save ──
@@ -333,10 +391,49 @@ function App() {
     [mapViewState.zoom],
   )
 
-  const handleExportMapPng = useCallback(() => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    canvas.toBlob((blob) => {
+  // Compose a decorated figure (title block, scale bar, north arrow, legend,
+  // attribution) from the live map canvas + current view state. Single source
+  // for all four export paths so decorations are always baked into the output.
+  const composeMapFigure = useCallback(
+    (title: string): HTMLCanvasElement | null => {
+      const canvas = mapViewRef.current?.getCanvas()
+      if (!canvas) return null
+      return composeFigure(canvas, {
+        title: title || 'Map',
+        centerLat: mapViewState.center[1],
+        zoom: mapViewState.zoom,
+        bearing: mapViewState.bearing,
+        legend: buildLegendEntries(layers),
+        attribution: BASEMAPS[basemap]?.attribution || '',
+      })
+    },
+    [mapViewState, layers, basemap],
+  )
+
+  // Fit a composed canvas onto a landscape A4 PDF page, full-bleed minus margin.
+  const composedToPdf = useCallback(async (figure: HTMLCanvasElement) => {
+    const { jsPDF } = await import('jspdf')
+    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
+    const img = figure.toDataURL('image/png')
+    const pageW = pdf.internal.pageSize.getWidth()
+    const pageH = pdf.internal.pageSize.getHeight()
+    const margin = 24
+    const maxW = pageW - margin * 2
+    const maxH = pageH - margin * 2
+    const aspect = figure.height > 0 ? figure.width / figure.height : maxW / maxH
+    let drawW = maxW
+    let drawH = drawW / aspect
+    if (drawH > maxH) { drawH = maxH; drawW = drawH * aspect }
+    const drawX = (pageW - drawW) / 2
+    const drawY = (pageH - drawH) / 2
+    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
+    return pdf
+  }, [])
+
+  const handleExportMapPng = useCallback((title?: string) => {
+    const figure = composeMapFigure(title || suggestExportTitleRef.current())
+    if (!figure) return
+    figure.toBlob((blob) => {
       if (!blob) return
       const a = document.createElement('a')
       a.href = URL.createObjectURL(blob)
@@ -344,50 +441,19 @@ function App() {
       a.click()
       URL.revokeObjectURL(a.href)
     })
-  }, [])
+  }, [composeMapFigure])
 
-  const handleExportPdf = useCallback(async () => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    const { jsPDF } = await import('jspdf')
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-    const img = canvas.toDataURL('image/png')
-
-    // A4 landscape ~842 × 595pt. Fit the canvas (in DPR-aware logical
-    // pixels) into the page below the title, preserving aspect ratio.
-    const pageW = pdf.internal.pageSize.getWidth()
-    const pageH = pdf.internal.pageSize.getHeight()
-    const margin = 40
-    const titleSpace = 30
-    const maxW = pageW - margin * 2
-    const maxH = pageH - margin - titleSpace - margin
-    const dpr = window.devicePixelRatio || 1
-    const logicalW = canvas.width / dpr
-    const logicalH = canvas.height / dpr
-    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
-    let drawW = maxW
-    let drawH = drawW / aspect
-    if (drawH > maxH) {
-      drawH = maxH
-      drawW = drawH * aspect
-    }
-    const drawX = (pageW - drawW) / 2
-    const drawY = margin + titleSpace
-
-    pdf.setFontSize(14)
-    pdf.text('Map export — Cursor for Urban Planners', margin, margin + 18)
-    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
-
-    const footer = `Viewport export — ${new Date().toISOString()}`
-    pdf.setFontSize(9)
-    pdf.text(footer, margin, pageH - 18)
+  const handleExportPdf = useCallback(async (title?: string) => {
+    const figure = composeMapFigure(title || suggestExportTitleRef.current())
+    if (!figure) return
+    const pdf = await composedToPdf(figure)
     pdf.save(`map-report-${Date.now()}.pdf`)
-  }, [])
+  }, [composeMapFigure, composedToPdf])
 
   const handleSavePngToArtifact = useCallback(async (title: string) => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    canvas.toBlob(async (blob) => {
+    const figure = composeMapFigure(title)
+    if (!figure) return
+    figure.toBlob(async (blob) => {
       if (!blob) return
       const form = new FormData()
       form.append('title', title)
@@ -402,35 +468,12 @@ function App() {
         /* backend unavailable */
       }
     })
-  }, [])
+  }, [composeMapFigure])
 
   const handleSavePdfToArtifact = useCallback(async (title: string) => {
-    const canvas = mapViewRef.current?.getCanvas()
-    if (!canvas) return
-    const { jsPDF } = await import('jspdf')
-    const pdf = new jsPDF({ orientation: 'landscape', unit: 'pt', format: 'a4' })
-    const img = canvas.toDataURL('image/png')
-    const pageW = pdf.internal.pageSize.getWidth()
-    const pageH = pdf.internal.pageSize.getHeight()
-    const margin = 40
-    const titleSpace = 30
-    const maxW = pageW - margin * 2
-    const maxH = pageH - margin - titleSpace - margin
-    const dpr = window.devicePixelRatio || 1
-    const logicalW = canvas.width / dpr
-    const logicalH = canvas.height / dpr
-    const aspect = logicalH > 0 ? logicalW / logicalH : maxW / maxH
-    let drawW = maxW
-    let drawH = drawW / aspect
-    if (drawH > maxH) { drawH = maxH; drawW = drawH * aspect }
-    const drawX = (pageW - drawW) / 2
-    const drawY = margin + titleSpace
-    pdf.setFontSize(14)
-    pdf.text(title, margin, margin + 18)
-    pdf.addImage(img, 'PNG', drawX, drawY, drawW, drawH)
-    const footer = `Viewport export — ${new Date().toISOString()}`
-    pdf.setFontSize(9)
-    pdf.text(footer, margin, pageH - 18)
+    const figure = composeMapFigure(title)
+    if (!figure) return
+    const pdf = await composedToPdf(figure)
     const pdfBytes = pdf.output('arraybuffer')
     const blob = new Blob([pdfBytes], { type: 'application/pdf' })
     const form = new FormData()
@@ -445,13 +488,15 @@ function App() {
     } catch {
       /* backend unavailable */
     }
-  }, [])
+  }, [composeMapFigure, composedToPdf])
 
   const suggestExportTitle = useCallback((): string => {
     const topLayer = layers.length > 0 ? layers[layers.length - 1].name : null
     const date = new Date().toLocaleDateString('en-GB', { day: '2-digit', month: 'short', year: 'numeric' })
     return topLayer ? `${topLayer} — ${date}` : `Map export — ${date}`
   }, [layers])
+
+  suggestExportTitleRef.current = suggestExportTitle
 
   const handleExportLayerFile = useCallback((layerId: string) => {
     const layer = layers.find((l) => l.id === layerId)
@@ -535,7 +580,7 @@ function App() {
   // live in React state (and project.json), not in a MapView ref that
   // disappears on reload.
   const appendMarkersToLayer = useCallback(
-    (markers: Array<{ lat: number; lng: number; label?: string; color?: string }>) => {
+    (markers: Array<{ lat: number; lng: number; label?: string; color?: string; description?: string }>) => {
       if (!markers.length) return
       const newFeatures: Feature[] = markers
         .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
@@ -544,6 +589,7 @@ function App() {
           geometry: { type: 'Point', coordinates: [m.lng, m.lat] },
           properties: {
             label: m.label || '',
+            ...(m.description ? { description: m.description } : {}),
             ...(m.color ? { fillColor: m.color, strokeColor: m.color } : {}),
             source: 'ai_marker',
           },
@@ -606,9 +652,143 @@ function App() {
     [],
   )
 
+  // Build a LayerStyleSpec from a `style_layer` action payload, reading the
+  // layer's feature values to compute category palettes / numeric breaks.
+  // Shared by the AI action path and (indirectly) the manual SymbologyPanel.
+  const buildStyleSpec = useCallback(
+    (
+      layer: GeoJSONLayer,
+      p: Extract<MapAction, { type: 'style_layer' }>['payload'],
+    ): LayerStyleSpec => {
+      const feats = layer.data?.features || []
+      // Carry forward existing labels unless the payload changes them.
+      const prevLabel = layer.styleSpec?.label
+      const spec: LayerStyleSpec = {
+        mode: p.mode,
+        opacity: p.opacity ?? layer.styleSpec?.opacity,
+        label: prevLabel,
+      }
+
+      if (p.mode === 'categorized' && p.property) {
+        const values = feats.map((f) => String(f.properties?.[p.property!] ?? ''))
+        spec.property = p.property
+        spec.categories = p.categories?.length
+          ? p.categories
+          : buildCategories(values, p.property, p.ramp || 'category')
+        spec.otherColor = layer.color
+        spec.rampName = p.ramp || 'category'
+      } else if (p.mode === 'graduated' && p.property) {
+        const nums = feats
+          .map((f) => Number(f.properties?.[p.property!]))
+          .filter((n) => Number.isFinite(n))
+        const classes = Math.max(2, Math.min(p.classes ?? 5, 9))
+        const method = p.classification || 'quantile'
+        const breaks = computeBreaks(nums, classes, method)
+        const rampName = p.ramp || DEFAULT_RAMP
+        spec.property = p.property
+        spec.breaks = breaks
+        // rampColors length must equal breaks.length + 1 (one color per bucket).
+        spec.rampColors = rampColorsForClasses(rampName, breaks.length + 1)
+        spec.classification = method
+        spec.rampName = rampName
+      }
+
+      // Label changes (independent of color mode).
+      if (p.label_property !== undefined || p.label_enabled !== undefined ||
+          p.label_size !== undefined || p.label_color !== undefined) {
+        const property = p.label_property ?? prevLabel?.property ?? ''
+        spec.label = {
+          enabled: p.label_enabled ?? (p.label_property ? true : prevLabel?.enabled ?? false),
+          property,
+          size: p.label_size ?? prevLabel?.size,
+          color: p.label_color ?? prevLabel?.color,
+          haloColor: prevLabel?.haloColor,
+        }
+      }
+
+      return spec
+    },
+    [],
+  )
+
+  // Direct UI path: SymbologyPanel writes a fully-formed styleSpec onto a layer.
+  const handleSymbologyChange = useCallback((layerId: string, styleSpec: LayerStyleSpec) => {
+    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, styleSpec } : l)))
+  }, [])
+
+  const stylingLayer = useMemo(
+    () => layers.find((l) => l.id === stylingLayerId) ?? null,
+    [layers, stylingLayerId],
+  )
+
+  // ── Manual drawing → real layer ──
+  // A user finished drawing in MapView. Promote the geometry to a layer (so it
+  // persists, appears in mapContext, and can be styled), then open the
+  // attribute editor so they can tag it (e.g. set zone_code) before styling.
+  const handleDrawComplete = useCallback(
+    (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => {
+      let geometry: Geometry
+      if (type === 'point') {
+        geometry = { type: 'Point', coordinates: coordinates[0] }
+      } else if (type === 'line') {
+        geometry = { type: 'LineString', coordinates }
+      } else {
+        const ring =
+          coordinates[0][0] !== coordinates[coordinates.length - 1][0] ||
+          coordinates[0][1] !== coordinates[coordinates.length - 1][1]
+            ? [...coordinates, coordinates[0]]
+            : coordinates
+        geometry = { type: 'Polygon', coordinates: [ring] }
+      }
+      userShapeCounterRef.current += 1
+      const label = type === 'point' ? 'Point' : type === 'line' ? 'Line' : 'Polygon'
+      const name = `Drawn ${label} ${userShapeCounterRef.current}`
+      const id = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+      const color = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
+      colorIndexRef.current++
+      const layer: GeoJSONLayer = {
+        id,
+        name,
+        filePath: '',
+        visible: true,
+        color,
+        data: {
+          type: 'FeatureCollection',
+          features: [{ type: 'Feature', geometry, properties: { name, source: 'user_draw' } }],
+        },
+      }
+      setLayers((prev) => [...prev, layer])
+      setActiveLeftTab('layers')
+      setAttrLayerId(id) // open the attribute editor on the new layer
+    },
+    [],
+  )
+
+  // Attribute editor writes an edited FeatureCollection back onto a layer.
+  const handleAttributesChange = useCallback((layerId: string, data: FeatureCollection) => {
+    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, data } : l)))
+  }, [])
+
+  const attrLayer = useMemo(
+    () => layers.find((l) => l.id === attrLayerId) ?? null,
+    [layers, attrLayerId],
+  )
+
   // ── Map action handler (intercepts layer ops, queues the rest) ──
 
   const handleMapAction = useCallback((action: MapAction) => {
+    if (action.type === 'style_layer') {
+      const p = action.payload
+      setLayers((prev) =>
+        prev.map((l) =>
+          l.name.toLowerCase() === p.layer_name?.toLowerCase()
+            ? { ...l, styleSpec: buildStyleSpec(l, p) }
+            : l,
+        ),
+      )
+      setActiveLeftTab('layers')
+      return
+    }
     if (action.type === 'save_bookmark') {
       const { name, south, west, north, east, zoom } = action.payload
       const bounds =
@@ -788,7 +968,7 @@ function App() {
       return
     }
     setMapActions((prev) => [...prev, action])
-  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom])
+  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom, buildStyleSpec])
 
   // ── Right-click map actions ──
 
@@ -895,6 +1075,20 @@ function App() {
           } catch { /* ignore */ }
         }
 
+        const s = l.styleSpec
+        const style = s
+          ? {
+              mode: s.mode,
+              property: s.property,
+              categoryCount: s.categories?.length,
+              classes: s.breaks ? s.breaks.length + 1 : undefined,
+              ramp: s.rampName,
+              labels: (s.label?.enabled
+                ? { property: s.label.property }
+                : false) as false | { property: string },
+            }
+          : { mode: 'simple' as const, labels: false as const }
+
         return {
           name: l.name,
           featureCount,
@@ -902,6 +1096,7 @@ function App() {
           properties,
           visible: l.visible,
           ...(geometry_data ? { geometry_data } : {}),
+          style,
         }
       }),
       basemap,
@@ -1001,6 +1196,7 @@ function App() {
             ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
             ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
+            ...(l.styleSpec !== undefined ? { styleSpec: l.styleSpec } : {}),
           })),
           conversations,
           activeConversationId,
@@ -1093,6 +1289,7 @@ function App() {
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
               ...(info.lineColor !== undefined ? { lineColor: info.lineColor } : {}),
               ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
+              ...(info.styleSpec !== undefined ? { styleSpec: info.styleSpec } : {}),
             })
           } catch {
             /* skip invalid files */
@@ -1199,10 +1396,45 @@ function App() {
             </button>
           </div>
           {activeLeftTab === 'files' && (
-            <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
+            <>
+              {convertingFile && (
+                <div className="import-status">Importing {convertingFile}…</div>
+              )}
+              {convertError && (
+                <div className="import-status import-error" onClick={() => setConvertError(null)}>
+                  {convertError}
+                </div>
+              )}
+              <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
+            </>
           )}
           {activeLeftTab === 'layers' && (
-            <LayerPanel layers={layers} onToggle={toggleLayer} onRemove={removeLayer} onZoomTo={zoomToLayer} />
+            <>
+              <LayerPanel
+                layers={layers}
+                onToggle={toggleLayer}
+                onRemove={removeLayer}
+                onZoomTo={zoomToLayer}
+                onStyle={(id) => { setStylingLayerId((cur) => (cur === id ? null : id)); setAttrLayerId(null) }}
+                activeStyleId={stylingLayerId}
+                onAttributes={(id) => { setAttrLayerId((cur) => (cur === id ? null : id)); setStylingLayerId(null) }}
+                activeAttrId={attrLayerId}
+              />
+              {stylingLayer && (
+                <SymbologyPanel
+                  layer={stylingLayer}
+                  onChange={handleSymbologyChange}
+                  onClose={() => setStylingLayerId(null)}
+                />
+              )}
+              {attrLayer && (
+                <AttributeTable
+                  layer={attrLayer}
+                  onChange={handleAttributesChange}
+                  onClose={() => setAttrLayerId(null)}
+                />
+              )}
+            </>
           )}
           {activeLeftTab === 'bookmarks' && (
             <BookmarkPanel
@@ -1259,8 +1491,10 @@ function App() {
                   onAddMarker={handleRightClickAddMarker}
                   onOpenStreetView={handleRightClickStreetView}
                   onAskChat={handleRightClickAskChat}
+                  onDrawComplete={handleDrawComplete}
                 />
               </ErrorBoundary>
+              <Legend layers={layers} />
             </div>
           ) : (
             <ErrorBoundary label="Document">

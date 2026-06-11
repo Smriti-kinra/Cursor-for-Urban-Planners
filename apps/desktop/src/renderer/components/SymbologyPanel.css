@@ -1,0 +1,131 @@
+.symbology-panel {
+  border-top: 1px solid var(--border, #2a2a3a);
+  padding: 8px 12px 12px;
+  font-size: 12px;
+  background: var(--bg-secondary, rgba(255, 255, 255, 0.02));
+}
+
+.sym-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  margin-bottom: 8px;
+}
+
+.sym-title {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.sym-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  line-height: 1;
+  padding: 0 2px;
+}
+.sym-close:hover { color: var(--danger, #ef4444); }
+
+.sym-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  margin: 6px 0;
+}
+
+.sym-row-divider {
+  border-top: 1px solid var(--border, #2a2a3a);
+  padding-top: 8px;
+  margin-top: 10px;
+}
+
+.sym-label {
+  flex: 0 0 64px;
+  color: var(--text-muted);
+}
+
+.sym-select {
+  flex: 1;
+  background: var(--bg-input, #1a1a26);
+  color: var(--text-primary);
+  border: 1px solid var(--border, #2a2a3a);
+  border-radius: 4px;
+  padding: 3px 6px;
+  font-size: 12px;
+}
+
+.sym-modes,
+.sym-ramps {
+  display: flex;
+  gap: 4px;
+  flex: 1;
+}
+
+.sym-mode {
+  flex: 1;
+  background: var(--bg-input, #1a1a26);
+  color: var(--text-muted);
+  border: 1px solid var(--border, #2a2a3a);
+  border-radius: 4px;
+  padding: 3px 4px;
+  cursor: pointer;
+  font-size: 11px;
+}
+.sym-mode.active {
+  color: #fff;
+  background: var(--accent, #4363d8);
+  border-color: var(--accent, #4363d8);
+}
+
+.sym-categories {
+  max-height: 180px;
+  overflow-y: auto;
+  margin-top: 4px;
+}
+
+.sym-cat {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 2px 0;
+}
+.sym-cat input[type='color'] {
+  width: 20px;
+  height: 20px;
+  border: none;
+  background: none;
+  cursor: pointer;
+  padding: 0;
+}
+.sym-cat-value {
+  flex: 1;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  color: var(--text-primary);
+}
+
+.sym-ramp {
+  display: flex;
+  flex: 1;
+  height: 18px;
+  border: 1px solid var(--border, #2a2a3a);
+  border-radius: 3px;
+  overflow: hidden;
+  cursor: pointer;
+  padding: 0;
+}
+.sym-ramp.active { outline: 2px solid var(--accent, #4363d8); }
+.sym-ramp span { flex: 1; }
+
+.sym-hint {
+  color: var(--text-muted);
+  font-size: 11px;
+  padding: 4px 0;
+}

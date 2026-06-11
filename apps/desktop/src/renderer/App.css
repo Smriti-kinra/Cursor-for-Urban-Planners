@@ -160,6 +160,21 @@ body.resizing .resize-handle {
   border-bottom: 1px solid var(--border);
 }
 
+.import-status {
+  flex: 0 0 auto;
+  padding: 6px 12px;
+  font-size: 12px;
+  color: var(--accent);
+  background: rgba(137, 180, 250, 0.12);
+  border-bottom: 1px solid var(--border);
+}
+
+.import-status.import-error {
+  color: var(--danger);
+  background: rgba(243, 139, 168, 0.12);
+  cursor: pointer;
+}
+
 .map-stack {
   position: relative;
   flex: 1;
