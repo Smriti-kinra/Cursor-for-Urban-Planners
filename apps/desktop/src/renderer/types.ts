@@ -9,6 +9,8 @@ export interface GeoJSONLayer {
   color: string
   fillColor?: string
   lineColor?: string
+  lineWidth?: number
+  lineDasharray?: number[]
   opacity?: number
   styleSpec?: LayerStyleSpec
 }
@@ -29,6 +31,7 @@ export interface LabelSpec {
   size?: number       // px, default 12
   color?: string      // default '#1f2937'
   haloColor?: string  // default '#ffffff'
+  minZoom?: number     // default 10
 }
 
 export interface LayerStyleSpec {
@@ -231,6 +234,8 @@ export interface ProjectData {
     color: string
     fillColor?: string
     lineColor?: string
+    lineWidth?: number
+    lineDasharray?: number[]
     opacity?: number
     styleSpec?: LayerStyleSpec
   }>

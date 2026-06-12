@@ -347,7 +347,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           ],
           paint: {
             'line-color': lineColorExpression(layer),
-            'line-width': 2,
+            'line-width': ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+            ...(layer.lineDasharray ? { 'line-dasharray': layer.lineDasharray } : {}),
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -357,9 +358,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           type: 'circle',
           source: layer.id,
           filter: [
-            'any',
-            ['==', ['geometry-type'], 'Point'],
-            ['==', ['geometry-type'], 'MultiPoint'],
+            'all',
+            [
+              'any',
+              ['==', ['geometry-type'], 'Point'],
+              ['==', ['geometry-type'], 'MultiPoint'],
+            ],
+            ['!=', ['get', 'role'], 'label'],
           ],
           paint: {
             'circle-color': fillColorExpression(layer),
@@ -378,7 +383,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           id: `${layer.id}-label`,
           type: 'symbol',
           source: layer.id,
-          minzoom: 10,
+          minzoom: labelSpec?.minZoom ?? 10,
           layout: {
             'text-field': labelField(layer),
             // Must be a stack the glyphs endpoint actually serves. demotiles
@@ -431,6 +436,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
         if (map.getLayer(`${layer.id}-line`)) {
           map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
+          map.setPaintProperty(
+            `${layer.id}-line`, 'line-width',
+            ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+          )
+          if (layer.lineDasharray) {
+            map.setPaintProperty(`${layer.id}-line`, 'line-dasharray', layer.lineDasharray)
+          }
         }
         if (map.getLayer(`${layer.id}-circle`)) {
           map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
@@ -439,6 +451,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         // feature cap, AND the layer's own visibility).
         if (map.getLayer(`${layer.id}-label`)) {
           const labelSpec = layer.styleSpec?.label
+          map.setLayerZoomRange(`${layer.id}-label`, labelSpec?.minZoom ?? 10, 24)
           map.setLayoutProperty(`${layer.id}-label`, 'text-field', labelField(layer))
           map.setLayoutProperty(`${layer.id}-label`, 'text-size', labelSpec?.size ?? 12)
           map.setLayoutProperty(

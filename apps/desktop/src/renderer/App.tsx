@@ -46,6 +46,46 @@ function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+function formatDistance(km: number): string {
+  if (!Number.isFinite(km)) return 'unknown'
+  if (km < 1) return `${Math.round(km * 1000)} m`
+  return `${km.toFixed(km >= 10 ? 1 : 2)} km`
+}
+
+function routeLabelCoordinate(coordinates: number[][], distanceKm?: number): number[] {
+  if (coordinates.length === 0) return [0, 0]
+  if (coordinates.length === 1) return coordinates[0]
+  if (distanceKm && distanceKm > 0) {
+    try {
+      return turf.along(turf.lineString(coordinates), distanceKm / 2, { units: 'kilometers' })
+        .geometry.coordinates
+    } catch {
+      // Fall through to the middle vertex when Turf rejects malformed input.
+    }
+  }
+  return coordinates[Math.floor(coordinates.length / 2)]
+}
+
+async function fetchOsrmRoute(start: number[], end: number[]) {
+  const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`
+  const url =
+    `https://router.project-osrm.org/route/v1/car/${coords}` +
+    '?overview=full&geometries=geojson&steps=false'
+  const resp = await fetch(url)
+  if (!resp.ok) throw new Error(`OSRM route failed: ${resp.status}`)
+  const data = await resp.json()
+  const route = data?.routes?.[0]
+  const routeCoords = route?.geometry?.coordinates
+  if (data?.code !== 'Ok' || !Array.isArray(routeCoords) || routeCoords.length < 2) {
+    throw new Error(data?.message || 'No route found')
+  }
+  return {
+    coordinates: routeCoords as number[][],
+    distanceKm: Number(route.distance || 0) / 1000,
+    durationMinutes: Number(route.duration || 0) / 60,
+  }
+}
+
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('map')
   const [documentImage, setDocumentImage] = useState<DocumentImage | null>(null)
@@ -727,6 +767,121 @@ function App() {
   // attribute editor so they can tag it (e.g. set zone_code) before styling.
   const handleDrawComplete = useCallback(
     (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => {
+      if (type === 'line' && coordinates.length === 2) {
+        const [start, end] = coordinates
+        const directKm = turf.length(turf.lineString([start, end]), { units: 'kilometers' })
+        const directLabel = `Direct: ${formatDistance(directKm)}`
+        const labelStyle: LayerStyleSpec = {
+          mode: 'simple',
+          label: {
+            enabled: true,
+            property: 'label',
+            size: 13,
+            color: '#111827',
+            haloColor: '#ffffff',
+            minZoom: 0,
+          },
+        }
+
+        userShapeCounterRef.current += 1
+        const measureNo = userShapeCounterRef.current
+        const directLayerId = `layer-${genId()}`
+        const directName = `Direct Distance ${measureNo}`
+        const directFeatures: Feature[] = [
+          {
+            type: 'Feature',
+            geometry: { type: 'LineString', coordinates: [start, end] },
+            properties: {
+              name: directName,
+              source: 'user_measure',
+              kind: 'direct_distance',
+              distance_km: Number(directKm.toFixed(4)),
+              distance: directLabel,
+            },
+          },
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: start },
+            properties: { name: 'Start', source: 'user_measure', role: 'endpoint' },
+          },
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: end },
+            properties: { name: 'End', source: 'user_measure', role: 'endpoint' },
+          },
+          {
+            type: 'Feature',
+            geometry: { type: 'Point', coordinates: routeLabelCoordinate([start, end], directKm) },
+            properties: { label: directLabel, source: 'user_measure', role: 'label' },
+          },
+        ]
+        const directLayer: GeoJSONLayer = {
+          id: directLayerId,
+          name: directName,
+          filePath: '',
+          visible: true,
+          color: '#2563eb',
+          lineColor: '#2563eb',
+          lineWidth: 2.5,
+          lineDasharray: [2, 2],
+          data: { type: 'FeatureCollection', features: directFeatures },
+          styleSpec: labelStyle,
+        }
+
+        setLayers((prev) => [...prev, directLayer])
+        setActiveLeftTab('layers')
+        setAttrLayerId(null)
+
+        void fetchOsrmRoute(start, end)
+          .then((route) => {
+            const routeLabel = `Route: ${formatDistance(route.distanceKm)}`
+            const routeName = `Route Distance ${measureNo}`
+            const routeLayer: GeoJSONLayer = {
+              id: `layer-${genId()}`,
+              name: routeName,
+              filePath: '',
+              visible: true,
+              color: '#dc2626',
+              lineColor: '#dc2626',
+              lineWidth: 4,
+              data: {
+                type: 'FeatureCollection',
+                features: [
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'LineString', coordinates: route.coordinates },
+                    properties: {
+                      name: routeName,
+                      source: 'user_measure',
+                      kind: 'route_distance',
+                      distance_km: Number(route.distanceKm.toFixed(4)),
+                      duration_minutes: Number(route.durationMinutes.toFixed(1)),
+                      distance: routeLabel,
+                    },
+                  },
+                  {
+                    type: 'Feature',
+                    geometry: {
+                      type: 'Point',
+                      coordinates: routeLabelCoordinate(route.coordinates, route.distanceKm),
+                    },
+                    properties: { label: routeLabel, source: 'user_measure', role: 'label' },
+                  },
+                ],
+              },
+              styleSpec: {
+                ...labelStyle,
+                label: { ...labelStyle.label!, color: '#7f1d1d' },
+              },
+            }
+            setLayers((prev) => [...prev, routeLayer])
+          })
+          .catch((err) => {
+            console.warn('Route lookup failed', err)
+          })
+        return
+      }
+
       let geometry: Geometry
       if (type === 'point') {
         geometry = { type: 'Point', coordinates: coordinates[0] }
@@ -1195,6 +1350,8 @@ function App() {
             color: l.color,
             ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
+            ...(l.lineWidth !== undefined ? { lineWidth: l.lineWidth } : {}),
+            ...(l.lineDasharray !== undefined ? { lineDasharray: l.lineDasharray } : {}),
             ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
             ...(l.styleSpec !== undefined ? { styleSpec: l.styleSpec } : {}),
           })),
@@ -1288,6 +1445,8 @@ function App() {
               color: info.color,
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
               ...(info.lineColor !== undefined ? { lineColor: info.lineColor } : {}),
+              ...(info.lineWidth !== undefined ? { lineWidth: info.lineWidth } : {}),
+              ...(info.lineDasharray !== undefined ? { lineDasharray: info.lineDasharray } : {}),
               ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
               ...(info.styleSpec !== undefined ? { styleSpec: info.styleSpec } : {}),
             })
