@@ -10,6 +10,7 @@ interface LayerPanelProps {
   activeStyleId?: string | null
   onAttributes?: (id: string) => void
   activeAttrId?: string | null
+  onRename?: (id: string, name: string) => void
 }
 
 export default function LayerPanel({
@@ -21,6 +22,7 @@ export default function LayerPanel({
   activeStyleId,
   onAttributes,
   activeAttrId,
+  onRename,
 }: LayerPanelProps) {
   if (layers.length === 0) {
     return (
@@ -43,9 +45,19 @@ export default function LayerPanel({
             {layer.visible ? '👁' : '⊘'}
           </button>
           <span className="layer-color" style={{ background: layer.color }} />
-          <span className="layer-name" title={layer.name}>
-            {layer.name}
-          </span>
+          {onRename ? (
+            <input
+              type="text"
+              className="layer-name-input"
+              value={layer.name}
+              onChange={(e) => onRename(layer.id, e.target.value)}
+              title="Rename layer"
+            />
+          ) : (
+            <span className="layer-name" title={layer.name}>
+              {layer.name}
+            </span>
+          )}
           <span className="layer-count">{layer.data?.features?.length || 0}</span>
           {onAttributes && (
             <button

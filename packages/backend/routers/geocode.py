@@ -34,8 +34,49 @@ async def geocode(query: str = Query(..., description="Address or place name"), 
         except GoogleUnavailable:
             pass
 
-    # Tier 2: Nominatim (this server-side proxy is the reason the route exists —
-    # browsers cannot set the User-Agent header that OSM's usage policy requires).
+    # Tier 2: Photon (komoot) — returns well-ranked city/town nodes, far better
+    # than Nominatim for place-name lookups (e.g. "SAS Nagar" → Mohali city).
+    # Results are sorted: place/admin features before highway/waterway/railway.
+    _CLASS_RANK = {"place": 0, "boundary": 1, "natural": 2, "landuse": 3,
+                   "highway": 9, "railway": 9, "waterway": 9}
+    try:
+        photon = await http_client.fetch_json(
+            "https://photon.komoot.io/api/",
+            namespace="photon",
+            params={"q": query, "limit": limit},
+        )
+        features = (photon or {}).get("features", []) or []
+        photon_results = []
+        for feat in features:
+            coords = (feat.get("geometry") or {}).get("coordinates") or []
+            if len(coords) < 2:
+                continue
+            lng, lat = coords[0], coords[1]
+            props = feat.get("properties") or {}
+            parts = [
+                props.get("name"),
+                props.get("city") or props.get("locality"),
+                props.get("state"),
+                props.get("country"),
+            ]
+            display_name = ", ".join(p for p in parts if p) or props.get("name", "")
+            key = props.get("osm_key", "")
+            photon_results.append((_CLASS_RANK.get(key, 5), {
+                "display_name": display_name,
+                "lat": float(lat),
+                "lon": float(lng),
+                "type": props.get("osm_value"),
+                "class": key,
+                "importance": None,
+            }))
+        photon_results.sort(key=lambda x: x[0])
+        if photon_results:
+            return {"results": [r for _, r in photon_results]}
+    except Exception:
+        pass
+
+    # Tier 3: Nominatim fallback — sort by importance DESC so the most
+    # significant administrative result leads (cities before bus stops).
     try:
         data = await http_client.fetch_json(
             "https://nominatim.openstreetmap.org/search",
@@ -44,6 +85,7 @@ async def geocode(query: str = Query(..., description="Address or place name"), 
         )
         if not isinstance(data, list):
             return {"error": "Nominatim returned an unexpected response.", "results": []}
+        data.sort(key=lambda r: float(r.get("importance") or 0), reverse=True)
         return {
             "results": [
                 {
@@ -61,6 +103,8 @@ async def geocode(query: str = Query(..., description="Address or place name"), 
         return {"error": str(e), "results": []}
     except Exception as e:
         return {"error": f"Unexpected error: {e}", "results": []}
+
+
 
 
 @router.get("/reverse")

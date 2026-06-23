@@ -13,6 +13,7 @@ import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
+import PinsPanel from './components/PinsPanel'
 import DocumentView, { type DocumentImage } from './components/DocumentView'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
@@ -39,7 +40,7 @@ import { composeFigure } from './lib/compose-figure'
 import { buildLegendEntries } from './lib/legend-data'
 
 type AppMode = 'map' | 'document'
-type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
+type LeftTab = 'files' | 'layers' | 'pins' | 'bookmarks' | 'export' | 'zoning'
 type RightTab = 'chat' | 'artifacts'
 
 function genId() {
@@ -133,6 +134,7 @@ function App() {
   const isLoadingRef = useRef(false)
   const isSavingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const dirtyLayerIdsRef = useRef<Set<string>>(new Set())
   const AI_MARKERS_LAYER = 'AI Markers'
 
   useEffect(() => { bookmarksRef.current = bookmarks }, [bookmarks])
@@ -237,6 +239,10 @@ function App() {
 
   const toggleLayer = useCallback((id: string) => {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)))
+  }, [])
+
+  const renameLayer = useCallback((id: string, name: string) => {
+    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)))
   }, [])
 
   const zoomToLayer = useCallback((id: string) => {
@@ -640,24 +646,28 @@ function App() {
           (l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase(),
         )
         if (idx >= 0) {
+          const existing = prev[idx]
+          dirtyLayerIdsRef.current.add(existing.id)
           const merged = {
-            ...prev[idx],
+            ...existing,
             visible: true,
             data: {
               type: 'FeatureCollection',
-              features: [...(prev[idx].data?.features || []), ...newFeatures],
+              features: [...(existing.data?.features || []), ...newFeatures],
             } as FeatureCollection,
           }
           const next = [...prev]
           next[idx] = merged
           return next
         }
+        const newId = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
+        dirtyLayerIdsRef.current.add(newId)
         const layerColor = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
         colorIndexRef.current++
         return [
           ...prev,
           {
-            id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+            id: newId,
             name: AI_MARKERS_LAYER,
             filePath: '',
             visible: true,
@@ -666,7 +676,7 @@ function App() {
           },
         ]
       })
-      setActiveLeftTab('layers')
+      setActiveLeftTab('pins')
     },
     [],
   )
@@ -921,12 +931,28 @@ function App() {
 
   // Attribute editor writes an edited FeatureCollection back onto a layer.
   const handleAttributesChange = useCallback((layerId: string, data: FeatureCollection) => {
+    dirtyLayerIdsRef.current.add(layerId)
     setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, data } : l)))
   }, [])
 
   const attrLayer = useMemo(
     () => layers.find((l) => l.id === attrLayerId) ?? null,
     [layers, attrLayerId],
+  )
+
+  const aiMarkersLayer = useMemo(
+    () => layers.find((l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()) ?? null,
+    [layers, AI_MARKERS_LAYER],
+  )
+
+  const pinCount = useMemo(
+    () => aiMarkersLayer?.data?.features?.length ?? 0,
+    [aiMarkersLayer],
+  )
+
+  const displayLayersCount = useMemo(
+    () => layers.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()).length,
+    [layers, AI_MARKERS_LAYER],
   )
 
   // ── Map action handler (intercepts layer ops, queues the rest) ──
@@ -1139,6 +1165,7 @@ function App() {
           setLayers((prev) =>
             prev.map((l) => {
               if (l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()) return l
+              dirtyLayerIdsRef.current.add(l.id)
               const features = [...(l.data?.features || [])]
               // Update the most-recently-added point matching these coords.
               for (let i = features.length - 1; i >= 0; i--) {
@@ -1315,11 +1342,22 @@ function App() {
         const withPaths: GeoJSONLayer[] = []
         let materializedAny = false
         for (const l of layers) {
-          if (l.filePath?.trim()) {
+          const isAiMarkers = l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()
+          const isDirty = dirtyLayerIdsRef.current.has(l.id)
+          const needsWrite = !l.filePath?.trim() || isAiMarkers || isDirty
+
+          if (!needsWrite) {
             withPaths.push(l)
             continue
           }
-          const fp = `${workspacePath}/.cursor-urban/layers/${l.id}.geojson`
+
+          let fp = l.filePath
+          if (isAiMarkers) {
+            fp = `${workspacePath}/ai_markers.geojson`
+          } else if (!fp?.trim()) {
+            fp = `${workspacePath}/.cursor-urban/layers/${l.id}.geojson`
+          }
+
           const ok = await window.electronAPI.writeFile(fp, JSON.stringify(l.data, null, 2))
           if (!ok) {
             console.error('Failed to persist layer:', l.name)
@@ -1328,6 +1366,7 @@ function App() {
           }
           withPaths.push({ ...l, filePath: fp })
           materializedAny = true
+          dirtyLayerIdsRef.current.delete(l.id)
         }
         if (materializedAny) {
           layersSnapshot = withPaths
@@ -1532,7 +1571,14 @@ function App() {
               onClick={() => setActiveLeftTab('layers')}
             >
               Layers
-              {layers.length > 0 && <span className="tab-badge">{layers.length}</span>}
+              {displayLayersCount > 0 && <span className="tab-badge">{displayLayersCount}</span>}
+            </button>
+            <button
+              className={`tab ${activeLeftTab === 'pins' ? 'active' : ''}`}
+              onClick={() => setActiveLeftTab('pins')}
+            >
+              Pins
+              {pinCount > 0 && <span className="tab-badge">{pinCount}</span>}
             </button>
             <button
               className={`tab ${activeLeftTab === 'bookmarks' ? 'active' : ''}`}
@@ -1570,7 +1616,7 @@ function App() {
           {activeLeftTab === 'layers' && (
             <>
               <LayerPanel
-                layers={layers}
+                layers={layers.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase())}
                 onToggle={toggleLayer}
                 onRemove={removeLayer}
                 onZoomTo={zoomToLayer}
@@ -1578,6 +1624,7 @@ function App() {
                 activeStyleId={stylingLayerId}
                 onAttributes={(id) => { setAttrLayerId((cur) => (cur === id ? null : id)); setStylingLayerId(null) }}
                 activeAttrId={attrLayerId}
+                onRename={renameLayer}
               />
               {stylingLayer && (
                 <SymbologyPanel
@@ -1594,6 +1641,18 @@ function App() {
                 />
               )}
             </>
+          )}
+          {activeLeftTab === 'pins' && (
+            <PinsPanel
+              layer={aiMarkersLayer}
+              onChange={handleAttributesChange}
+              onZoomToPin={(lng, lat) => {
+                setMapActions((prev) => [
+                  ...prev,
+                  { type: 'fly_to', payload: { lat, lng, zoom: 15 } },
+                ])
+              }}
+            />
           )}
           {activeLeftTab === 'bookmarks' && (
             <BookmarkPanel

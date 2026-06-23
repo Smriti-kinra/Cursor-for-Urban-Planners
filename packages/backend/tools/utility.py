@@ -30,8 +30,20 @@ def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
     return R * 2 * math.asin(math.sqrt(a))
 
 
+# Photon osm_key values from most-to-least preferred for place lookups.
+# Prefer city/town/suburb nodes over administrative boundary centroids — this
+# ensures "SAS Nagar" resolves to the city of Mohali, not the Tahsil boundary.
+_PHOTON_KEY_RANK: dict[str, int] = {
+    "place": 0,
+    "tourism": 1,
+    "amenity": 2,
+    "natural": 3,
+    "boundary": 10,  # administrative boundaries last — centroid often wrong
+}
+
+
 def _photon_to_results(payload: dict) -> list[dict]:
-    out: list[dict] = []
+    raw: list[tuple[int, dict]] = []
     for feat in (payload or {}).get("features", []) or []:
         geom = feat.get("geometry") or {}
         coords = geom.get("coordinates") or []
@@ -49,12 +61,16 @@ def _photon_to_results(payload: dict) -> list[dict]:
             props.get("country"),
         ]
         display_name = ", ".join(p for p in parts if p)
-        out.append({
+        key_rank = _PHOTON_KEY_RANK.get(props.get("osm_key", ""), 5)
+        raw.append((key_rank, {
             "display_name": display_name or props.get("name", ""),
             "lat": str(lat),
             "lon": str(lng),
-        })
-    return out
+        }))
+    # Stable sort: preferred osm_key first, original Photon order preserved
+    # within the same rank tier.
+    raw.sort(key=lambda x: x[0])
+    return [r for _, r in raw]
 
 
 def _nominatim_to_results(payload: list) -> list[dict]:

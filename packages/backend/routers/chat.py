@@ -162,7 +162,12 @@ SYSTEM_PROMPT = (
     "layers) — use it as the tool input. gis_intersection/difference/clip/dissolve render their "
     "result automatically (do NOT call add_geojson after). Use gis_clip to crop a layer to a "
     "boundary, gis_dissolve with group_by to merge parcels into districts, gis_spatial_join to "
-    "tag points with their containing polygon, and gis_nearest for closest-feature queries."
+    "tag points with their containing polygon, and gis_nearest for closest-feature queries.\n"
+    "14. NAVIGATION ACCURACY: ALWAYS call the geocode tool first to resolve a place name to "
+    "coordinates — never use your training-data knowledge for coordinates directly, as they "
+    "can be outdated or wrong. Use the FIRST result returned by geocode for fly_to. "
+    "Choose zoom based on place type: country=5, state=8, district=10, city/town=12, "
+    "neighbourhood/sector=14, specific POI=16. Never use zoom>16 unless the user zooms in."
 )
 
 # ── Deep research helpers ──────────────────────────────────────────────────────

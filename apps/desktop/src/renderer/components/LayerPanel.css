@@ -63,6 +63,26 @@
   white-space: nowrap;
 }
 
+.layer-name-input {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  outline: none;
+  width: 0;
+  min-width: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.layer-name-input:focus,
+.layer-name-input:hover {
+  border-color: var(--border, #45475a);
+  background: var(--input-bg, #1a1a26);
+}
+
 .layer-count {
   font-size: 11px;
   color: var(--text-muted);

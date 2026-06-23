@@ -1,0 +1,130 @@
+.pins-panel {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  min-height: 0;
+  background: var(--bg-sidebar, #1e1e2e);
+}
+
+.pins-header {
+  padding: 12px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+}
+
+.pins-title {
+  font-size: 14px;
+  font-weight: 600;
+  color: var(--text-primary, #ffffff);
+}
+
+.pins-empty {
+  padding: 24px;
+  text-align: center;
+  color: var(--text-muted, #a6adc8);
+  font-size: 13px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  justify-content: center;
+  align-items: center;
+  flex: 1;
+}
+
+.pins-empty .hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.pins-list-container {
+  flex: 1;
+  overflow-y: auto;
+}
+
+.pins-list {
+  display: flex;
+  flex-direction: column;
+}
+
+.pin-item {
+  display: flex;
+  flex-direction: column;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  gap: 4px;
+  transition: background 0.15s ease;
+}
+
+.pin-item:hover {
+  background: var(--bg-hover, #2d2d3e);
+}
+
+.pin-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.pin-label-input {
+  flex: 1;
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  color: var(--text-primary, #ffffff);
+  font-size: 13px;
+  padding: 4px 6px;
+  outline: none;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.pin-label-input:focus,
+.pin-label-input:hover {
+  border-color: var(--border, #45475a);
+  background: var(--input-bg, #1a1a26);
+}
+
+.pin-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.pin-action-btn {
+  background: none;
+  border: none;
+  cursor: pointer;
+  padding: 4px;
+  font-size: 14px;
+  line-height: 1;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.pin-zoom {
+  color: var(--text-muted, #a6adc8);
+}
+
+.pin-zoom:hover {
+  color: var(--accent, #89b4fa);
+  background: rgba(137, 180, 250, 0.1);
+}
+
+.pin-delete {
+  color: var(--text-muted, #a6adc8);
+}
+
+.pin-delete:hover {
+  color: var(--danger, #f38ba8);
+  background: rgba(243, 139, 168, 0.1);
+}
+
+.pin-coords {
+  font-size: 11px;
+  color: var(--text-muted, #a6adc8);
+  opacity: 0.6;
+  padding-left: 6px;
+  font-variant-numeric: tabular-nums;
+}
