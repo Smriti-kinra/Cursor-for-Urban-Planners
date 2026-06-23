@@ -47,6 +47,60 @@ function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
 }
 
+type MarkerInput = {
+  lat: number
+  lng: number
+  label?: string
+  color?: string
+  description?: string
+}
+
+function markerFeature(marker: MarkerInput): Feature {
+  return {
+    type: 'Feature',
+    geometry: { type: 'Point', coordinates: [marker.lng, marker.lat] },
+    properties: {
+      label: marker.label || '',
+      ...(marker.description ? { description: marker.description } : {}),
+      ...(marker.color ? { fillColor: marker.color, strokeColor: marker.color } : {}),
+      source: 'ai_marker',
+    },
+  }
+}
+
+function pointFeatureName(feature: Feature, fallback: string): string {
+  const props = feature.properties || {}
+  for (const key of ['label', 'name', 'title', 'display_name', 'address', 'id']) {
+    const value = props[key]
+    if (value != null && String(value).trim()) return String(value).trim()
+  }
+  return fallback
+}
+
+function isPointOnlyCollection(data: FeatureCollection): boolean {
+  const features = data.features || []
+  return features.length > 1 && features.every((feature) => {
+    const coords = feature.geometry?.type === 'Point' ? feature.geometry.coordinates : null
+    return Array.isArray(coords) && Number.isFinite(coords[0]) && Number.isFinite(coords[1])
+  })
+}
+
+function compactLayerGroups(layers: GeoJSONLayer[]): GeoJSONLayer[] {
+  const counts = new Map<string, number>()
+  layers.forEach((layer) => {
+    if (layer.groupId) counts.set(layer.groupId, (counts.get(layer.groupId) || 0) + 1)
+  })
+  return layers.map((layer) => {
+    if (!layer.groupId || (counts.get(layer.groupId) || 0) > 1) return layer
+    const { groupId: _groupId, groupName: _groupName, ...rest } = layer
+    return rest
+  })
+}
+
+function layerHasAiMarkers(layer: GeoJSONLayer): boolean {
+  return (layer.data?.features || []).some((feature) => feature.properties?.source === 'ai_marker')
+}
+
 function formatDistance(km: number): string {
   if (!Number.isFinite(km)) return 'unknown'
   if (km < 1) return `${Math.round(km * 1000)} m`
@@ -130,6 +184,7 @@ function App() {
 
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
+  const aiMarkerGroupCounterRef = useRef(0)
   const userShapeCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
   const isSavingRef = useRef(false)
@@ -234,15 +289,56 @@ function App() {
   )
 
   const removeLayer = useCallback((id: string) => {
-    setLayers((prev) => prev.filter((l) => l.id !== id))
+    setLayers((prev) => compactLayerGroups(prev.filter((l) => l.id !== id)))
   }, [])
 
   const toggleLayer = useCallback((id: string) => {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)))
   }, [])
 
+  const toggleLayerGroup = useCallback((groupId: string, visible: boolean) => {
+    setLayers((prev) => prev.map((l) => (l.groupId === groupId ? { ...l, visible } : l)))
+  }, [])
+
   const renameLayer = useCallback((id: string, name: string) => {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)))
+  }, [])
+
+  const groupLayers = useCallback((sourceId: string, targetId: string) => {
+    if (sourceId === targetId) return
+    setLayers((prev) => {
+      const source = prev.find((l) => l.id === sourceId)
+      const target = prev.find((l) => l.id === targetId)
+      if (!source || !target) return prev
+
+      const groupId = target.groupId || source.groupId || `group-${genId()}`
+      const groupName = target.groupName || source.groupName || `${source.name} Group`
+      const sourceGroupToMerge = source.groupId && source.groupId !== groupId ? source.groupId : null
+      const targetGroupToMerge = target.groupId && target.groupId !== groupId ? target.groupId : null
+
+      return prev.map((layer) => {
+        const shouldJoin =
+          layer.id === sourceId ||
+          layer.id === targetId ||
+          layer.groupId === groupId ||
+          layer.groupId === sourceGroupToMerge ||
+          layer.groupId === targetGroupToMerge
+        return shouldJoin ? { ...layer, groupId, groupName } : layer
+      })
+    })
+  }, [])
+
+  const ungroupLayer = useCallback((id: string) => {
+    setLayers((prev) => {
+      const layer = prev.find((l) => l.id === id)
+      if (!layer?.groupId) return prev
+      const next = prev.map((l) => {
+        if (l.id !== id) return l
+        const { groupId: _groupId, groupName: _groupName, ...rest } = l
+        return rest
+      })
+      return compactLayerGroups(next)
+    })
   }, [])
 
   const zoomToLayer = useCallback((id: string) => {
@@ -621,25 +717,14 @@ function App() {
     setActiveLeftTab('layers')
   }, [])
 
-  // Append-merge AI-placed markers into the canonical "AI Markers" layer.
-  // We intercept add_marker / add_markers in handleMapAction so the pins
-  // live in React state (and project.json), not in a MapView ref that
-  // disappears on reload.
+  // Append-merge single marker pins into the canonical "AI Markers" layer.
+  // Multi-marker AI requests use addGroupedMarkersToLayers below.
   const appendMarkersToLayer = useCallback(
-    (markers: Array<{ lat: number; lng: number; label?: string; color?: string; description?: string }>) => {
+    (markers: MarkerInput[]) => {
       if (!markers.length) return
       const newFeatures: Feature[] = markers
         .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
-        .map((m) => ({
-          type: 'Feature',
-          geometry: { type: 'Point', coordinates: [m.lng, m.lat] },
-          properties: {
-            label: m.label || '',
-            ...(m.description ? { description: m.description } : {}),
-            ...(m.color ? { fillColor: m.color, strokeColor: m.color } : {}),
-            source: 'ai_marker',
-          },
-        }))
+        .map(markerFeature)
       if (!newFeatures.length) return
       setLayers((prev) => {
         const idx = prev.findIndex(
@@ -680,6 +765,66 @@ function App() {
     },
     [],
   )
+
+  const addGroupedMarkersToLayers = useCallback((markers: MarkerInput[]) => {
+    const features = markers
+      .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
+      .map(markerFeature)
+    if (!features.length) return
+
+    aiMarkerGroupCounterRef.current += 1
+    const groupId = `group-ai-markers-${genId()}`
+    const groupName = `AI Markers ${aiMarkerGroupCounterRef.current}`
+    const nextLayers: GeoJSONLayer[] = features.map((feature, idx) => {
+      const color =
+        String(feature.properties?.fillColor || '') ||
+        LAYER_COLORS[(colorIndexRef.current + idx) % LAYER_COLORS.length]
+      const label = String(feature.properties?.label || '').trim()
+      return {
+        id: `layer-${genId()}`,
+        name: label || `Marker ${idx + 1}`,
+        filePath: '',
+        visible: true,
+        groupId,
+        groupName,
+        data: { type: 'FeatureCollection', features: [feature] },
+        color,
+      }
+    })
+    colorIndexRef.current += nextLayers.length
+    setLayers((prev) => [...prev, ...nextLayers])
+    setActiveLeftTab('layers')
+  }, [])
+
+  const addGroupedPointFeaturesToLayers = useCallback((
+    groupName: string,
+    data: FeatureCollection,
+    color?: string,
+  ) => {
+    const features = (data.features || []).filter((feature) => feature.geometry?.type === 'Point')
+    if (!features.length) return
+
+    const groupId = `group-points-${genId()}`
+    const nextLayers: GeoJSONLayer[] = features.map((feature, idx) => {
+      const featureColor =
+        String(feature.properties?.fillColor || feature.properties?.strokeColor || '') ||
+        color ||
+        LAYER_COLORS[(colorIndexRef.current + idx) % LAYER_COLORS.length]
+      return {
+        id: `layer-${genId()}`,
+        name: pointFeatureName(feature, `${groupName} ${idx + 1}`),
+        filePath: '',
+        visible: true,
+        groupId,
+        groupName,
+        data: { type: 'FeatureCollection', features: [feature] },
+        color: featureColor,
+      }
+    })
+    colorIndexRef.current += nextLayers.length
+    setLayers((prev) => [...prev, ...nextLayers])
+    setActiveLeftTab('layers')
+  }, [])
 
   const handleLayerStyleChange = useCallback(
     (
@@ -1034,7 +1179,12 @@ function App() {
             : geojson && 'type' in geojson && geometryTypes.includes(geojson.type as string)
               ? { type: 'FeatureCollection', features: [{ type: 'Feature', geometry: geojson as Geometry, properties: {} }] }
               : { type: 'FeatureCollection', features: [] }
-      upsertLayer(name || 'AI Layer', data, color)
+      const layerName = name || 'AI Layer'
+      if (isPointOnlyCollection(data)) {
+        addGroupedPointFeaturesToLayers(layerName, data, color)
+      } else {
+        upsertLayer(layerName, data, color)
+      }
       return
     }
     if (action.type === 'toggle_layer') {
@@ -1059,20 +1209,23 @@ function App() {
       setArtifactsRevision((n) => n + 1)
       return
     }
-    // AI-placed pins: merge into a single "AI Markers" Point layer so they
-    // appear in mapContext, persist to project.json, and survive reload.
+    // Single pins keep using the Pins panel. Multi-pin AI requests become a
+    // group of separate one-point layers so they can be managed like Figma
+    // objects in the Layers panel.
     if (action.type === 'add_marker') {
       appendMarkersToLayer([action.payload])
       return
     }
     if (action.type === 'add_markers') {
       const list = Array.isArray(action.payload?.markers) ? action.payload.markers : []
-      appendMarkersToLayer(list)
+      addGroupedMarkersToLayers(list)
       return
     }
     if (action.type === 'clear_markers') {
       setLayers((prev) =>
-        prev.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()),
+        compactLayerGroups(prev.filter((l) =>
+          l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase() && !layerHasAiMarkers(l),
+        )),
       )
       return
     }
@@ -1149,7 +1302,15 @@ function App() {
       return
     }
     setMapActions((prev) => [...prev, action])
-  }, [upsertLayer, clipLayersToBboxAndSave, appendMarkersToLayer, mapViewState.zoom, buildStyleSpec])
+  }, [
+    upsertLayer,
+    clipLayersToBboxAndSave,
+    appendMarkersToLayer,
+    addGroupedMarkersToLayers,
+    addGroupedPointFeaturesToLayers,
+    mapViewState.zoom,
+    buildStyleSpec,
+  ])
 
   // ── Right-click map actions ──
 
@@ -1277,6 +1438,8 @@ function App() {
           geometryTypes,
           properties,
           visible: l.visible,
+          ...(l.groupId !== undefined ? { groupId: l.groupId } : {}),
+          ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
           ...(geometry_data ? { geometry_data } : {}),
           style,
         }
@@ -1386,6 +1549,8 @@ function App() {
             name: l.name,
             filePath: toRelative(l.filePath),
             visible: l.visible,
+            ...(l.groupId !== undefined ? { groupId: l.groupId } : {}),
+            ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
             color: l.color,
             ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
@@ -1480,6 +1645,8 @@ function App() {
               name: info.name,
               filePath: resolved,
               visible: info.visible,
+              ...(info.groupId !== undefined ? { groupId: info.groupId } : {}),
+              ...(info.groupName !== undefined ? { groupName: info.groupName } : {}),
               data: geojson,
               color: info.color,
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
@@ -1625,6 +1792,9 @@ function App() {
                 onAttributes={(id) => { setAttrLayerId((cur) => (cur === id ? null : id)); setStylingLayerId(null) }}
                 activeAttrId={attrLayerId}
                 onRename={renameLayer}
+                onGroupWith={groupLayers}
+                onUngroup={ungroupLayer}
+                onToggleGroup={toggleLayerGroup}
               />
               {stylingLayer && (
                 <SymbologyPanel

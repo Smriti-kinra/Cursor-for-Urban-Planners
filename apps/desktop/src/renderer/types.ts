@@ -5,6 +5,8 @@ export interface GeoJSONLayer {
   name: string
   filePath: string
   visible: boolean
+  groupId?: string
+  groupName?: string
   data: FeatureCollection
   color: string
   fillColor?: string
@@ -231,6 +233,8 @@ export interface ProjectData {
     /** Workspace-relative for new projects; absolute for legacy projects. */
     filePath: string
     visible: boolean
+    groupId?: string
+    groupName?: string
     color: string
     fillColor?: string
     lineColor?: string
@@ -269,6 +273,8 @@ export interface MapContext {
     geometryTypes: string[]
     properties: string[]
     visible: boolean
+    groupId?: string
+    groupName?: string
     geometry_data?: LayerGeometryData
     style?: LayerStyleSummary
   }>

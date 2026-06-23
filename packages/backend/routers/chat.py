@@ -81,8 +81,8 @@ SYSTEM_PROMPT = (
     "Always respond in English regardless of the query language.\n\n"
     "AVAILABLE TOOLS:\n"
     "- Navigate: fly_to, fit_bounds\n"
-    "- Markers: add_marker, add_markers (pass a 'description' to show info in a hover popup), clear_markers\n"
-    "- Layers: add_geojson, toggle_layer, remove_layer, set_layer_style, style_layer\n"
+    "- Markers: add_marker, add_markers (multi-marker requests become a grouped set of separate marker layers; pass a 'description' to show info in a hover popup), clear_markers\n"
+    "- Layers: add_geojson (multiple point features are displayed as separate layers inside one group), toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
     "- Search: web_search, geocode\n"
     "- OSM: osm_search (amenities, buildings, roads), "
@@ -116,7 +116,7 @@ SYSTEM_PROMPT = (
     "- bookmarks: saved regions; use go_to_bookmark to navigate.\n"
     "- Layer list with geometry_data (actual coordinates for small layers, bbox for large ones).\n\n"
     "IMPORTANT RULES:\n"
-    "1. Do NOT add markers unless the user explicitly asks for markers or pins.\n"
+    "1. Do NOT add markers unless the user explicitly asks for markers or pins. When the user asks for multiple different points, use one add_markers call so the app creates a grouped set of separate marker layers.\n"
     "2. Do NOT repeat a tool call you already made. Call each tool ONCE per distinct item.\n"
     "3. osm_search, osm_boundary, overture_places_search, overture_buildings_search, "
     "nearby_places, and nearby_places_in_polygon results are AUTO-DISPLAYED on the map. "
@@ -458,7 +458,7 @@ def _build_tools() -> list[dict]:
             },
             "required": ["lat", "lng", "label"],
         }),
-        ("add_markers", "Add multiple markers at once. Each marker may include a description shown in a popup on hover.", {
+        ("add_markers", "Add multiple markers at once. The app displays them as separate marker layers inside one layer group. Each marker may include a description shown in a popup on hover.", {
             "type": "object",
             "properties": {
                 "markers": {
@@ -479,7 +479,7 @@ def _build_tools() -> list[dict]:
         ("clear_markers", "Remove all AI-placed markers from the map", {
             "type": "object", "properties": {},
         }),
-        ("add_geojson", "Add a GeoJSON FeatureCollection as a new map layer", {
+        ("add_geojson", "Add GeoJSON to the map. FeatureCollections with multiple Point features are displayed as separate layers inside one group.", {
             "type": "object",
             "properties": {
                 "geojson": {"type": "object", "description": "A GeoJSON FeatureCollection"},
