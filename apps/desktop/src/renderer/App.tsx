@@ -13,7 +13,7 @@ import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
-import PinsPanel from './components/PinsPanel'
+
 import DocumentView, { type DocumentImage } from './components/DocumentView'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
@@ -40,7 +40,7 @@ import { composeFigure } from './lib/compose-figure'
 import { buildLegendEntries } from './lib/legend-data'
 
 type AppMode = 'map' | 'document'
-type LeftTab = 'files' | 'layers' | 'pins' | 'bookmarks' | 'export' | 'zoning'
+type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
 type RightTab = 'chat' | 'artifacts'
 
 function genId() {
@@ -184,7 +184,8 @@ function App() {
 
   const colorIndexRef = useRef(0)
   const aiShapeNameCounterRef = useRef(0)
-  const aiMarkerGroupCounterRef = useRef(0)
+  const aiMarkerCounterRef = useRef(0)
+  const aiMarkersGroupIdRef = useRef(`group-ai-markers-${genId()}`)
   const userShapeCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
   const isSavingRef = useRef(false)
@@ -717,82 +718,36 @@ function App() {
     setActiveLeftTab('layers')
   }, [])
 
-  // Append-merge single marker pins into the canonical "AI Markers" layer.
-  // Multi-marker AI requests use addGroupedMarkersToLayers below.
-  const appendMarkersToLayer = useCallback(
-    (markers: MarkerInput[]) => {
-      if (!markers.length) return
-      const newFeatures: Feature[] = markers
-        .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
-        .map(markerFeature)
-      if (!newFeatures.length) return
-      setLayers((prev) => {
-        const idx = prev.findIndex(
-          (l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase(),
-        )
-        if (idx >= 0) {
-          const existing = prev[idx]
-          dirtyLayerIdsRef.current.add(existing.id)
-          const merged = {
-            ...existing,
-            visible: true,
-            data: {
-              type: 'FeatureCollection',
-              features: [...(existing.data?.features || []), ...newFeatures],
-            } as FeatureCollection,
-          }
-          const next = [...prev]
-          next[idx] = merged
-          return next
-        }
-        const newId = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-        dirtyLayerIdsRef.current.add(newId)
-        const layerColor = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
-        colorIndexRef.current++
-        return [
-          ...prev,
-          {
-            id: newId,
-            name: AI_MARKERS_LAYER,
-            filePath: '',
-            visible: true,
-            data: { type: 'FeatureCollection', features: newFeatures } as FeatureCollection,
-            color: layerColor,
-          },
-        ]
-      })
-      setActiveLeftTab('pins')
-    },
-    [],
-  )
-
-  const addGroupedMarkersToLayers = useCallback((markers: MarkerInput[]) => {
+  const addAiMarkersToGroup = useCallback((markers: MarkerInput[]) => {
     const features = markers
       .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
       .map(markerFeature)
     if (!features.length) return
 
-    aiMarkerGroupCounterRef.current += 1
-    const groupId = `group-ai-markers-${genId()}`
-    const groupName = `AI Markers ${aiMarkerGroupCounterRef.current}`
-    const nextLayers: GeoJSONLayer[] = features.map((feature, idx) => {
-      const color =
-        String(feature.properties?.fillColor || '') ||
-        LAYER_COLORS[(colorIndexRef.current + idx) % LAYER_COLORS.length]
-      const label = String(feature.properties?.label || '').trim()
-      return {
-        id: `layer-${genId()}`,
-        name: label || `Marker ${idx + 1}`,
-        filePath: '',
-        visible: true,
-        groupId,
-        groupName,
-        data: { type: 'FeatureCollection', features: [feature] },
-        color,
-      }
+    setLayers((prev) => {
+      const groupId =
+        prev.find((layer) => layer.groupName === AI_MARKERS_LAYER)?.groupId ||
+        aiMarkersGroupIdRef.current
+      const nextLayers: GeoJSONLayer[] = features.map((feature, idx) => {
+        aiMarkerCounterRef.current += 1
+        const color =
+          String(feature.properties?.fillColor || '') ||
+          LAYER_COLORS[(colorIndexRef.current + idx) % LAYER_COLORS.length]
+        const label = String(feature.properties?.label || '').trim()
+        return {
+          id: `layer-${genId()}`,
+          name: label || `Marker ${aiMarkerCounterRef.current}`,
+          filePath: '',
+          visible: true,
+          groupId,
+          groupName: AI_MARKERS_LAYER,
+          data: { type: 'FeatureCollection', features: [feature] },
+          color,
+        }
+      })
+      colorIndexRef.current += nextLayers.length
+      return [...prev, ...nextLayers]
     })
-    colorIndexRef.current += nextLayers.length
-    setLayers((prev) => [...prev, ...nextLayers])
     setActiveLeftTab('layers')
   }, [])
 
@@ -1085,19 +1040,9 @@ function App() {
     [layers, attrLayerId],
   )
 
-  const aiMarkersLayer = useMemo(
-    () => layers.find((l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()) ?? null,
-    [layers, AI_MARKERS_LAYER],
-  )
-
-  const pinCount = useMemo(
-    () => aiMarkersLayer?.data?.features?.length ?? 0,
-    [aiMarkersLayer],
-  )
-
   const displayLayersCount = useMemo(
-    () => layers.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()).length,
-    [layers, AI_MARKERS_LAYER],
+    () => layers.length,
+    [layers],
   )
 
   // ── Map action handler (intercepts layer ops, queues the rest) ──
@@ -1209,16 +1154,15 @@ function App() {
       setArtifactsRevision((n) => n + 1)
       return
     }
-    // Single pins keep using the Pins panel. Multi-pin AI requests become a
-    // group of separate one-point layers so they can be managed like Figma
-    // objects in the Layers panel.
+    // AI-placed pins become separate one-point layers inside the persistent
+    // "AI Markers" group so they can be managed like Figma objects.
     if (action.type === 'add_marker') {
-      appendMarkersToLayer([action.payload])
+      addAiMarkersToGroup([action.payload])
       return
     }
     if (action.type === 'add_markers') {
       const list = Array.isArray(action.payload?.markers) ? action.payload.markers : []
-      addGroupedMarkersToLayers(list)
+      addAiMarkersToGroup(list)
       return
     }
     if (action.type === 'clear_markers') {
@@ -1305,8 +1249,7 @@ function App() {
   }, [
     upsertLayer,
     clipLayersToBboxAndSave,
-    appendMarkersToLayer,
-    addGroupedMarkersToLayers,
+    addAiMarkersToGroup,
     addGroupedPointFeaturesToLayers,
     mapViewState.zoom,
     buildStyleSpec,
@@ -1318,34 +1261,41 @@ function App() {
     (lng: number, lat: number) => {
       // Place immediately with a coordinate label, then upgrade to the
       // reverse-geocoded address when it resolves. Never block the pin.
-      appendMarkersToLayer([{ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}` }])
+      addAiMarkersToGroup([{ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}` }])
       fetch(`http://localhost:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`)
         .then((r) => r.json())
         .then((d: { display_name?: string | null }) => {
           if (!d?.display_name) return
           setLayers((prev) =>
             prev.map((l) => {
-              if (l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase()) return l
-              dirtyLayerIdsRef.current.add(l.id)
-              const features = [...(l.data?.features || [])]
-              // Update the most-recently-added point matching these coords.
-              for (let i = features.length - 1; i >= 0; i--) {
-                const g = features[i].geometry
-                if (g?.type === 'Point' && g.coordinates[0] === lng && g.coordinates[1] === lat) {
-                  features[i] = {
-                    ...features[i],
-                    properties: { ...features[i].properties, label: d.display_name },
-                  }
-                  break
-                }
+              const feature = l.data?.features?.[0]
+              const g = feature?.geometry
+              if (
+                feature?.properties?.source !== 'ai_marker' ||
+                g?.type !== 'Point' ||
+                g.coordinates[0] !== lng ||
+                g.coordinates[1] !== lat
+              ) {
+                return l
               }
-              return { ...l, data: { type: 'FeatureCollection', features } as FeatureCollection }
+              dirtyLayerIdsRef.current.add(l.id)
+              return {
+                ...l,
+                name: d.display_name,
+                data: {
+                  type: 'FeatureCollection',
+                  features: [{
+                    ...feature,
+                    properties: { ...feature.properties, label: d.display_name },
+                  }],
+                } as FeatureCollection,
+              }
             }),
           )
         })
         .catch(() => { /* keep coordinate label */ })
     },
-    [appendMarkersToLayer],
+    [addAiMarkersToGroup],
   )
 
   const handleRightClickStreetView = useCallback((lng: number, lat: number) => {
@@ -1740,13 +1690,7 @@ function App() {
               Layers
               {displayLayersCount > 0 && <span className="tab-badge">{displayLayersCount}</span>}
             </button>
-            <button
-              className={`tab ${activeLeftTab === 'pins' ? 'active' : ''}`}
-              onClick={() => setActiveLeftTab('pins')}
-            >
-              Pins
-              {pinCount > 0 && <span className="tab-badge">{pinCount}</span>}
-            </button>
+
             <button
               className={`tab ${activeLeftTab === 'bookmarks' ? 'active' : ''}`}
               onClick={() => setActiveLeftTab('bookmarks')}
@@ -1783,7 +1727,7 @@ function App() {
           {activeLeftTab === 'layers' && (
             <>
               <LayerPanel
-                layers={layers.filter((l) => l.name.toLowerCase() !== AI_MARKERS_LAYER.toLowerCase())}
+                layers={layers}
                 onToggle={toggleLayer}
                 onRemove={removeLayer}
                 onZoomTo={zoomToLayer}
@@ -1812,18 +1756,7 @@ function App() {
               )}
             </>
           )}
-          {activeLeftTab === 'pins' && (
-            <PinsPanel
-              layer={aiMarkersLayer}
-              onChange={handleAttributesChange}
-              onZoomToPin={(lng, lat) => {
-                setMapActions((prev) => [
-                  ...prev,
-                  { type: 'fly_to', payload: { lat, lng, zoom: 15 } },
-                ])
-              }}
-            />
-          )}
+
           {activeLeftTab === 'bookmarks' && (
             <BookmarkPanel
               bookmarks={bookmarks}

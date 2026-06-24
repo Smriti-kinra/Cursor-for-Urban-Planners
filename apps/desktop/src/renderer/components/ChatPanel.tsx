@@ -689,9 +689,9 @@ export default function ChatPanel({
         <button
           className="chat-history-toggle"
           onClick={() => setShowHistory(!showHistory)}
-          title="Chat history"
+          title="View chat history"
         >
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
+          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
             <path
               d="M8 3.5V8L11 10M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z"
               stroke="currentColor"
@@ -700,9 +700,12 @@ export default function ChatPanel({
               strokeLinejoin="round"
             />
           </svg>
-          <span className="chat-header-title">
-            {activeConversation?.title || 'New chat'}
-          </span>
+          <div className="chat-history-labels">
+            <span className="chat-history-label">View history</span>
+            <span className="chat-header-title">
+              {activeConversation?.title || 'New chat'}
+            </span>
+          </div>
           <svg
             className={`chat-chevron ${showHistory ? 'open' : ''}`}
             width="10"
@@ -713,10 +716,11 @@ export default function ChatPanel({
             <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
         </button>
-        <button className="chat-new-btn-header" onClick={handleNewChat} title="New chat">
+        <button className="chat-new-btn-header" onClick={handleNewChat} title="Start a new chat">
           <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
             <path d="M8 3V13M3 8H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
           </svg>
+          <span>New chat</span>
         </button>
       </div>
 
