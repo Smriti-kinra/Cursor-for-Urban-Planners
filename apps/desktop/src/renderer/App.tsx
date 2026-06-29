@@ -239,6 +239,26 @@ function App() {
     }).catch(() => {})
   }, [])
 
+  const resetWorkspaceState = useCallback(() => {
+    setActiveLeftTab('files')
+    setActiveRightTab('chat')
+    setStylingLayerId(null)
+    setAttrLayerId(null)
+    setConvertingFile(null)
+    setConvertError(null)
+    setLayers([])
+    setMapViewState({ center: [76.7794, 30.7333], zoom: 13, bearing: 0, pitch: 0 })
+    setBasemap('street')
+    setConversations([])
+    setActiveConversationId(null)
+    setMapActions([])
+    setStreetViewTarget(null)
+    setInjectedMessage(null)
+    setBookmarks([])
+    setMapBounds(null)
+    setArtifactsRevision(0)
+  }, [])
+
   const handleSelectWorkspace = async (): Promise<void> => {
     const selected = await window.electronAPI.selectWorkspace()
     if (selected) {
@@ -246,6 +266,25 @@ function App() {
       window.electronAPI.setLastWorkspace(selected).catch(() => {})
     }
   }
+
+  const handleCloseWorkspace = useCallback(async (): Promise<void> => {
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current)
+      saveTimeoutRef.current = null
+    }
+
+    if (workspacePath) {
+      try {
+        await saveProjectRef.current(true)
+      } catch {
+        // Ignore save errors and still clear the current workspace.
+      }
+    }
+
+    setWorkspacePath(null)
+    resetWorkspaceState()
+    window.electronAPI.setLastWorkspace(null).catch(() => {})
+  }, [workspacePath, resetWorkspaceState])
 
   // ── Layer management ──
 
@@ -1666,9 +1705,16 @@ function App() {
           </button>
         </div>
         {appMode === 'map' && (
-          <button className="workspace-btn" onClick={handleSelectWorkspace}>
-            {workspaceLabel}
-          </button>
+          <div style={{ display: 'flex', gap: 8 }}>
+            {workspacePath && (
+              <button className="workspace-btn" onClick={handleCloseWorkspace} title="Close workspace">
+                Close
+              </button>
+            )}
+            <button className="workspace-btn" onClick={handleSelectWorkspace}>
+              {workspaceLabel}
+            </button>
+          </div>
         )}
       </header>
 
