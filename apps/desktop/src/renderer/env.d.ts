@@ -27,6 +27,7 @@ declare global {
     getModels: () => Promise<ModelInfo[]>
     getCurrentModel: () => Promise<string>
     switchModel: (model: string) => Promise<{ ok: boolean; requiresManualRestart: boolean }>
+    importSpatialFiles: (workspacePath: string) => Promise<string[]>
   }
 
   interface Window {

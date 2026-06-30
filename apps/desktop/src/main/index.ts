@@ -241,6 +241,38 @@ ipcMain.handle('write-file', async (_event, filePath: string, content: string) =
   }
 })
 
+ipcMain.handle('import-spatial-files', async (_e, workspacePath: string) => {
+  const result = await dialog.showOpenDialog(mainWindow!, {
+    properties: ['openFile', 'multiSelections'],
+    filters: [
+      { name: 'Spatial Files', extensions: ['geojson', 'json', 'kml', 'kmz', 'shp', 'gpkg', 'gpx', 'csv'] },
+      { name: 'All Files', extensions: ['*'] }
+    ]
+  })
+  if (result.canceled || result.filePaths.length === 0) return []
+
+  const importedPaths: string[] = []
+  for (const fp of result.filePaths) {
+    const filename = path.basename(fp)
+    const targetPath = path.join(workspacePath, filename)
+    
+    // Check if the file is already in the workspace
+    const isInside = fp.startsWith(workspacePath)
+    if (isInside) {
+      importedPaths.push(fp)
+    } else {
+      // Copy the file to the workspace
+      try {
+        fs.copyFileSync(fp, targetPath)
+        importedPaths.push(targetPath)
+      } catch (err) {
+        console.error('Failed to copy file:', fp, err)
+      }
+    }
+  }
+  return importedPaths
+})
+
 // --- App lifecycle ---
 
 app.whenReady().then(async () => {

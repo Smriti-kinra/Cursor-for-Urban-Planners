@@ -39,6 +39,42 @@
   color: var(--text-primary);
 }
 
+.file-tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-tree-import-btn {
+  background: var(--bg-hover, #2d2d3e);
+  border: 1px solid var(--border, #45475a);
+  color: var(--text-primary, #ffffff);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.file-tree-import-btn:hover {
+  background: var(--input-bg, #1a1a26);
+  border-color: var(--accent, #89b4fa);
+}
+
+.file-formats-banner {
+  font-size: 10px;
+  color: var(--text-muted, #a6adc8);
+  opacity: 0.75;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  background: rgba(0, 0, 0, 0.1);
+  line-height: 1.3;
+}
+
 .file-tree {
   flex: 1;
   overflow-y: auto;

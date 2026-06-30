@@ -151,6 +151,8 @@ function App() {
   const [attrLayerId, setAttrLayerId] = useState<string | null>(null)
   const [convertingFile, setConvertingFile] = useState<string | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
+  const [fileTreeRevision, setFileTreeRevision] = useState(0)
+
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
   const [mapViewState, setMapViewState] = useState<MapViewState>({
@@ -400,6 +402,51 @@ function App() {
     },
     [addLayer, convertAndAddLayer],
   )
+
+  const handleImportSpatialFiles = useCallback(async () => {
+    if (!workspacePath) {
+      setConvertError('Open a workspace folder before importing files.')
+      return
+    }
+    setConvertError(null)
+    try {
+      const paths = await window.electronAPI.importSpatialFiles(workspacePath)
+      if (!paths || paths.length === 0) return
+
+      for (const fp of paths) {
+        const lower = fp.toLowerCase()
+        const filename = fp.split(/[/\\]/).pop() || 'file'
+        
+        if (lower.endsWith('.geojson') || lower.endsWith('.json')) {
+          const name = filename.replace(/\.(geojson|json)$/i, '')
+          await addLayer(name, fp)
+        } else if (/\.(shp|gpkg|kml|kmz|gpx|csv)$/.test(lower)) {
+          setConvertingFile(filename)
+          try {
+            const resp = await fetch('http://localhost:8765/api/files/convert', {
+              method: 'POST',
+              headers: { 'Content-Type': 'application/json' },
+              body: JSON.stringify({ path: fp, workspace: workspacePath }),
+            })
+            const data = await resp.json()
+            if (data.error) {
+              setConvertError(`${filename}: ${data.error}`)
+            } else if (data.path) {
+              await addLayer(data.name || filename, data.path)
+            }
+          } catch (e) {
+            setConvertError(`Could not reach the backend to convert ${filename}.`)
+          } finally {
+            setConvertingFile(null)
+          }
+        }
+      }
+      setFileTreeRevision((prev) => prev + 1)
+    } catch (err) {
+      setConvertError(`Import failed: ${err}`)
+    }
+  }, [workspacePath, addLayer])
+
 
   // ── Admin boundary save ──
 
@@ -749,6 +796,17 @@ function App() {
         dirtyLayerIdsRef.current.add(newId)
         const layerColor = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
         colorIndexRef.current++
+        const defaultStyleSpec = {
+          mode: 'simple' as const,
+          label: {
+            enabled: true,
+            property: 'label',
+            size: 12,
+            color: '#1e1e2e',
+            haloColor: '#ffffff',
+            minZoom: 0,
+          }
+        }
         return [
           ...prev,
           {
@@ -758,6 +816,7 @@ function App() {
             visible: true,
             data: { type: 'FeatureCollection', features: newFeatures } as FeatureCollection,
             color: layerColor,
+            styleSpec: defaultStyleSpec,
           },
         ]
       })
@@ -1585,6 +1644,10 @@ function App() {
     try {
       const content = await window.electronAPI.readFile(`${workspacePath}/project.json`)
       if (!content) {
+        setLayers([])
+        setConversations([])
+        setActiveConversationId(null)
+        setBookmarks([])
         isLoadingRef.current = false
         return
       }
@@ -1594,7 +1657,11 @@ function App() {
         setMapActions([{ type: 'set_view', payload: data.mapState }])
       }
       if (data.basemap) setBasemap(data.basemap)
-      if (data.bookmarks && data.bookmarks.length > 0) setBookmarks(data.bookmarks)
+      if (data.bookmarks && data.bookmarks.length > 0) {
+        setBookmarks(data.bookmarks)
+      } else {
+        setBookmarks([])
+      }
 
       if (data.conversations && data.conversations.length > 0) {
         setConversations(data.conversations)
@@ -1608,6 +1675,9 @@ function App() {
         }
         setConversations([migrated])
         setActiveConversationId(migrated.id)
+      } else {
+        setConversations([])
+        setActiveConversationId(null)
       }
 
       if (data.layers) {
@@ -1640,6 +1710,30 @@ function App() {
                       type: 'FeatureCollection',
                       features: [{ type: 'Feature', geometry: raw, properties: {} }],
                     }
+            const isAiMarkers = info.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()
+            const defaultStyleSpec = isAiMarkers ? {
+              mode: 'simple' as const,
+              label: {
+                enabled: true,
+                property: 'label',
+                size: 12,
+                color: '#1e1e2e',
+                haloColor: '#ffffff',
+                minZoom: 0,
+              }
+            } : undefined
+
+            const finalStyleSpec = info.styleSpec !== undefined
+              ? (isAiMarkers ? {
+                  ...defaultStyleSpec,
+                  ...info.styleSpec,
+                  label: {
+                    ...defaultStyleSpec?.label,
+                    ...info.styleSpec?.label,
+                  }
+                } : info.styleSpec)
+              : defaultStyleSpec
+
             loadedLayers.push({
               id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               name: info.name,
@@ -1654,7 +1748,7 @@ function App() {
               ...(info.lineWidth !== undefined ? { lineWidth: info.lineWidth } : {}),
               ...(info.lineDasharray !== undefined ? { lineDasharray: info.lineDasharray } : {}),
               ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
-              ...(info.styleSpec !== undefined ? { styleSpec: info.styleSpec } : {}),
+              styleSpec: finalStyleSpec,
             })
           } catch {
             /* skip invalid files */
@@ -1662,6 +1756,8 @@ function App() {
         }
         setLayers(loadedLayers)
         colorIndexRef.current = loadedLayers.length
+      } else {
+        setLayers([])
       }
     } catch (e) {
       console.error('Failed to load project:', e)
@@ -1777,7 +1873,12 @@ function App() {
                   {convertError}
                 </div>
               )}
-              <FileTree workspacePath={workspacePath} onFileClick={handleFileClick} />
+              <FileTree
+                workspacePath={workspacePath}
+                onFileClick={handleFileClick}
+                onImportClick={handleImportSpatialFiles}
+                revision={fileTreeRevision}
+              />
             </>
           )}
           {activeLeftTab === 'layers' && (

@@ -4,6 +4,8 @@ import './FileTree.css'
 interface FileTreeProps {
   workspacePath: string | null
   onFileClick?: (entry: FileEntry) => void
+  onImportClick?: () => void
+  revision?: number
 }
 
 interface TreeNodeProps {
@@ -56,7 +58,7 @@ function TreeNode({ entry, depth, onFileClick }: TreeNodeProps) {
   )
 }
 
-export default function FileTree({ workspacePath, onFileClick }: FileTreeProps) {
+export default function FileTree({ workspacePath, onFileClick, onImportClick, revision }: FileTreeProps) {
   const [entries, setEntries] = useState<FileEntry[]>([])
 
   const loadDirectory = useCallback(async () => {
@@ -67,7 +69,7 @@ export default function FileTree({ workspacePath, onFileClick }: FileTreeProps) 
 
   useEffect(() => {
     loadDirectory()
-  }, [loadDirectory])
+  }, [loadDirectory, revision])
 
   if (!workspacePath) {
     return (
@@ -80,13 +82,23 @@ export default function FileTree({ workspacePath, onFileClick }: FileTreeProps) 
 
   return (
     <div className="file-tree-wrap">
-      <div className="file-tree-toolbar">
-        <span className="file-tree-path" title={workspacePath}>
-          {workspacePath.split('/').pop()}
-        </span>
-        <button className="file-tree-refresh" onClick={loadDirectory} title="Refresh file tree">
-          ↻
-        </button>
+      <div className="file-tree-header-container">
+        <div className="file-tree-toolbar">
+          <span className="file-tree-path" title={workspacePath}>
+            {workspacePath.split('/').pop()}
+          </span>
+          <div className="file-tree-actions">
+            <button className="file-tree-import-btn" onClick={onImportClick} title="Import spatial files">
+              📥 Import
+            </button>
+            <button className="file-tree-refresh" onClick={loadDirectory} title="Refresh file tree">
+              ↻
+            </button>
+          </div>
+        </div>
+        <div className="file-formats-banner">
+          Supported: KML, KMZ, SHP, GPKG, GPX, CSV, GeoJSON
+        </div>
       </div>
       <div className="file-tree">
         {entries.map((entry) => (
