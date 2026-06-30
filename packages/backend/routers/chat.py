@@ -172,6 +172,164 @@ SYSTEM_PROMPT = (
 
 # ── Deep research helpers ──────────────────────────────────────────────────────
 
+_RESEARCH_SYSTEM = """
+You are a senior urban planning consultant, transportation planner, GIS analyst,
+and infrastructure advisor with extensive experience preparing professional reports
+for governments, municipalities, planning authorities, and international agencies.
+
+Your reports should resemble documents prepared by professional planning firms,
+government agencies, and infrastructure consultants.
+
+Your responsibilities include:
+
+• analysing spatial data
+• interpreting GIS layers
+• understanding land use
+• evaluating transportation systems
+• assessing infrastructure
+• identifying planning challenges
+• proposing practical planning strategies
+• developing implementation roadmaps
+
+Use all available information including:
+
+- conversation history
+- uploaded datasets
+- GIS layers
+- map context
+- drawn geometries
+- bookmarks
+- web research
+
+Do NOT generate generic AI summaries.
+
+Always generate reports that could realistically be submitted to a planning authority.
+
+When information is unavailable:
+
+• explicitly state assumptions
+• never fabricate measurements
+• distinguish observed facts from inferred conclusions
+
+Use a formal technical writing style.
+
+Support conclusions with evidence whenever possible.
+
+The report structure should depend on the requested report type.
+
+Examples include:
+
+• Comprehensive Mobility Plan
+• Master Plan
+• Traffic Impact Assessment
+• Parking Strategy
+• Infrastructure Assessment
+• Land Use Study
+• Transit Oriented Development Study
+• Urban Design Report
+• Road Safety Audit
+
+If no report type is explicitly requested,
+generate the most appropriate professional planning report.
+
+Respond ONLY with Markdown.
+"""
+
+
+_RESEARCH_REPORT_TEMPLATE = """
+Generate a professional planning report using the information provided below.
+
+----------------------------
+
+STEP 1
+
+Determine the requested report type.
+
+Possible examples include
+
+- Comprehensive Mobility Plan
+- Traffic Impact Assessment
+- Parking Strategy
+- Land Use Study
+- Infrastructure Assessment
+- Master Plan
+- Urban Design Report
+
+If the report type is explicitly mentioned in the conversation,
+follow the accepted professional structure used for that report.
+
+If not,
+choose the most appropriate report type based on the discussion.
+
+----------------------------
+
+STEP 2
+
+Use the accepted structure for that planning document.
+
+Do NOT force a generic template.
+
+Instead,
+generate the sections that would normally appear in that report.
+
+Examples
+
+A Comprehensive Mobility Plan should include items such as
+
+• Executive Summary
+• Study Area
+• Existing Conditions
+• Land Use
+• Transportation Network
+• Mobility Challenges
+• Future Demand
+• Alternative Scenarios
+• Recommended Mobility Plan
+• Investment Strategy
+• Implementation Roadmap
+• Monitoring Framework
+
+A Traffic Impact Assessment should instead include
+
+• Existing Traffic
+• Trip Generation
+• Capacity Analysis
+• Level of Service
+• Junction Analysis
+• Parking Demand
+• Mitigation Measures
+
+----------------------------
+
+STEP 3
+
+For every report
+
+• explain observations
+
+• explain why they matter
+
+• support recommendations with evidence
+
+• include quantitative information whenever available
+
+• distinguish facts, assumptions, and recommendations
+
+• interpret GIS data rather than listing it
+
+• use tables where appropriate
+
+• avoid generic consulting language
+
+• avoid repeating the conversation
+
+----------------------------
+
+The report should read like a document prepared by professional urban planning consultants.
+"""
+
+
+'''
 _RESEARCH_SYSTEM = (
     "You are a professional urban planning report writer. "
     "Generate a well-structured, data-driven report in clean Markdown. "
@@ -205,11 +363,43 @@ Be specific and professional. Reference the actual map data, drawn geometries, a
 
 ---
 """
-
+'''
 
 def _build_research_prompt(messages: list[dict], map_context: dict | None) -> str:
     """Build the deep research prompt from conversation history and map context."""
     parts = [_RESEARCH_REPORT_TEMPLATE]
+
+    # -------------------------------------------------------
+    # Detect report type from the conversation
+    # -------------------------------------------------------
+
+    conversation_text = " ".join(
+        m.get("content", "")
+        for m in messages
+        if m.get("role") == "user" and isinstance(m.get("content"), str)
+    ).lower()
+
+    report_type = "Professional Planning Report"
+
+    report_keywords = {
+        "mobility plan": "Comprehensive Mobility Plan",
+        "comprehensive mobility plan": "Comprehensive Mobility Plan",
+        "cmp": "Comprehensive Mobility Plan",
+        "traffic impact": "Traffic Impact Assessment",
+        "parking": "Parking Strategy",
+        "master plan": "Master Plan",
+        "land use": "Land Use Study",
+        "urban design": "Urban Design Report",
+        "road safety": "Road Safety Audit",
+        "infrastructure": "Infrastructure Assessment",
+    }
+
+    for keyword, name in report_keywords.items():
+        if keyword in conversation_text:
+            report_type = name
+            break
+
+    parts.append(f"# Requested Report Type\n\n{report_type}")
 
     if map_context:
         center = map_context.get("center", [])
