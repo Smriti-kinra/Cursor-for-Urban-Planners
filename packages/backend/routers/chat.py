@@ -34,6 +34,7 @@ from mcp_servers.google_places_server import GooglePlacesServer
 from mcp_servers.google_environment_server import GoogleEnvironmentServer
 from tools.utility import UtilityServer
 from tools.config import get_model as _get_model
+from tools.google import google_maps_key_var
 
 try:
     from shapely.geometry import shape as _shape
@@ -42,7 +43,8 @@ except ImportError:
 
 router = APIRouter()
 
-_client = AsyncOpenAI(api_key=os.environ.get("OPENAI_API_KEY", ""))
+_env_key = os.environ.get("OPENAI_API_KEY", "")
+_client = AsyncOpenAI(api_key=_env_key) if _env_key else None
 
 _servers = {
     "osm": OSMServer(),
@@ -1175,6 +1177,10 @@ async def chat_websocket(websocket: WebSocket):
             image_data = payload.get("image")  # {base64, mime_type} or None
             history_payload = payload.get("history")
             api_key = payload.get("api_key")
+            google_maps_api_key = payload.get("google_maps_api_key", "")
+
+            # Set the context-local variable for this WebSocket iteration
+            google_maps_key_var.set(google_maps_api_key)
 
             if not api_key or not api_key.strip():
                 await websocket.send_text(json.dumps({

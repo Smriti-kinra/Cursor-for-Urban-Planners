@@ -23,4 +23,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   importSpatialFiles: (workspacePath: string) => ipcRenderer.invoke('import-spatial-files', workspacePath),
   getAPIKey: () => ipcRenderer.invoke('get-api-key'),
   setAPIKey: (key: string) => ipcRenderer.invoke('set-api-key', key),
+  getGoogleMapsKey: () => ipcRenderer.invoke('get-google-maps-key'),
+  setGoogleMapsKey: (key: string) => ipcRenderer.invoke('set-google-maps-key', key),
 })

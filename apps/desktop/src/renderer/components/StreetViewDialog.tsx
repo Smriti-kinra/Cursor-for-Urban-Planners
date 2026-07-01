@@ -33,6 +33,13 @@ export default function StreetViewDialog({ target, onClose }: StreetViewDialogPr
   const [error, setError] = useState<string | null>(null)
   const viewerHostRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<{ destroy: () => void } | null>(null)
+  const [googleKey, setGoogleKey] = useState<string | null>(null)
+
+  useEffect(() => {
+    window.electronAPI.getGoogleMapsKey().then((key) => {
+      setGoogleKey(key || '')
+    })
+  }, [])
 
   // Escape to close.
   useEffect(() => {
@@ -44,28 +51,33 @@ export default function StreetViewDialog({ target, onClose }: StreetViewDialogPr
 
   // Fetch metadata when target changes.
   useEffect(() => {
-    if (!target) { setMeta(null); setError(null); return }
+    if (!target || googleKey === null) { setMeta(null); setError(null); return }
     let cancelled = false
     setLoading(true)
     setError(null)
     setMeta(null)
-    fetch(`${API}/meta?lat=${target.lat}&lng=${target.lng}`)
+    const headers: Record<string, string> = {}
+    if (googleKey) {
+      headers['x-google-maps-key'] = googleKey
+    }
+    fetch(`${API}/meta?lat=${target.lat}&lng=${target.lng}`, { headers })
       .then((r) => r.json())
       .then((d: StreetViewMeta) => { if (!cancelled) setMeta(d) })
       .catch((e) => { if (!cancelled) setError(String(e)) })
       .finally(() => { if (!cancelled) setLoading(false) })
     return () => { cancelled = true }
-  }, [target])
+  }, [target, googleKey])
 
   // Init pannellum when we have a found panorama. Request the pano image by
   // lat/lng (the backend rediscovers the panorama from coordinates).
   useEffect(() => {
-    if (!meta?.found || !target || !viewerHostRef.current) return
+    if (!meta?.found || !target || !viewerHostRef.current || googleKey === null) return
     if (!window.pannellum) { setError('360° viewer failed to load.'); return }
     const host = viewerHostRef.current
+    const keyQuery = googleKey ? `&google_maps_api_key=${encodeURIComponent(googleKey)}` : ''
     const viewer = window.pannellum.viewer(host, {
       type: 'equirectangular',
-      panorama: `${API}/pano?lat=${target.lat}&lng=${target.lng}&zoom=3`,
+      panorama: `${API}/pano?lat=${target.lat}&lng=${target.lng}&zoom=3${keyQuery}`,
       autoLoad: true,
       showControls: true,
       crossOrigin: 'anonymous',
@@ -75,7 +87,7 @@ export default function StreetViewDialog({ target, onClose }: StreetViewDialogPr
       try { viewer.destroy() } catch { /* ignore */ }
       viewerRef.current = null
     }
-  }, [meta, target])
+  }, [meta, target, googleKey])
 
   if (!target) return null
 

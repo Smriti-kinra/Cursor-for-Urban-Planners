@@ -878,8 +878,14 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     try {
       // Proxy through the backend — browsers can't set the User-Agent that
       // Nominatim's usage policy requires.
+      const googleKey = await window.electronAPI.getGoogleMapsKey()
+      const headers: Record<string, string> = {}
+      if (googleKey) {
+        headers['x-google-maps-key'] = googleKey
+      }
       const resp = await fetch(
         `http://localhost:8765/api/geocode?query=${encodeURIComponent(searchQuery)}&limit=5`,
+        { headers }
       )
       const data = await resp.json()
       const results: NominatimSearchResult[] = (data?.results || [])

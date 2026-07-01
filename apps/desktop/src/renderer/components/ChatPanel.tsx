@@ -254,6 +254,11 @@ export default function ChatPanel({
   const [keyError, setKeyError] = useState<string | null>(null)
   const [isKeyLoaded, setIsKeyLoaded] = useState(false)
 
+  // Google Maps API Key State
+  const [googleKey, setGoogleKey] = useState('')
+  const [isSavingGoogleKey, setIsSavingGoogleKey] = useState(false)
+  const [googleKeyError, setGoogleKeyError] = useState<string | null>(null)
+
   // Deep research state
   const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
   const [researchSteps, setResearchSteps] = useState<string[]>([])
@@ -299,6 +304,14 @@ export default function ChatPanel({
         console.error('Failed to load API key from secure storage:', err)
         setIsKeyLoaded(true)
         setShowApiKeyInput(true)
+      })
+
+    window.electronAPI.getGoogleMapsKey()
+      .then((key) => {
+        setGoogleKey(key || '')
+      })
+      .catch((err) => {
+        console.error('Failed to load Google Maps API key:', err)
       })
   }, [])
 
@@ -663,6 +676,32 @@ export default function ChatPanel({
     }
   }
 
+  const saveGoogleKey = async (keyToSave: string): Promise<boolean> => {
+    setIsSavingGoogleKey(true)
+    setGoogleKeyError(null)
+    try {
+      const ok = await window.electronAPI.setGoogleMapsKey(keyToSave)
+      if (ok) {
+        setGoogleKey(keyToSave)
+        setIsSavingGoogleKey(false)
+        return true
+      } else {
+        setGoogleKeyError('Failed to save key securely to system keychain.')
+      }
+    } catch (err) {
+      setGoogleKeyError('Failed to save key.')
+    }
+    setIsSavingGoogleKey(false)
+    return false
+  }
+
+  const clearGoogleKey = async () => {
+    const ok = await window.electronAPI.setGoogleMapsKey('')
+    if (ok) {
+      setGoogleKey('')
+    }
+  }
+
   const sendMessageDirect = async (text: string): Promise<void> => {
     if (!text.trim() || isStreaming || !activeConversation) return
 
@@ -699,6 +738,7 @@ export default function ChatPanel({
         content: userMessage.content,
         map_context: mapContext,
         api_key: apiKey,
+        google_maps_api_key: googleKey,
         image: documentImage
           ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
           : undefined,
@@ -843,62 +883,123 @@ export default function ChatPanel({
       {/* ── API Key Configuration Bar ── */}
       {isKeyLoaded && (
         <div className="api-key-config-bar">
-          {apiKey ? (
-            <div className="api-key-status success">
-              <span className="api-key-indicator green">●</span>
-              <span className="api-key-label">OpenAI API Key active</span>
-              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
-                {showApiKeyInput ? 'Hide' : 'Edit'}
-              </button>
-            </div>
-          ) : (
-            <div className="api-key-status warning">
-              <span className="api-key-indicator yellow">●</span>
-              <span className="api-key-label">OpenAI API Key required</span>
-              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
-                {showApiKeyInput ? 'Hide' : 'Configure'}
-              </button>
-            </div>
-          )}
+          <div className="api-key-status-row">
+            <div className="api-key-status-header">
+              <div className="api-key-status-indicators">
+                {apiKey ? (
+                  <div className="api-key-status success">
+                    <span className="api-key-indicator green">●</span>
+                    <span className="api-key-label">OpenAI API Key active</span>
+                  </div>
+                ) : (
+                  <div className="api-key-status warning">
+                    <span className="api-key-indicator yellow">●</span>
+                    <span className="api-key-label">OpenAI API Key required</span>
+                  </div>
+                )}
 
-          {showApiKeyInput && (
-            <div className="api-key-input-container">
-              <div className="api-key-input-wrapper">
-                <input
-                  type="password"
-                  className="api-key-input-field"
-                  defaultValue={apiKey}
-                  id="api-key-input-element"
-                  placeholder="sk-proj-..."
-                  disabled={isSavingKey}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') {
-                      const el = document.getElementById('api-key-input-element') as HTMLInputElement
-                      if (el) validateAndSaveKey(el.value)
-                    }
-                  }}
-                />
-                <button
-                  className="api-key-save-btn"
-                  onClick={() => {
-                    const el = document.getElementById('api-key-input-element') as HTMLInputElement
-                    if (el) validateAndSaveKey(el.value)
-                  }}
-                  disabled={isSavingKey}
-                >
-                  {isSavingKey ? 'Saving...' : 'Save'}
-                </button>
-                {apiKey && (
-                  <button
-                    className="api-key-clear-btn"
-                    onClick={clearApiKey}
-                    disabled={isSavingKey}
-                  >
-                    Clear
-                  </button>
+                {googleKey ? (
+                  <div className="api-key-status success">
+                    <span className="api-key-indicator green">●</span>
+                    <span className="api-key-label">Google Maps Key active</span>
+                  </div>
+                ) : (
+                  <div className="api-key-status info">
+                    <span className="api-key-indicator gray">●</span>
+                    <span className="api-key-label">Google Maps Key inactive (OSM fallback)</span>
+                  </div>
                 )}
               </div>
-              {keyError && <div className="api-key-error-msg">{keyError}</div>}
+
+              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
+                {showApiKeyInput ? 'Hide Settings' : 'Settings'}
+              </button>
+            </div>
+          </div>
+
+          {showApiKeyInput && (
+            <div className="settings-drawer-container">
+              {/* OpenAI Key Section */}
+              <div className="setting-field-group">
+                <label htmlFor="api-key-input-element" className="setting-field-label">OpenAI API Key (Required)</label>
+                <div className="api-key-input-wrapper">
+                  <input
+                    type="password"
+                    className="api-key-input-field"
+                    defaultValue={apiKey}
+                    id="api-key-input-element"
+                    placeholder="sk-proj-..."
+                    disabled={isSavingKey}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const el = document.getElementById('api-key-input-element') as HTMLInputElement
+                        if (el) validateAndSaveKey(el.value)
+                      }
+                    }}
+                  />
+                  <button
+                    className="api-key-save-btn"
+                    onClick={() => {
+                      const el = document.getElementById('api-key-input-element') as HTMLInputElement
+                      if (el) validateAndSaveKey(el.value)
+                    }}
+                    disabled={isSavingKey}
+                  >
+                    {isSavingKey ? 'Saving...' : 'Save'}
+                  </button>
+                  {apiKey && (
+                    <button
+                      className="api-key-clear-btn"
+                      onClick={clearApiKey}
+                      disabled={isSavingKey}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {keyError && <div className="api-key-error-msg">{keyError}</div>}
+              </div>
+
+              {/* Google Maps Key Section */}
+              <div className="setting-field-group">
+                <label htmlFor="google-key-input-element" className="setting-field-label">Google Maps API Key (Optional)</label>
+                <div className="api-key-input-wrapper">
+                  <input
+                    type="password"
+                    className="api-key-input-field"
+                    defaultValue={googleKey}
+                    id="google-key-input-element"
+                    placeholder="AIzaSy..."
+                    disabled={isSavingGoogleKey}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        const el = document.getElementById('google-key-input-element') as HTMLInputElement
+                        if (el) saveGoogleKey(el.value)
+                      }
+                    }}
+                  />
+                  <button
+                    className="api-key-save-btn"
+                    onClick={() => {
+                      const el = document.getElementById('google-key-input-element') as HTMLInputElement
+                      if (el) saveGoogleKey(el.value)
+                    }}
+                    disabled={isSavingGoogleKey}
+                  >
+                    {isSavingGoogleKey ? 'Saving...' : 'Save'}
+                  </button>
+                  {googleKey && (
+                    <button
+                      className="api-key-clear-btn"
+                      onClick={clearGoogleKey}
+                      disabled={isSavingGoogleKey}
+                    >
+                      Clear
+                    </button>
+                  )}
+                </div>
+                {googleKeyError && <div className="api-key-error-msg">{googleKeyError}</div>}
+              </div>
             </div>
           )}
         </div>

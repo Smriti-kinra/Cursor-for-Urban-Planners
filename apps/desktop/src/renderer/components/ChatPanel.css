@@ -1064,3 +1064,63 @@
 .chat-error-inline-save-btn:hover {
   opacity: 0.9;
 }
+
+/* ── Settings Drawer Expansion ── */
+.api-key-status-row {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  width: 100%;
+}
+
+.api-key-status-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  width: 100%;
+  border-bottom: 1px dashed var(--border);
+  padding-bottom: 4px;
+}
+
+.api-key-status-indicators {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  flex: 1;
+}
+
+.api-key-status.info {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.api-key-indicator.gray {
+  color: #a6adc8;
+}
+
+.settings-drawer-container {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 10px;
+  border: 1px solid var(--border);
+}
+
+.setting-field-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.setting-field-label {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}

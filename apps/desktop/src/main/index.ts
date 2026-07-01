@@ -77,6 +77,56 @@ function encryptAndSaveKey(key: string): boolean {
   }
 }
 
+// Google Maps API Key persistence with safeStorage encryption
+const GOOGLE_MAPS_KEY_CONFIG_PATH = path.join(
+  isDev ? path.resolve(process.cwd(), '.tmp') : app.getPath('userData'),
+  'google-maps-key.json'
+)
+
+function readAndDecryptGoogleMapsKey(): string {
+  try {
+    if (!fs.existsSync(GOOGLE_MAPS_KEY_CONFIG_PATH)) return ''
+    const config = JSON.parse(fs.readFileSync(GOOGLE_MAPS_KEY_CONFIG_PATH, 'utf-8'))
+    if (!config.key) return ''
+    if (config.encrypted && safeStorage.isEncryptionAvailable()) {
+      const encryptedBuffer = Buffer.from(config.key, 'hex')
+      return safeStorage.decryptString(encryptedBuffer)
+    } else if (!config.encrypted) {
+      return Buffer.from(config.key, 'base64').toString('utf-8')
+    }
+    return ''
+  } catch (err) {
+    console.error('Failed to read/decrypt Google Maps API key:', err)
+    return ''
+  }
+}
+
+function encryptAndSaveGoogleMapsKey(key: string): boolean {
+  try {
+    if (!key || !key.trim()) {
+      if (fs.existsSync(GOOGLE_MAPS_KEY_CONFIG_PATH)) {
+        fs.unlinkSync(GOOGLE_MAPS_KEY_CONFIG_PATH)
+      }
+      return true
+    }
+
+    let storedValue: string
+    const useEncryption = safeStorage.isEncryptionAvailable()
+    if (useEncryption) {
+      const encryptedBuffer = safeStorage.encryptString(key.trim())
+      storedValue = encryptedBuffer.toString('hex')
+    } else {
+      storedValue = Buffer.from(key.trim()).toString('base64')
+    }
+    fs.mkdirSync(path.dirname(GOOGLE_MAPS_KEY_CONFIG_PATH), { recursive: true })
+    fs.writeFileSync(GOOGLE_MAPS_KEY_CONFIG_PATH, JSON.stringify({ key: storedValue, encrypted: useEncryption }))
+    return true
+  } catch (err) {
+    console.error('Failed to encrypt/save Google Maps API key:', err)
+    return false
+  }
+}
+
 interface ModelConfig {
   id: string
   name: string
@@ -162,6 +212,8 @@ ipcMain.handle('get-last-workspace', () => readLastWorkspace())
 ipcMain.handle('set-last-workspace', (_e, p: string | null) => writeLastWorkspace(p))
 ipcMain.handle('get-api-key', () => readAndDecryptKey())
 ipcMain.handle('set-api-key', (_e, key: string) => encryptAndSaveKey(key))
+ipcMain.handle('get-google-maps-key', () => readAndDecryptGoogleMapsKey())
+ipcMain.handle('set-google-maps-key', (_e, key: string) => encryptAndSaveGoogleMapsKey(key))
 
 // Open file dialog (for document mode)
 ipcMain.handle('open-file', async (_e, opts: { filters?: { name: string; extensions: string[] }[] }) => {

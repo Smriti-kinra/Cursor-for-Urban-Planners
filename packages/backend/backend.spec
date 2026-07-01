@@ -1,13 +1,18 @@
 # -*- mode: python ; coding: utf-8 -*-
 # Build with: source .buildenv/bin/activate && pyinstaller backend.spec --noconfirm
 
+from PyInstaller.utils.hooks import collect_data_files, collect_dynamic_libs
+
 block_cipher = None
+
+datas = collect_data_files('pyexiv2')
+binaries = collect_dynamic_libs('pyexiv2')
 
 a = Analysis(
     ['cli.py'],
     pathex=[],
-    binaries=[],
-    datas=[],
+    binaries=binaries,
+    datas=datas,
     hiddenimports=[
         'uvicorn.logging',
         'uvicorn.loops',

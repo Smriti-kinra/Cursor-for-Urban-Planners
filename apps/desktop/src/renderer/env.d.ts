@@ -30,6 +30,8 @@ declare global {
     importSpatialFiles: (workspacePath: string) => Promise<string[]>
     getAPIKey: () => Promise<string>
     setAPIKey: (key: string) => Promise<boolean>
+    getGoogleMapsKey: () => Promise<string>
+    setGoogleMapsKey: (key: string) => Promise<boolean>
   }
 
   interface Window {

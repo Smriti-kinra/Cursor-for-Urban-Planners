@@ -1348,38 +1348,44 @@ function App() {
       // Place immediately with a coordinate label, then upgrade to the
       // reverse-geocoded address when it resolves. Never block the pin.
       addAiMarkersToGroup([{ lng, lat, label: `${lat.toFixed(5)}, ${lng.toFixed(5)}` }])
-      fetch(`http://localhost:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`)
-        .then((r) => r.json())
-        .then((d: { display_name?: string | null }) => {
-          if (!d?.display_name) return
-          setLayers((prev) =>
-            prev.map((l) => {
-              const feature = l.data?.features?.[0]
-              const g = feature?.geometry
-              if (
-                feature?.properties?.source !== 'ai_marker' ||
-                g?.type !== 'Point' ||
-                g.coordinates[0] !== lng ||
-                g.coordinates[1] !== lat
-              ) {
-                return l
-              }
-              dirtyLayerIdsRef.current.add(l.id)
-              return {
-                ...l,
-                name: d.display_name,
-                data: {
-                  type: 'FeatureCollection',
-                  features: [{
-                    ...feature,
-                    properties: { ...feature.properties, label: d.display_name },
-                  }],
-                } as FeatureCollection,
-              }
-            }),
-          )
-        })
-        .catch(() => { /* keep coordinate label */ })
+      window.electronAPI.getGoogleMapsKey().then((googleKey) => {
+        const headers: Record<string, string> = {}
+        if (googleKey) {
+          headers['x-google-maps-key'] = googleKey
+        }
+        fetch(`http://localhost:8765/api/geocode/reverse?lat=${lat}&lng=${lng}`, { headers })
+          .then((r) => r.json())
+          .then((d: { display_name?: string | null }) => {
+            if (!d?.display_name) return
+            setLayers((prev) =>
+              prev.map((l) => {
+                const feature = l.data?.features?.[0]
+                const g = feature?.geometry
+                if (
+                  feature?.properties?.source !== 'ai_marker' ||
+                  g?.type !== 'Point' ||
+                  g.coordinates[0] !== lng ||
+                  g.coordinates[1] !== lat
+                ) {
+                  return l
+                }
+                dirtyLayerIdsRef.current.add(l.id)
+                return {
+                  ...l,
+                  name: d.display_name,
+                  data: {
+                    type: 'FeatureCollection',
+                    features: [{
+                      ...feature,
+                      properties: { ...feature.properties, label: d.display_name },
+                    }],
+                  } as FeatureCollection,
+                }
+              }),
+            )
+          })
+          .catch(() => { /* keep coordinate label */ })
+      }).catch(() => { /* keep coordinate label */ })
     },
     [addAiMarkersToGroup],
   )

@@ -18,9 +18,13 @@ each tool can announce itself unavailable at execute-time.
 from __future__ import annotations
 
 import os
+from contextvars import ContextVar
 from typing import Any
 
 from tools import http as http_client
+
+# Context-local variable for request-specific Google Maps API Key passed from the frontend
+google_maps_key_var: ContextVar[str] = ContextVar("google_maps_key", default="")
 
 
 class GoogleUnavailable(RuntimeError):
@@ -33,7 +37,9 @@ class GoogleUnavailable(RuntimeError):
 
 def _api_key() -> str | None:
     """Read the API key fresh every call. Returns ``None`` if unset/blank."""
-    key = (os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
+    key = google_maps_key_var.get().strip()
+    if not key:
+        key = (os.environ.get("GOOGLE_MAPS_API_KEY") or "").strip()
     return key or None
 
 

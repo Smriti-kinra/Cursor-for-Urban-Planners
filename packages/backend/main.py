@@ -24,6 +24,21 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(title="Cursor Urban Planners API", lifespan=lifespan)
 
+from fastapi import Request
+from tools.google import google_maps_key_var
+
+@app.middleware("http")
+async def extract_google_maps_key(request: Request, call_next):
+    key = request.headers.get("x-google-maps-key", "")
+    if not key:
+        key = request.query_params.get("google_maps_api_key", "")
+    token = google_maps_key_var.set(key)
+    try:
+        response = await call_next(request)
+        return response
+    finally:
+        google_maps_key_var.reset(token)
+
 # Allow only loopback origins. The renderer runs as a file:// or
 # http://localhost:* and the Electron preload bridges all other channels.
 # Wide-open CORS would let any browser tab on the user's machine hit the
