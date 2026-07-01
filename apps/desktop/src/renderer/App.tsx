@@ -804,72 +804,7 @@ function App() {
     setActiveLeftTab('layers')
   }, [])
 
-<<<<<<< HEAD
-  // Append-merge single marker pins into the canonical "AI Markers" layer.
-  // Multi-marker AI requests use addGroupedMarkersToLayers below.
-  const appendMarkersToLayer = useCallback(
-    (markers: MarkerInput[]) => {
-      if (!markers.length) return
-      const newFeatures: Feature[] = markers
-        .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
-        .map(markerFeature)
-      if (!newFeatures.length) return
-      setLayers((prev) => {
-        const idx = prev.findIndex(
-          (l) => l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase(),
-        )
-        if (idx >= 0) {
-          const existing = prev[idx]
-          dirtyLayerIdsRef.current.add(existing.id)
-          const merged = {
-            ...existing,
-            visible: true,
-            data: {
-              type: 'FeatureCollection',
-              features: [...(existing.data?.features || []), ...newFeatures],
-            } as FeatureCollection,
-          }
-          const next = [...prev]
-          next[idx] = merged
-          return next
-        }
-        const newId = `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
-        dirtyLayerIdsRef.current.add(newId)
-        const layerColor = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
-        colorIndexRef.current++
-        const defaultStyleSpec = {
-          mode: 'simple' as const,
-          label: {
-            enabled: true,
-            property: 'label',
-            size: 12,
-            color: '#1e1e2e',
-            haloColor: '#ffffff',
-            minZoom: 0,
-          }
-        }
-        return [
-          ...prev,
-          {
-            id: newId,
-            name: AI_MARKERS_LAYER,
-            filePath: '',
-            visible: true,
-            data: { type: 'FeatureCollection', features: newFeatures } as FeatureCollection,
-            color: layerColor,
-            styleSpec: defaultStyleSpec,
-          },
-        ]
-      })
-      setActiveLeftTab('pins')
-    },
-    [],
-  )
-
-  const addGroupedMarkersToLayers = useCallback((markers: MarkerInput[]) => {
-=======
   const addAiMarkersToGroup = useCallback((markers: MarkerInput[]) => {
->>>>>>> refs/remotes/origin/main
     const features = markers
       .filter((m) => Number.isFinite(m.lat) && Number.isFinite(m.lng))
       .map(markerFeature)

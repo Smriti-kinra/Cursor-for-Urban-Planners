@@ -3,10 +3,15 @@
   "version": "0.1.0",
   "private": true,
   "main": "./out/main/index.js",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Smriti-kinra/Cursor-for-Urban-Planners.git"
+  },
   "scripts": {
     "dev": "electron-vite dev",
     "build": "electron-vite build",
-    "package": "electron-vite build && electron-builder"
+    "package": "electron-vite build && electron-builder",
+    "release:mac": "electron-vite build && electron-builder --mac --publish always"
   },
   "dependencies": {
     "@turf/turf": "^7.3.4",
