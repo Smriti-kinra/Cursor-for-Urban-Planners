@@ -16,6 +16,7 @@ import sys
 from pathlib import Path
 
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
+from pydantic import BaseModel
 from openai import AsyncOpenAI
 
 # Make sure backend package is importable
@@ -460,7 +461,7 @@ def _build_research_prompt(messages: list[dict], map_context: dict | None) -> st
     return "\n\n".join(parts)
 
 
-async def _run_deep_research(messages: list[dict], map_context: dict | None, ws: WebSocket) -> str:
+async def _run_deep_research(messages: list[dict], map_context: dict | None, ws: WebSocket, client: AsyncOpenAI | None = None) -> str:
     """Run o4-mini-deep-research and stream progress back over the WebSocket.
 
     Sends these WS message types:
@@ -494,7 +495,8 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
         search_count = 0
         last_heartbeat = asyncio.get_event_loop().time()
 
-        stream = await _client.responses.create(
+        openai_client = client or _client
+        stream = await openai_client.responses.create(
             model="o4-mini-deep-research",
             input=prompt,
             instructions=_RESEARCH_SYSTEM,
@@ -810,9 +812,10 @@ async def _execute_tool(
     ws: WebSocket,
     messages: list[dict] | None = None,
     map_context: dict | None = None,
+    client: AsyncOpenAI | None = None,
 ) -> str:
     if name == "generate_report":
-        return await _run_deep_research(messages or [], map_context, ws)
+        return await _run_deep_research(messages or [], map_context, ws, client=client)
 
     # Map action tools → send directly to frontend
     if name in _ACTION_TOOLS:
@@ -1028,6 +1031,7 @@ async def _execute_tool(
 async def _run_agent(
     messages: list[dict],
     ws: WebSocket,
+    client: AsyncOpenAI,
     tools: list[dict] | None = None,
     map_context: dict | None = None,
 ) -> None:
@@ -1042,7 +1046,7 @@ async def _run_agent(
         finish_reason = None
 
         try:
-            stream = await _client.chat.completions.create(
+            stream = await client.chat.completions.create(
                 model=_get_model(),
                 messages=messages,
                 tools=tools if tools else None,
@@ -1126,7 +1130,7 @@ async def _run_agent(
                     "detail": args_error,
                 })
             else:
-                result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context)
+                result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context, client=client)
             messages.append({
                 "role": "tool",
                 "tool_call_id": tc["id"],
@@ -1135,6 +1139,22 @@ async def _run_agent(
 
         if finish_reason == "stop":
             break
+
+
+class ValidateKeyRequest(BaseModel):
+    api_key: str
+
+@router.post("/validate-key")
+async def validate_key(req: ValidateKeyRequest):
+    try:
+        if not req.api_key or not req.api_key.strip():
+            return {"valid": False, "error": "API Key is empty."}
+        # Lightweight check to validate key
+        temp_client = AsyncOpenAI(api_key=req.api_key.strip())
+        await temp_client.models.list()
+        return {"valid": True}
+    except Exception as e:
+        return {"valid": False, "error": str(e)}
 
 
 # ── WebSocket handler ─────────────────────────────────────────────────────────
@@ -1154,6 +1174,18 @@ async def chat_websocket(websocket: WebSocket):
             map_context = payload.get("map_context")
             image_data = payload.get("image")  # {base64, mime_type} or None
             history_payload = payload.get("history")
+            api_key = payload.get("api_key")
+
+            if not api_key or not api_key.strip():
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "code": "auth",
+                    "message": "OpenAI API key is missing. Please configure your API key in the settings panel."
+                }))
+                await websocket.send_text(json.dumps({"type": "end"}))
+                continue
+
+            client = AsyncOpenAI(api_key=api_key.strip())
 
             if not user_content.strip():
                 continue
@@ -1199,7 +1231,7 @@ async def chat_websocket(websocket: WebSocket):
             full_messages = [{"role": "system", "content": system}] + messages
             full_messages.append(user_msg)
 
-            await _run_agent(full_messages, websocket, tools=tools, map_context=map_context)
+            await _run_agent(full_messages, websocket, client, tools=tools, map_context=map_context)
 
             # Persist exchange into history, but strip system + image data (keep history lean)
             new_history = []

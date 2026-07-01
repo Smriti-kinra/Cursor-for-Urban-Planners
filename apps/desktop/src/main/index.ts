@@ -1,4 +1,4 @@
-import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net } from 'electron'
+import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage } from 'electron'
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
@@ -25,6 +25,56 @@ function writeLastWorkspace(p: string | null): void {
     fs.mkdirSync(path.dirname(LAST_WORKSPACE_PATH), { recursive: true })
     fs.writeFileSync(LAST_WORKSPACE_PATH, JSON.stringify({ path: p }))
   } catch { /* ignore */ }
+}
+
+// API Key persistence with safeStorage encryption
+const API_KEY_CONFIG_PATH = path.join(
+  isDev ? path.resolve(process.cwd(), '.tmp') : app.getPath('userData'),
+  'api-key.json'
+)
+
+function readAndDecryptKey(): string {
+  try {
+    if (!fs.existsSync(API_KEY_CONFIG_PATH)) return ''
+    const config = JSON.parse(fs.readFileSync(API_KEY_CONFIG_PATH, 'utf-8'))
+    if (!config.key) return ''
+    if (config.encrypted && safeStorage.isEncryptionAvailable()) {
+      const encryptedBuffer = Buffer.from(config.key, 'hex')
+      return safeStorage.decryptString(encryptedBuffer)
+    } else if (!config.encrypted) {
+      return Buffer.from(config.key, 'base64').toString('utf-8')
+    }
+    return ''
+  } catch (err) {
+    console.error('Failed to read/decrypt API key:', err)
+    return ''
+  }
+}
+
+function encryptAndSaveKey(key: string): boolean {
+  try {
+    if (!key || !key.trim()) {
+      if (fs.existsSync(API_KEY_CONFIG_PATH)) {
+        fs.unlinkSync(API_KEY_CONFIG_PATH)
+      }
+      return true
+    }
+
+    let storedValue: string
+    const useEncryption = safeStorage.isEncryptionAvailable()
+    if (useEncryption) {
+      const encryptedBuffer = safeStorage.encryptString(key.trim())
+      storedValue = encryptedBuffer.toString('hex')
+    } else {
+      storedValue = Buffer.from(key.trim()).toString('base64')
+    }
+    fs.mkdirSync(path.dirname(API_KEY_CONFIG_PATH), { recursive: true })
+    fs.writeFileSync(API_KEY_CONFIG_PATH, JSON.stringify({ key: storedValue, encrypted: useEncryption }))
+    return true
+  } catch (err) {
+    console.error('Failed to encrypt/save API key:', err)
+    return false
+  }
 }
 
 interface ModelConfig {
@@ -110,6 +160,8 @@ async function waitForBackend(retries = 30, delay = 500): Promise<boolean> {
 // Workspace persistence IPC
 ipcMain.handle('get-last-workspace', () => readLastWorkspace())
 ipcMain.handle('set-last-workspace', (_e, p: string | null) => writeLastWorkspace(p))
+ipcMain.handle('get-api-key', () => readAndDecryptKey())
+ipcMain.handle('set-api-key', (_e, key: string) => encryptAndSaveKey(key))
 
 // Open file dialog (for document mode)
 ipcMain.handle('open-file', async (_e, opts: { filters?: { name: string; extensions: string[] }[] }) => {

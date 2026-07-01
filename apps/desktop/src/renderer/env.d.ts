@@ -28,6 +28,8 @@ declare global {
     getCurrentModel: () => Promise<string>
     switchModel: (model: string) => Promise<{ ok: boolean; requiresManualRestart: boolean }>
     importSpatialFiles: (workspacePath: string) => Promise<string[]>
+    getAPIKey: () => Promise<string>
+    setAPIKey: (key: string) => Promise<boolean>
   }
 
   interface Window {

@@ -196,6 +196,7 @@ interface ChatPanelProps {
   onMapAction: (action: MapAction) => void
   documentImage?: DocumentImage | null
   injectedMessage?: { text: string; nonce: number } | null
+  onComposeMapFigure?: (title: string) => HTMLCanvasElement | null
 }
 
 function CodePre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
@@ -234,6 +235,7 @@ export default function ChatPanel({
   onMapAction,
   documentImage,
   injectedMessage,
+  onComposeMapFigure,
 }: ChatPanelProps) {
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
@@ -244,6 +246,13 @@ export default function ChatPanel({
   const [isSwitchingModel, setIsSwitchingModel] = useState(false)
   const [chatError, setChatError] = useState<ChatErrorMessage | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>(() => pickSuggestions(3))
+
+  // API Key State
+  const [apiKey, setApiKey] = useState('')
+  const [showApiKeyInput, setShowApiKeyInput] = useState(false)
+  const [isSavingKey, setIsSavingKey] = useState(false)
+  const [keyError, setKeyError] = useState<string | null>(null)
+  const [isKeyLoaded, setIsKeyLoaded] = useState(false)
 
   // Deep research state
   const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
@@ -276,6 +285,22 @@ export default function ChatPanel({
   onMessagesChangeRef.current = onMessagesChange
   const onMapActionRef = useRef(onMapAction)
   onMapActionRef.current = onMapAction
+
+  useEffect(() => {
+    window.electronAPI.getAPIKey()
+      .then((key) => {
+        setApiKey(key || '')
+        setIsKeyLoaded(true)
+        if (!key) {
+          setShowApiKeyInput(true)
+        }
+      })
+      .catch((err) => {
+        console.error('Failed to load API key from secure storage:', err)
+        setIsKeyLoaded(true)
+        setShowApiKeyInput(true)
+      })
+  }, [])
 
   useEffect(() => {
     if (activeConversation && pendingInputRef.current) {
@@ -484,6 +509,45 @@ export default function ChatPanel({
     }
 
     const lines = md.split('\n')
+    let mapInserted = false
+    const hasHeader = lines.some((l) => l.trimStart().startsWith('# '))
+
+    const insertMap = () => {
+      if (mapInserted || !onComposeMapFigure) return
+      const figure = onComposeMapFigure(activeConversation?.title || 'Project Map')
+      if (!figure) return
+      try {
+        const img = figure.toDataURL('image/png')
+        const aspect = figure.height > 0 ? figure.width / figure.height : 1.6
+        const drawW = maxLineWidth
+        const drawH = drawW / aspect
+
+        checkY(drawH + 34)
+        doc.addImage(img, 'PNG', margin, y, drawW, drawH)
+        y += drawH + 12
+
+        // Compile dynamic caption showing active conversation title and visible layers
+        const visibleLayers = (mapContext.layers || [])
+          .filter((l) => l.visible)
+          .map((l) => l.name)
+        const conversationTitle = activeConversation?.title || 'Urban Project'
+        const layersPart = visibleLayers.length > 0
+          ? ` showing active layers: ${visibleLayers.join(', ')}`
+          : ' with no active layers'
+        const caption = `Figure 1: Composed Map for "${conversationTitle}"${layersPart}.`
+
+        writeWrapped(caption, 9, 'italic', 12)
+        y += 16
+      } catch (err) {
+        console.error('Failed to add map image to PDF:', err)
+      }
+      mapInserted = true
+    }
+
+    if (!hasHeader) {
+      insertMap()
+    }
+
     for (let i = 0; i < lines.length; i++) {
       const raw = lines[i].replace(/\s+$/, '')
       const line = raw.trimStart()
@@ -529,6 +593,8 @@ export default function ChatPanel({
         y += 8; writeWrapped(stripInline(line.slice(3)), 16, 'bold', 21)
       } else if (line.startsWith('# ')) {
         y += 8; writeWrapped(stripInline(line.slice(2)), 20, 'bold', 27)
+        y += 12
+        insertMap()
       } else if (/^>\s?/.test(line)) {
         writeWrapped(stripInline(line.replace(/^>\s?/, '')), 11, 'italic', 14, 16)
       } else if (/^(\s*)([-*+])\s+/.test(raw)) {
@@ -545,7 +611,7 @@ export default function ChatPanel({
       }
     }
     doc.save(`urban-planning-report-${Date.now()}.pdf`)
-  }, [])
+  }, [onComposeMapFigure, activeConversation, mapContext])
 
   useEffect(() => {
     setResearchPhase('idle')
@@ -556,6 +622,46 @@ export default function ChatPanel({
     setResearchReasoning('')
     reportMdRef.current = ''
   }, [activeConversation?.id])
+
+  const validateAndSaveKey = async (keyToSave: string): Promise<boolean> => {
+    setIsSavingKey(true)
+    setKeyError(null)
+    try {
+      const res = await fetch('http://localhost:8765/api/chat/validate-key', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ api_key: keyToSave }),
+      })
+      const data = await res.json()
+      if (data.valid) {
+        const ok = await window.electronAPI.setAPIKey(keyToSave)
+        if (ok) {
+          setApiKey(keyToSave)
+          setShowApiKeyInput(false)
+          setChatError(null)
+          setIsSavingKey(false)
+          return true
+        } else {
+          setKeyError('Failed to save key securely to system keychain.')
+        }
+      } else {
+        setKeyError(data.error || 'Invalid API Key. Please verify and try again.')
+      }
+    } catch (err) {
+      setKeyError('Could not reach verification server. Make sure the backend is running.')
+    }
+    setIsSavingKey(false)
+    return false
+  }
+
+  const clearApiKey = async () => {
+    const ok = await window.electronAPI.setAPIKey('')
+    if (ok) {
+      setApiKey('')
+      setShowApiKeyInput(true)
+      setChatError(null)
+    }
+  }
 
   const sendMessageDirect = async (text: string): Promise<void> => {
     if (!text.trim() || isStreaming || !activeConversation) return
@@ -592,6 +698,7 @@ export default function ChatPanel({
       const payload: Record<string, unknown> = {
         content: userMessage.content,
         map_context: mapContext,
+        api_key: apiKey,
         image: documentImage
           ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
           : undefined,
@@ -618,6 +725,15 @@ export default function ChatPanel({
 
   const sendMessage = async (): Promise<void> => {
     if (!input.trim() || isStreaming) return
+
+    if (!apiKey.trim()) {
+      setShowApiKeyInput(true)
+      setChatError({
+        code: 'auth',
+        message: 'An OpenAI API Key is required. Please configure your key in the settings panel above.',
+      })
+      return
+    }
 
     if (!activeConversation) {
       pendingInputRef.current = input.trim()
@@ -724,6 +840,70 @@ export default function ChatPanel({
         </button>
       </div>
 
+      {/* ── API Key Configuration Bar ── */}
+      {isKeyLoaded && (
+        <div className="api-key-config-bar">
+          {apiKey ? (
+            <div className="api-key-status success">
+              <span className="api-key-indicator green">●</span>
+              <span className="api-key-label">OpenAI API Key active</span>
+              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
+                {showApiKeyInput ? 'Hide' : 'Edit'}
+              </button>
+            </div>
+          ) : (
+            <div className="api-key-status warning">
+              <span className="api-key-indicator yellow">●</span>
+              <span className="api-key-label">OpenAI API Key required</span>
+              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
+                {showApiKeyInput ? 'Hide' : 'Configure'}
+              </button>
+            </div>
+          )}
+
+          {showApiKeyInput && (
+            <div className="api-key-input-container">
+              <div className="api-key-input-wrapper">
+                <input
+                  type="password"
+                  className="api-key-input-field"
+                  defaultValue={apiKey}
+                  id="api-key-input-element"
+                  placeholder="sk-proj-..."
+                  disabled={isSavingKey}
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const el = document.getElementById('api-key-input-element') as HTMLInputElement
+                      if (el) validateAndSaveKey(el.value)
+                    }
+                  }}
+                />
+                <button
+                  className="api-key-save-btn"
+                  onClick={() => {
+                    const el = document.getElementById('api-key-input-element') as HTMLInputElement
+                    if (el) validateAndSaveKey(el.value)
+                  }}
+                  disabled={isSavingKey}
+                >
+                  {isSavingKey ? 'Saving...' : 'Save'}
+                </button>
+                {apiKey && (
+                  <button
+                    className="api-key-clear-btn"
+                    onClick={clearApiKey}
+                    disabled={isSavingKey}
+                  >
+                    Clear
+                  </button>
+                )}
+              </div>
+              {keyError && <div className="api-key-error-msg">{keyError}</div>}
+            </div>
+          )}
+        </div>
+      )}
+
       {/* ── Conversation history dropdown ── */}
       {showHistory && (
         <div className="chat-history-list">
@@ -767,8 +947,35 @@ export default function ChatPanel({
       {/* ── Error banner ── */}
       {chatError && (
         <div className={`chat-error chat-error-${chatError.code}`} role="alert">
-          <span className="chat-error-code">{chatError.code}</span>
-          <span className="chat-error-msg">{chatError.message}</span>
+          <div className="chat-error-content-wrapper">
+            <span className="chat-error-code">{chatError.code}</span>
+            <span className="chat-error-msg">{chatError.message}</span>
+            {(chatError.code === 'auth' || chatError.code === 'rate_limit') && (
+              <div className="chat-error-inline-form">
+                <input
+                  type="password"
+                  className="chat-error-inline-input"
+                  id="chat-error-inline-input-element"
+                  placeholder="Enter new API key (sk-proj-...)"
+                  onKeyDown={(e) => {
+                    if (e.key === 'Enter') {
+                      const el = document.getElementById('chat-error-inline-input-element') as HTMLInputElement
+                      if (el) validateAndSaveKey(el.value)
+                    }
+                  }}
+                />
+                <button
+                  className="chat-error-inline-save-btn"
+                  onClick={() => {
+                    const el = document.getElementById('chat-error-inline-input-element') as HTMLInputElement
+                    if (el) validateAndSaveKey(el.value)
+                  }}
+                >
+                  Save
+                </button>
+              </div>
+            )}
+          </div>
           <button
             className="chat-error-dismiss"
             onClick={() => setChatError(null)}
@@ -870,10 +1077,13 @@ export default function ChatPanel({
             onChange={handleInputChange}
             onKeyDown={handleKeyDown}
             placeholder={
-              activeConversation
+              !apiKey.trim()
+                ? 'Please configure your OpenAI API Key above to start...'
+                : activeConversation
                 ? 'Ask anything about your project...'
                 : 'Start a new conversation...'
             }
+            disabled={!apiKey.trim()}
             rows={1}
           />
           <button

@@ -1993,6 +1993,7 @@ function App() {
                 onMapAction={handleMapAction}
                 documentImage={appMode === 'document' ? documentImage : null}
                 injectedMessage={injectedMessage}
+                onComposeMapFigure={composeMapFigure}
               />
             </ErrorBoundary>
           ) : (

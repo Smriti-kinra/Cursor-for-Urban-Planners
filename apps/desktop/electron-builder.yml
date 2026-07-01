@@ -9,6 +9,7 @@ mac:
   target:
     - zip
   category: public.app-category.developer-tools
+  artifactName: "Cursor-for-Urban-Planners-${version}-${arch}.${ext}"
 win:
   target:
     - nsis

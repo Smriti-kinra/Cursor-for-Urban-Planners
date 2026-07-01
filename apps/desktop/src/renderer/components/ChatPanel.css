@@ -892,3 +892,175 @@
 .citation-link:hover {
   text-decoration: underline;
 }
+
+/* ── API Key Configuration Bar ── */
+.api-key-config-bar {
+  background: var(--bg-surface);
+  border-bottom: 1px solid var(--border);
+  padding: 8px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  flex-shrink: 0;
+}
+
+.api-key-status {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 12px;
+  font-weight: 500;
+}
+
+.api-key-indicator {
+  font-size: 8px;
+  line-height: 1;
+}
+
+.api-key-indicator.green {
+  color: var(--success);
+}
+
+.api-key-indicator.yellow {
+  color: var(--warning);
+}
+
+.api-key-label {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.api-key-toggle-btn {
+  background: var(--bg-hover);
+  color: var(--accent);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-key-toggle-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+}
+
+.api-key-input-container {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  background: rgba(0, 0, 0, 0.15);
+  border-radius: 8px;
+  padding: 8px;
+  border: 1px solid var(--border);
+}
+
+.api-key-input-wrapper {
+  display: flex;
+  gap: 6px;
+}
+
+.api-key-input-field {
+  flex: 1;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  border-radius: 6px;
+  padding: 6px 10px;
+  font-size: 12px;
+  outline: none;
+  font-family: monospace;
+}
+
+.api-key-input-field:focus {
+  border-color: var(--accent);
+}
+
+.api-key-save-btn {
+  background: var(--accent);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.api-key-save-btn:hover {
+  opacity: 0.9;
+}
+
+.api-key-clear-btn {
+  background: rgba(243, 139, 168, 0.1);
+  color: var(--danger);
+  border: 1px solid transparent;
+  border-radius: 6px;
+  padding: 6px 12px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s ease;
+}
+
+.api-key-clear-btn:hover {
+  background: var(--danger);
+  color: #fff;
+}
+
+.api-key-error-msg {
+  font-size: 11px;
+  color: var(--danger);
+  margin-top: 2px;
+}
+
+/* ── Inline form within Error Banner ── */
+.chat-error-content-wrapper {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  align-items: flex-start;
+}
+
+.chat-error-inline-form {
+  display: flex;
+  gap: 6px;
+  width: 100%;
+  margin-top: 4px;
+}
+
+.chat-error-inline-input {
+  flex: 1;
+  background: rgba(0, 0, 0, 0.2);
+  border: 1px solid rgba(243, 139, 168, 0.4);
+  color: #fff;
+  border-radius: 6px;
+  padding: 4px 8px;
+  font-size: 12px;
+  outline: none;
+  font-family: monospace;
+}
+
+.chat-error-inline-input:focus {
+  border-color: #f38ba8;
+}
+
+.chat-error-inline-save-btn {
+  background: #f38ba8;
+  color: #11111b;
+  border: none;
+  border-radius: 6px;
+  padding: 4px 10px;
+  font-size: 12px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: opacity 0.15s ease;
+}
+
+.chat-error-inline-save-btn:hover {
+  opacity: 0.9;
+}

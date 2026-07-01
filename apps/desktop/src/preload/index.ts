@@ -21,4 +21,6 @@ contextBridge.exposeInMainWorld('electronAPI', {
   getCurrentModel: () => ipcRenderer.invoke('get-current-model'),
   switchModel: (model: string) => ipcRenderer.invoke('switch-model', model),
   importSpatialFiles: (workspacePath: string) => ipcRenderer.invoke('import-spatial-files', workspacePath),
+  getAPIKey: () => ipcRenderer.invoke('get-api-key'),
+  setAPIKey: (key: string) => ipcRenderer.invoke('set-api-key', key),
 })
