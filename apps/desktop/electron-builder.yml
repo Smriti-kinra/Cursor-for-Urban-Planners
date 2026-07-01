@@ -14,7 +14,7 @@ win:
     - nsis
     - portable
 extraResources:
-  - from: ../../packages/backend/dist/
+  - from: ../../packages/backend/dist/backend
     to: backend
     filter:
       - "**/*"
