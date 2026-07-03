@@ -1,0 +1,96 @@
+name: Release App
+
+on:
+  push:
+    tags:
+      - 'v*'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  build-mac:
+    name: Build & Release macOS
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          cd packages/backend
+          python -m venv .buildenv
+          source .buildenv/bin/activate
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Install Node dependencies
+        run: pnpm install
+
+      - name: Build & Publish macOS Release
+        run: pnpm run release:mac
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  build-win:
+    name: Build & Release Windows
+    runs-on: windows-latest
+    needs: build-mac  # Run sequentially to prevent race conditions on delete-github-assets.js
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Node.js
+        uses: actions/setup-node@v4
+        with:
+          node-version: 20
+
+      - name: Install pnpm
+        uses: pnpm/action-setup@v3
+        with:
+          version: 9
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+
+      - name: Install Python dependencies
+        run: |
+          cd packages/backend
+          python -m venv .buildenv
+          .\.buildenv\Scripts\python.exe -m pip install --upgrade pip
+          .\.buildenv\Scripts\python.exe -m pip install -r requirements.txt
+
+      - name: Install Node dependencies
+        run: pnpm install
+
+      - name: Build Backend
+        run: pnpm run build:backend
+
+      - name: Publish Windows Release
+        run: pnpm --filter @cursor-urban/desktop release:win
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
