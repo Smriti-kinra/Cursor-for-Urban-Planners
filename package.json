@@ -13,9 +13,10 @@
     "dev:desktop": "pnpm --filter @cursor-urban/desktop dev",
     "dev:backend": "cd packages/backend && source .buildenv/bin/activate && python -m uvicorn main:app --reload --port 8765",
     "build": "pnpm --filter @cursor-urban/desktop build",
-    "build:backend": "cd packages/backend && source .buildenv/bin/activate && pyinstaller backend.spec --noconfirm",
+    "build:backend": "node scripts/build-backend.js",
     "package": "pnpm run build:backend && pnpm --filter @cursor-urban/desktop package",
-    "release:mac": "pnpm run build:backend && pnpm --filter @cursor-urban/desktop release:mac"
+    "release:mac": "node scripts/delete-github-assets.js && pnpm run build:backend && pnpm --filter @cursor-urban/desktop release:mac",
+    "release:win": "node scripts/delete-github-assets.js && pnpm run build:backend && pnpm --filter @cursor-urban/desktop release:win"
   },
   "devDependencies": {
     "concurrently": "^9.2.1"

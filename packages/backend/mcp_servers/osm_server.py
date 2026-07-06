@@ -250,11 +250,12 @@ class OSMServer:
                             "type": "string",
                             "description": "OSM tag value. Single value ('hospital'), '*' for any value of the key, or pipe-separated list ('convenience|supermarket|mall').",
                         },
-                        "lat": {"type": "number", "description": "Center latitude"},
-                        "lng": {"type": "number", "description": "Center longitude"},
-                        "radius_meters": {"type": "number", "description": "Search radius in meters (default 1000, max 10000)"},
+                        "lat": {"type": "number", "description": "Center latitude. Optional if use_current_bounds is true."},
+                        "lng": {"type": "number", "description": "Center longitude. Optional if use_current_bounds is true."},
+                        "radius_meters": {"type": "number", "description": "Search radius in meters (default 1000, max 10000). Optional if use_current_bounds is true."},
+                        "use_current_bounds": {"type": "boolean", "description": "If true, searches within the current map viewport bounds instead of using lat/lng/radius_meters."},
                     },
-                    "required": ["feature_type", "lat", "lng"],
+                    "required": ["feature_type"],
                 },
             ),
             ToolDeclaration(
@@ -397,10 +398,7 @@ class OSMServer:
     async def _osm_search(self, args: dict) -> dict:
         feature_type = _sanitize_osm_token(args.get("feature_type", "amenity")) or "amenity"
         raw_value = args.get("feature_value", "")
-        lat = args.get("lat", 0)
-        lng = args.get("lng", 0)
-        radius = min(int(args.get("radius_meters", 1000)), 10000)
-
+        
         # Build the tag filter:
         #   '' or '*'  → existence check ["key"]
         #   list / 'a|b|c' → regex match ["key"~"a|b|c"]
@@ -428,7 +426,33 @@ class OSMServer:
         else:
             tag_filter = f'["{feature_type}"~"^({"|".join(values)})$"]'
 
-        overpass_query = f"""
+        use_current_bounds = args.get("use_current_bounds", False)
+        map_context = args.get("_map_context")
+        bounds = map_context.get("bounds") if map_context else None
+
+        if use_current_bounds and bounds and all(bounds.get(k) is not None for k in ["south", "west", "north", "east"]):
+            s = bounds["south"]
+            w = bounds["west"]
+            n = bounds["north"]
+            e = bounds["east"]
+            bbox_filter = f"({s},{w},{n},{e})"
+            
+            overpass_query = f"""
+[out:json][timeout:25];
+(
+  node{tag_filter}{bbox_filter};
+  way{tag_filter}{bbox_filter};
+  relation{tag_filter}{bbox_filter};
+);
+out body;
+>;
+out skel qt;
+"""
+        else:
+            lat = args.get("lat", 0)
+            lng = args.get("lng", 0)
+            radius = min(int(args.get("radius_meters", 1000)), 10000)
+            overpass_query = f"""
 [out:json][timeout:25];
 (
   node{tag_filter}(around:{radius},{lat},{lng});

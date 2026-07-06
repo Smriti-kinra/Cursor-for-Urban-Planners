@@ -32,6 +32,9 @@ from mcp_servers.demographics_server import DemographicsServer
 from mcp_servers.overture_server import OvertureServer
 from mcp_servers.google_places_server import GooglePlacesServer
 from mcp_servers.google_environment_server import GoogleEnvironmentServer
+from mcp_servers.wms_server import WMSServer
+from mcp_servers.gee_server import GEEServer
+from mcp_servers.datameet_server import DatameetServer
 from tools.utility import UtilityServer
 from tools.config import get_model as _get_model
 from tools.google import google_maps_key_var
@@ -55,6 +58,9 @@ _servers = {
     "overture": OvertureServer(),
     "google_places": GooglePlacesServer(),
     "google_env": GoogleEnvironmentServer(),
+    "wms": WMSServer(),
+    "gee": GEEServer(),
+    "datameet": DatameetServer(),
     "utility": UtilityServer(db_path=DB_PATH),
 }
 
@@ -64,7 +70,7 @@ _ACTION_TOOLS = {
     "fly_to", "fit_bounds", "add_marker", "add_markers", "clear_markers",
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
     "highlight_features", "set_layer_style", "style_layer", "toggle_layer", "remove_layer",
-    "save_bookmark", "go_to_bookmark", "export_region_clip",
+    "save_bookmark", "go_to_bookmark", "export_region_clip", "switch_basemap", "add_geojson_file",
 }
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -109,7 +115,8 @@ SYSTEM_PROMPT = (
     "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
     "- Demographics: get_demographics\n"
-    "- Artifacts: create_artifact (format: markdown/table/geojson), list_artifacts, get_artifact\n"
+    "- Artifacts: create_artifact (format: markdown/table/geojson), list_artifacts, get_artifact, extract_attribute_table\n"
+    "  extract_attribute_table extracts layer or shapefile properties/columns into a tabular artifact.\n"
     "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n"
     "- Reports: generate_report — generates a deep research urban planning report using web search. "
     "Use when user asks to generate/create/write a report or planning analysis.\n\n"
@@ -776,6 +783,17 @@ def _build_tools() -> list[dict]:
             },
             "required": ["output_base_name"],
         }),
+        ("switch_basemap", "Switch the map's background basemap (street, satellite, dark, light, terrain, topo, humanitarian)", {
+            "type": "object",
+            "properties": {
+                "basemap": {
+                    "type": "string",
+                    "enum": ["street", "satellite", "dark", "light", "terrain", "topo", "humanitarian"],
+                    "description": "Name of the basemap to switch to"
+                }
+            },
+            "required": ["basemap"],
+        }),
     ]
     for name, desc, params in action_defs:
         tools.append(_decl_to_openai(name, desc, params))
@@ -827,10 +845,10 @@ async def _execute_tool(
     # MCP server tools (includes UtilityServer)
     for srv in _servers.values():
         if name in srv.tool_names:
-            result = await srv.execute(name, args)
+            result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws})
 
-            # Side-effect: refresh artifacts panel after a successful create_artifact
-            if name == "create_artifact":
+            # Side-effect: refresh artifacts panel after a successful create_artifact or extract_attribute_table
+            if name in ("create_artifact", "extract_attribute_table"):
                 await _send_action(ws, "refresh_artifacts", {})
                 return json.dumps(result)
 

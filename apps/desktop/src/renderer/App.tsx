@@ -1134,6 +1134,13 @@ function App() {
   // ── Map action handler (intercepts layer ops, queues the rest) ──
 
   const handleMapAction = useCallback((action: MapAction) => {
+    if (action.type === 'switch_basemap') {
+      const bm = String(action.payload.basemap || '').toLowerCase()
+      if (BASEMAPS[bm]) {
+        setBasemap(bm)
+      }
+      return
+    }
     if (action.type === 'style_layer') {
       const p = action.payload
       setLayers((prev) =>
@@ -1197,6 +1204,27 @@ function App() {
           ? { south: Number(south), west: Number(west), north: Number(north), east: Number(east) }
           : undefined
       void clipLayersToBboxAndSave(String(output_base_name || 'clipped'), explicit)
+      return
+    }
+    if (action.type === 'add_wms_layer') {
+      const { url, layer_name, title } = action.payload
+      const id = `wms-${Date.now()}`
+      const newLayer: GeoJSONLayer = {
+        id,
+        name: title || layer_name,
+        filePath: '',
+        visible: true,
+        data: { type: 'FeatureCollection', features: [] },
+        color: '#06b6d4',
+        wmsSpec: { url, layer_name }
+      }
+      setLayers((prev) => [...prev, newLayer])
+      setActiveLeftTab('layers')
+      return
+    }
+    if (action.type === 'add_geojson_file') {
+      const { path, name } = action.payload
+      void addLayer(name, path)
       return
     }
     if (action.type === 'add_geojson') {
@@ -1405,6 +1433,29 @@ function App() {
     [],
   )
 
+  const handleContextualQuery = useCallback(
+    (feature: Feature, lngLat: { lng: number; lat: number }) => {
+      setActiveRightTab('chat')
+      const props = feature.properties || {}
+      const titleKey = ['name', 'title', 'label', 'Name', 'Label'].find((k) => props[k] != null && String(props[k]).trim() !== '')
+      const title = titleKey ? String(props[titleKey]).trim() : ''
+      const propsList = Object.entries(props)
+        .filter(([k]) => k !== 'layerName' && k !== 'groupId' && k !== 'groupName' && k !== 'fillColor' && k !== 'lineColor')
+        .map(([k, v]) => `  - **${k}**: ${v}`)
+        .join('\n')
+
+      let text = `Tell me about this feature`
+      if (title) text += ` named "${title}"`
+      text += ` at location (${lngLat.lat.toFixed(5)}, ${lngLat.lng.toFixed(5)}):\n`
+      if (propsList) {
+        text += `\nProperties:\n${propsList}\n`
+      }
+      text += `\nWhat can you analyze about this based on surrounding data? Use your tools.`
+      setInjectedMessage((prev) => ({ text, nonce: (prev?.nonce || 0) + 1 }))
+    },
+    [],
+  )
+
   // ── Map context for AI ──
 
   const mapContext: MapContext = useMemo(
@@ -1474,6 +1525,10 @@ function App() {
             }
           : { mode: 'simple' as const, labels: false as const }
 
+        const features_data = featureCount <= 100
+          ? features.map((f) => f.properties || {})
+          : undefined
+
         return {
           name: l.name,
           featureCount,
@@ -1483,6 +1538,7 @@ function App() {
           ...(l.groupId !== undefined ? { groupId: l.groupId } : {}),
           ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
           ...(geometry_data ? { geometry_data } : {}),
+          ...(features_data ? { features_data } : {}),
           style,
         }
       }),
@@ -1953,6 +2009,7 @@ function App() {
                   onAddMarker={handleRightClickAddMarker}
                   onOpenStreetView={handleRightClickStreetView}
                   onAskChat={handleRightClickAskChat}
+                  onContextualQuery={handleContextualQuery}
                   onDrawComplete={handleDrawComplete}
                 />
               </ErrorBoundary>

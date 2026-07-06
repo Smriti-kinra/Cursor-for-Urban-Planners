@@ -498,6 +498,8 @@
 .chat-error-msg {
   flex: 1;
   line-height: 1.4;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 .chat-error-dismiss {
@@ -1015,6 +1017,8 @@
   font-size: 11px;
   color: var(--danger);
   margin-top: 2px;
+  word-break: break-all;
+  overflow-wrap: break-word;
 }
 
 /* ── Inline form within Error Banner ── */

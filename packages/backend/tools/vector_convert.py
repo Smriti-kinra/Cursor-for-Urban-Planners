@@ -216,3 +216,43 @@ def convert_file(
     if ext in VECTOR_EXTS:
         return convert_vector_file(path)
     raise ConversionError(f"Unsupported file type: {ext or '(none)'}")
+
+
+def extract_table(path: str) -> dict:
+    """Read a vector file via ST_Read, exclude geometry, return columns and rows.
+    
+    Raises ConversionError on failure.
+    """
+    con = _connect()
+    try:
+        desc_rel = con.execute(f"SELECT * FROM ST_Read({_sql_str(path)}) LIMIT 0")
+        all_cols = [d[0] for d in desc_rel.description]
+    except duckdb.Error as e:
+        raise ConversionError(f"Could not read vector metadata: {e}") from e
+
+    geom_cols = {"geom", "geometry", "wkb_geometry"}
+    cols_to_select = [c for c in all_cols if c.lower() not in geom_cols]
+    
+    if not cols_to_select:
+        raise ConversionError("File contains only geometry columns or no readable columns.")
+
+    select_list = ", ".join([_sql_ident(c) for c in cols_to_select])
+    try:
+        rel = con.execute(f"SELECT {select_list} FROM ST_Read({_sql_str(path)})")
+        columns = [d[0] for d in rel.description]
+        rows = rel.fetchall()
+    except duckdb.Error as e:
+        raise ConversionError(f"Could not read vector attributes: {e}") from e
+
+    # convert any non-serializable objects (like datetime) to string
+    serializable_rows = []
+    for r in rows:
+        row_data = []
+        for val in r:
+            if val is not None and not isinstance(val, (int, float, str, bool)):
+                row_data.append(str(val))
+            else:
+                row_data.append(val)
+        serializable_rows.append(row_data)
+
+    return {"columns": columns, "rows": serializable_rows}

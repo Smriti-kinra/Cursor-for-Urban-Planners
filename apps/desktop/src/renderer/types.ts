@@ -15,6 +15,7 @@ export interface GeoJSONLayer {
   lineDasharray?: number[]
   opacity?: number
   styleSpec?: LayerStyleSpec
+  wmsSpec?: { url: string; layer_name: string }
 }
 
 // ── Data-driven symbology + labels ──
@@ -206,6 +207,9 @@ export type MapAction =
       }
     }
   | { type: 'refresh_artifacts'; payload: Record<string, never> }
+  | { type: 'switch_basemap'; payload: { basemap: string } }
+  | { type: 'add_wms_layer'; payload: { url: string; layer_name: string; title: string } }
+  | { type: 'add_geojson_file'; payload: { path: string; name: string } }
 
 export interface ChatErrorMessage {
   code: string
@@ -276,6 +280,7 @@ export interface MapContext {
     groupId?: string
     groupName?: string
     geometry_data?: LayerGeometryData
+    features_data?: Array<Record<string, any>>
     style?: LayerStyleSummary
   }>
   basemap: string

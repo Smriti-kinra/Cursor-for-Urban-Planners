@@ -147,6 +147,7 @@ interface MapViewProps {
   onAddMarker?: (lng: number, lat: number) => void
   onOpenStreetView?: (lng: number, lat: number) => void
   onAskChat?: (lng: number, lat: number) => void
+  onContextualQuery?: (feature: any, lngLat: { lng: number; lat: number }) => void
   /** A user finished drawing a shape. Coordinates are [lng,lat]; for 'point'
    *  the array holds a single pair, for 'line'/'polygon' the full vertex list
    *  (polygon ring is not yet closed). */
@@ -169,6 +170,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onAddMarker,
     onOpenStreetView,
     onAskChat,
+    onContextualQuery,
     onDrawComplete,
   },
   ref,
@@ -185,6 +187,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onOpenStreetViewRef.current = onOpenStreetView
   const onAskChatRef = useRef(onAskChat)
   onAskChatRef.current = onAskChat
+  const onContextualQueryRef = useRef(onContextualQuery)
+  onContextualQueryRef.current = onContextualQuery
   const onDrawCompleteRef = useRef(onDrawComplete)
   onDrawCompleteRef.current = onDrawComplete
   // Drawing state lives in refs so the map event handlers (bound once) always
@@ -192,6 +196,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const drawModeRef = useRef<DrawMode>(null)
   const drawVerticesRef = useRef<number[][]>([])
   const ownLayerIds = useRef(new Set<string>())
+  const renderLayerIds = useCallback((): string[] => {
+    const map = mapRef.current
+    if (!map) return []
+    const ids: string[] = []
+    for (const baseId of ownLayerIds.current) {
+      for (const suffix of ['-fill', '-line', '-circle']) {
+        if (map.getLayer(`${baseId}${suffix}`)) ids.push(`${baseId}${suffix}`)
+      }
+    }
+    return ids
+  }, [])
   const hoverPopupRef = useRef<maplibregl.Popup | null>(null)
   // Per-source revision token: setData() is only called when layer.data changes.
   const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
@@ -287,7 +302,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     for (const id of ownLayerIds.current) {
       if (!desiredIds.has(id)) {
-        for (const suffix of ['-fill', '-outline', '-line', '-circle', '-label']) {
+        for (const suffix of ['-fill', '-outline', '-line', '-circle', '-label', '-raster']) {
           if (map.getLayer(`${id}${suffix}`)) map.removeLayer(`${id}${suffix}`)
         }
         if (map.getSource(id)) map.removeSource(id)
@@ -300,9 +315,27 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const fillOpacity = layer.opacity ?? 0.3
 
       if (!map.getSource(layer.id)) {
-        map.addSource(layer.id, { type: 'geojson', data: layer.data })
-        ownLayerIds.current.add(layer.id)
-        layerRevisionRef.current.set(layer.id, layer.data)
+        if (layer.wmsSpec) {
+          const { url, layer_name } = layer.wmsSpec
+          const sep = url.includes('?') ? '&' : '?'
+          const wmsUrl = `${url}${sep}service=WMS&request=GetMap&layers=${encodeURIComponent(layer_name)}&styles=&format=image/png&transparent=true&version=1.1.1&height=256&width=256&srs=EPSG:3857&bbox={bbox-epsg-3857}`
+          
+          map.addSource(layer.id, {
+            type: 'raster',
+            tiles: [wmsUrl],
+            tileSize: 256,
+          })
+          map.addLayer({
+            id: `${layer.id}-raster`,
+            type: 'raster',
+            source: layer.id,
+            layout: { visibility: layer.visible ? 'visible' : 'none' },
+          })
+          ownLayerIds.current.add(layer.id)
+        } else {
+          map.addSource(layer.id, { type: 'geojson', data: layer.data })
+          ownLayerIds.current.add(layer.id)
+          layerRevisionRef.current.set(layer.id, layer.data)
 
         map.addLayer({
           id: `${layer.id}-fill`,
@@ -410,56 +443,64 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         } catch {
           /* ignore invalid bbox */
         }
+      }
       } else {
         // Existing source — sync data + visibility + style overrides.
-        const previous = layerRevisionRef.current.get(layer.id)
-        if (previous !== layer.data) {
-          const src = map.getSource(layer.id) as maplibregl.GeoJSONSource
-          src.setData(layer.data)
-          layerRevisionRef.current.set(layer.id, layer.data)
-        }
-        const vis = layer.visible ? 'visible' : 'none'
-        for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
-          if (map.getLayer(`${layer.id}${suffix}`)) {
-            map.setLayoutProperty(`${layer.id}${suffix}`, 'visibility', vis)
+        if (layer.wmsSpec) {
+          const vis = layer.visible ? 'visible' : 'none'
+          if (map.getLayer(`${layer.id}-raster`)) {
+            map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
           }
-        }
-        if (map.getLayer(`${layer.id}-fill`)) {
-          map.setPaintProperty(`${layer.id}-fill`, 'fill-color', fillColorExpression(layer))
-          map.setPaintProperty(
-            `${layer.id}-fill`, 'fill-opacity',
-            ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
-          )
-        }
-        if (map.getLayer(`${layer.id}-outline`)) {
-          map.setPaintProperty(`${layer.id}-outline`, 'line-color', lineColorExpression(layer))
-        }
-        if (map.getLayer(`${layer.id}-line`)) {
-          map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
-          map.setPaintProperty(
-            `${layer.id}-line`, 'line-width',
-            ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
-          )
-          if (layer.lineDasharray) {
-            map.setPaintProperty(`${layer.id}-line`, 'line-dasharray', layer.lineDasharray)
+        } else {
+          const previous = layerRevisionRef.current.get(layer.id)
+          if (previous !== layer.data) {
+            const src = map.getSource(layer.id) as maplibregl.GeoJSONSource
+            src.setData(layer.data)
+            layerRevisionRef.current.set(layer.id, layer.data)
           }
-        }
-        if (map.getLayer(`${layer.id}-circle`)) {
-          map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
-        }
-        // Labels: re-apply field/size/color and visibility (gated by enabled +
-        // feature cap, AND the layer's own visibility).
-        if (map.getLayer(`${layer.id}-label`)) {
-          const labelSpec = layer.styleSpec?.label
-          map.setLayerZoomRange(`${layer.id}-label`, labelSpec?.minZoom ?? 10, 24)
-          map.setLayoutProperty(`${layer.id}-label`, 'text-field', labelField(layer))
-          map.setLayoutProperty(`${layer.id}-label`, 'text-size', labelSpec?.size ?? 12)
-          map.setLayoutProperty(
-            `${layer.id}-label`, 'visibility',
-            layer.visible && labelsActive(layer) ? 'visible' : 'none',
-          )
-          map.setPaintProperty(`${layer.id}-label`, 'text-color', labelSpec?.color ?? '#1f2937')
-          map.setPaintProperty(`${layer.id}-label`, 'text-halo-color', labelSpec?.haloColor ?? '#ffffff')
+          const vis = layer.visible ? 'visible' : 'none'
+          for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
+            if (map.getLayer(`${layer.id}${suffix}`)) {
+              map.setLayoutProperty(`${layer.id}${suffix}`, 'visibility', vis)
+            }
+          }
+          if (map.getLayer(`${layer.id}-fill`)) {
+            map.setPaintProperty(`${layer.id}-fill`, 'fill-color', fillColorExpression(layer))
+            map.setPaintProperty(
+              `${layer.id}-fill`, 'fill-opacity',
+              ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
+            )
+          }
+          if (map.getLayer(`${layer.id}-outline`)) {
+            map.setPaintProperty(`${layer.id}-outline`, 'line-color', lineColorExpression(layer))
+          }
+          if (map.getLayer(`${layer.id}-line`)) {
+            map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
+            map.setPaintProperty(
+              `${layer.id}-line`, 'line-width',
+              ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+            )
+            if (layer.lineDasharray) {
+              map.setPaintProperty(`${layer.id}-line`, 'line-dasharray', layer.lineDasharray)
+            }
+          }
+          if (map.getLayer(`${layer.id}-circle`)) {
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
+          }
+          // Labels: re-apply field/size/color and visibility (gated by enabled +
+          // feature cap, AND the layer's own visibility).
+          if (map.getLayer(`${layer.id}-label`)) {
+            const labelSpec = layer.styleSpec?.label
+            map.setLayerZoomRange(`${layer.id}-label`, labelSpec?.minZoom ?? 10, 24)
+            map.setLayoutProperty(`${layer.id}-label`, 'text-field', labelField(layer))
+            map.setLayoutProperty(`${layer.id}-label`, 'text-size', labelSpec?.size ?? 12)
+            map.setLayoutProperty(
+              `${layer.id}-label`, 'visibility',
+              layer.visible && labelsActive(layer) ? 'visible' : 'none',
+            )
+            map.setPaintProperty(`${layer.id}-label`, 'text-color', labelSpec?.color ?? '#1f2937')
+            map.setPaintProperty(`${layer.id}-label`, 'text-halo-color', labelSpec?.haloColor ?? '#ffffff')
+          }
         }
       }
     }
@@ -775,7 +816,64 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     const onClick = (e: maplibregl.MapMouseEvent) => {
       const mode = drawModeRef.current
-      if (!mode) return
+      if (!mode) {
+        // Contextual query handling
+        if (e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
+          const ids = renderLayerIds()
+          if (!ids.length) return
+          const feats = map.queryRenderedFeatures(e.point, { layers: ids })
+          if (feats.length > 0) {
+            const feat = feats[0]
+            onContextualQueryRef.current?.(feat, e.lngLat)
+
+            // Visual feedback: Highlight the clicked feature in cyan
+            const hlId = 'highlight-temp'
+            for (const suffix of ['-fill', '-line', '-circle']) {
+              if (map.getLayer(`${hlId}${suffix}`)) map.removeLayer(`${hlId}${suffix}`)
+            }
+            if (map.getSource(hlId)) map.removeSource(hlId)
+
+            map.addSource(hlId, {
+              type: 'geojson',
+              data: { type: 'FeatureCollection', features: [feat] },
+            })
+            map.addLayer({
+              id: `${hlId}-fill`,
+              type: 'fill',
+              source: hlId,
+              filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+              paint: { 'fill-color': '#06b6d4', 'fill-opacity': 0.35 },
+            })
+            map.addLayer({
+              id: `${hlId}-line`,
+              type: 'line',
+              source: hlId,
+              filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+              paint: { 'line-color': '#06b6d4', 'line-width': 4 },
+            })
+            map.addLayer({
+              id: `${hlId}-circle`,
+              type: 'circle',
+              source: hlId,
+              filter: ['==', ['geometry-type'], 'Point'],
+              paint: {
+                'circle-radius': 8,
+                'circle-color': '#06b6d4',
+                'circle-stroke-color': '#ffffff',
+                'circle-stroke-width': 2,
+              },
+            })
+          }
+        } else {
+          // Clear visual feedback if clicked elsewhere without ctrl/meta key
+          const hlId = 'highlight-temp'
+          for (const suffix of ['-fill', '-line', '-circle']) {
+            if (map.getLayer(`${hlId}${suffix}`)) map.removeLayer(`${hlId}${suffix}`)
+          }
+          if (map.getSource(hlId)) map.removeSource(hlId)
+        }
+        return
+      }
       const pt = [e.lngLat.lng, e.lngLat.lat]
       if (mode === 'point') {
         drawVerticesRef.current = [pt]
@@ -807,16 +905,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   useEffect(() => {
     const map = mapRef.current
     if (!map || !mapReady) return
-
-    const renderLayerIds = (): string[] => {
-      const ids: string[] = []
-      for (const baseId of ownLayerIds.current) {
-        for (const suffix of ['-fill', '-line', '-circle']) {
-          if (map.getLayer(`${baseId}${suffix}`)) ids.push(`${baseId}${suffix}`)
-        }
-      }
-      return ids
-    }
 
     const hidePopup = () => {
       hoverPopupRef.current?.remove()

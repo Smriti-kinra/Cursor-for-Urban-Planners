@@ -91,6 +91,7 @@ class UtilityServer:
     tool_names = {
         "web_search", "geocode", "measure_distance", "measure_area",
         "create_artifact", "list_artifacts", "get_artifact",
+        "extract_attribute_table",
     }
 
     def __init__(self, db_path: Path):
@@ -224,6 +225,24 @@ class UtilityServer:
                     "required": ["id"],
                 },
             ),
+            ToolDeclaration(
+                name="extract_attribute_table",
+                description=(
+                    "Extract the non-spatial attributes (properties table) from a shapefile/vector file "
+                    "or a loaded map layer, and save it as a tabular project artifact. "
+                    "Either 'path' or 'layer_name' must be provided."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "title": {"type": "string", "description": "Title for the saved table artifact"},
+                        "layer_name": {"type": "string", "description": "Name of the loaded map layer to extract properties from"},
+                        "path": {"type": "string", "description": "Relative workspace path to a shapefile, GeoPackage, KML, GeoJSON, or CSV file"},
+                        "workspace": {"type": "string", "description": "Path to the active workspace folder"},
+                    },
+                    "required": ["title"],
+                },
+            ),
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
@@ -241,6 +260,8 @@ class UtilityServer:
             return self._list_artifacts(args)
         if tool_name == "get_artifact":
             return self._get_artifact(args)
+        if tool_name == "extract_attribute_table":
+            return await self._extract_attribute_table(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _web_search(self, query: str) -> dict:
@@ -427,3 +448,98 @@ class UtilityServer:
             return dict(row)
         except Exception as e:
             return {"error": str(e)}
+
+    async def _extract_attribute_table(self, args: dict) -> dict:
+        import json
+        title = args.get("title", "Extracted Attribute Table")
+        path = args.get("path")
+        layer_name = args.get("layer_name")
+        workspace = args.get("workspace") or ""
+        map_context = args.get("_map_context")
+
+        columns = []
+        rows = []
+
+        # 1. Try extracting by file path if provided
+        if path:
+            import os
+            full_path = path
+            if workspace and not os.path.isabs(path):
+                full_path = os.path.join(workspace, path)
+            
+            try:
+                from tools.vector_convert import extract_table
+                data = extract_table(full_path)
+                columns = data["columns"]
+                rows = data["rows"]
+            except Exception as e:
+                return {"error": f"Failed to extract table from file: {str(e)}"}
+
+        # 2. Try extracting from loaded layers by name
+        elif layer_name and map_context:
+            layers = map_context.get("layers", [])
+            target_layer = None
+            for l in layers:
+                if l.get("name", "").lower() == layer_name.lower():
+                    target_layer = l
+                    break
+
+            if not target_layer:
+                return {"error": f"Layer '{layer_name}' not found in map context."}
+
+            file_path = target_layer.get("filePath")
+            if file_path:
+                import os
+                full_path = file_path
+                if workspace and not os.path.isabs(file_path):
+                    full_path = os.path.join(workspace, file_path)
+                
+                try:
+                    from tools.vector_convert import extract_table
+                    data = extract_table(full_path)
+                    columns = data["columns"]
+                    rows = data["rows"]
+                except Exception as e:
+                    # Fallback to features_data if file read fails
+                    pass
+
+            if not columns and "features_data" in target_layer:
+                features_data = target_layer["features_data"]
+                if features_data:
+                    all_keys = set()
+                    for feat in features_data:
+                        all_keys.update(feat.keys())
+                    columns = list(all_keys)
+                    
+                    for feat in features_data:
+                        row = [feat.get(col) for col in columns]
+                        row_data = []
+                        for val in row:
+                            if val is not None and not isinstance(val, (int, float, str, bool)):
+                                row_data.append(str(val))
+                            else:
+                                row_data.append(val)
+                        rows.append(row_data)
+
+            if not columns:
+                return {
+                    "error": (
+                        f"Layer '{layer_name}' has no file path and features data is empty. "
+                        "Make sure the layer has visible features."
+                    )
+                }
+
+        else:
+            return {"error": "Provide either 'path' or 'layer_name'"}
+
+        try:
+            from tools.artifact_store import save_artifact
+            result = save_artifact(
+                title=title,
+                artifact_type="analysis",
+                format="table",
+                content=json.dumps({"columns": columns, "rows": rows}),
+            )
+            return {"status": "created", "id": result["id"], "columns_count": len(columns), "rows_count": len(rows)}
+        except Exception as e:
+            return {"error": f"Failed to save artifact: {str(e)}"}

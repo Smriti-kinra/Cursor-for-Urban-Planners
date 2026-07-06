@@ -13,7 +13,8 @@ mac:
 win:
   target:
     - nsis
-    - portable
+    - zip
+  artifactName: "Cursor-for-Urban-Planners-${version}-${arch}.${ext}"
 extraResources:
   - from: ../../packages/backend/dist/backend
     to: backend
