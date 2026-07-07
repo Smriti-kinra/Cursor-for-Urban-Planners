@@ -38,6 +38,7 @@ from mcp_servers.datameet_server import DatameetServer
 from tools.utility import UtilityServer
 from tools.config import get_model as _get_model
 from tools.google import google_maps_key_var
+from tools.action_utils import send_action as _send_action
 
 try:
     from shapely.geometry import shape as _shape
@@ -821,10 +822,6 @@ def _build_tools() -> list[dict]:
 _TOOLS = _build_tools()
 
 # ── Tool execution ────────────────────────────────────────────────────────────
-
-async def _send_action(ws: WebSocket, action: str, payload: dict) -> None:
-    await ws.send_text(json.dumps({"type": "action", "action": action, "payload": payload}))
-
 
 async def _execute_tool(
     name: str,

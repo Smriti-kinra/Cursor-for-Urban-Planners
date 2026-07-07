@@ -1,7 +1,7 @@
 from __future__ import annotations
 import httpx
 from llm.base import ToolDeclaration
-from routers.chat import _send_action
+from tools.action_utils import send_action
 
 class WMSServer:
     description = "Web Map Service (WMS) layers integration"
@@ -63,7 +63,7 @@ class WMSServer:
 
         if ws:
             try:
-                await _send_action(ws, "add_wms_layer", {
+                await send_action(ws, "add_wms_layer", {
                     "url": url,
                     "layer_name": layer_name,
                     "title": title

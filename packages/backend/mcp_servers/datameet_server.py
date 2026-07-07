@@ -2,7 +2,7 @@ from __future__ import annotations
 from pathlib import Path
 import httpx
 from llm.base import ToolDeclaration
-from routers.chat import _send_action
+from tools.action_utils import send_action
 
 class DatameetServer:
     description = "DataMeet boundaries downloader (States, Districts, Villages)"
@@ -77,7 +77,7 @@ class DatameetServer:
         if target_file.exists():
             if ws:
                 try:
-                    await _send_action(ws, "add_geojson_file", {
+                    await send_action(ws, "add_geojson_file", {
                         "path": str(target_file.resolve()),
                         "name": filename.replace(".geojson", "").replace("_", " ").title()
                     })
@@ -117,7 +117,7 @@ class DatameetServer:
         # Instruct client to load it
         if ws:
             try:
-                await _send_action(ws, "add_geojson_file", {
+                await send_action(ws, "add_geojson_file", {
                     "path": str(target_file.resolve()),
                     "name": filename.replace(".geojson", "").replace("_", " ").title()
                 })
