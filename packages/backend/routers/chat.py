@@ -10,6 +10,7 @@ agentic loop:
 """
 
 import asyncio
+import contextvars
 import json
 import os
 import sys
@@ -46,6 +47,29 @@ except ImportError:
     _shape = None
 
 router = APIRouter()
+
+_stop_event_var: contextvars.ContextVar[asyncio.Event | None] = contextvars.ContextVar("chat_stop_event", default=None)
+
+
+def _set_stop_event(stop_event: asyncio.Event | None) -> None:
+    _stop_event_var.set(stop_event)
+
+
+def _get_stop_event() -> asyncio.Event | None:
+    return _stop_event_var.get()
+
+
+def _is_cancelled() -> bool:
+    event = _get_stop_event()
+    return event is not None and event.is_set()
+
+
+async def _send_action_if_allowed(ws: WebSocket, action: str, payload: dict) -> bool:
+    if _is_cancelled():
+        return False
+    await _send_action(ws, action, payload)
+    return True
+
 
 _env_key = os.environ.get("OPENAI_API_KEY", "")
 _client = AsyncOpenAI(api_key=_env_key) if _env_key else None
@@ -505,6 +529,8 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
         search_count = 0
         last_heartbeat = asyncio.get_event_loop().time()
 
+        stop_event = _get_stop_event()
+
         openai_client = client or _client
         stream = await openai_client.responses.create(
             model="o4-mini-deep-research",
@@ -516,6 +542,10 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
             stream=True,
         )
         async for event in stream:
+            if _is_cancelled():
+                await ws.send_text(json.dumps({"type": "stopped"}))
+                return json.dumps({"status": "cancelled"})
+
             # Send a heartbeat if >30 s have passed since the last WS message
             now = asyncio.get_event_loop().time()
             if now - last_heartbeat > 30:
@@ -831,28 +861,36 @@ async def _execute_tool(
     map_context: dict | None = None,
     client: AsyncOpenAI | None = None,
 ) -> str:
+    if _is_cancelled():
+        return json.dumps({"status": "cancelled"})
+
     if name == "generate_report":
         return await _run_deep_research(messages or [], map_context, ws, client=client)
 
     # Map action tools → send directly to frontend
     if name in _ACTION_TOOLS:
-        await _send_action(ws, name, args)
+        if not await _send_action_if_allowed(ws, name, args):
+            return json.dumps({"status": "cancelled"})
         return json.dumps({"status": "success", "message": f"'{name}' executed on map."})
 
     # MCP server tools (includes UtilityServer)
     for srv in _servers.values():
         if name in srv.tool_names:
+            if _is_cancelled():
+                return json.dumps({"status": "cancelled"})
             result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws})
 
             # Side-effect: refresh artifacts panel after a successful create_artifact or extract_attribute_table
             if name in ("create_artifact", "extract_attribute_table"):
-                await _send_action(ws, "refresh_artifacts", {})
+                if not await _send_action_if_allowed(ws, "refresh_artifacts", {}):
+                    return json.dumps({"status": "cancelled"})
                 return json.dumps(result)
 
             # Auto-display osm_search result on map
             if name == "osm_search" and "geojson" in result and result.get("count", 0) > 0:
                 label = f"{args.get('feature_value', 'features')} ({args.get('feature_type', '')})"
-                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": result["geojson"], "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 features_summary = []
                 for f in result["geojson"].get("features", [])[:50]:
                     props = f.get("properties", {})
@@ -875,7 +913,8 @@ async def _execute_tool(
                     label = f"Overture: {args.get('category') or args.get('query') or 'places'}"
                 else:
                     label = "Overture: buildings"
-                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": result["geojson"], "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 features_summary = []
                 for f in result["geojson"].get("features", [])[:50]:
                     props = f.get("properties", {})
@@ -903,7 +942,8 @@ async def _execute_tool(
                 types_label = ",".join(args.get("included_types") or []) or "places"
                 suffix = " (in polygon)" if name == "nearby_places_in_polygon" else ""
                 label = f"Google: {types_label}{suffix}"
-                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": result["geojson"], "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 features_summary = []
                 for f in result["geojson"].get("features", [])[:50]:
                     props = f.get("properties", {})
@@ -934,7 +974,8 @@ async def _execute_tool(
             # gis_point_in_polygon) can chain on the boundary.
             elif name == "osm_boundary" and "geojson" in result:
                 label = f"{args.get('name', 'Boundary')} boundary"
-                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": result["geojson"], "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 model_result: dict = {
                     "name": result.get("name", ""),
                     "displayed_on_map": True,
@@ -964,7 +1005,8 @@ async def _execute_tool(
             # geometry can be huge and is already on the map as a layer.
             elif name == "osm_boundary_union" and "geojson" in result:
                 label = result.get("name") or args.get("layer_name") or "Merged region"
-                await _send_action(ws, "add_geojson", {"geojson": result["geojson"], "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": result["geojson"], "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 model_result: dict = {
                     "name": label,
                     "displayed_on_map": True,
@@ -997,20 +1039,22 @@ async def _execute_tool(
 
             # Auto-display route
             elif name == "osm_route_overview" and "geometry" in result:
-                await _send_action(ws, "draw_line", {
+                if not await _send_action_if_allowed(ws, "draw_line", {
                     "coordinates": result["geometry"]["coordinates"],
                     "color": "#2563eb", "width": 4,
                     "label": f"Route ({result.get('distance_km', '?')} km)",
-                })
+                }):
+                    return json.dumps({"status": "cancelled"})
 
             # Auto-display buffer/hull/union
             elif name in ("gis_buffer", "gis_convex_hull", "gis_union") and "geojson" in result:
                 label = {"gis_buffer": f"Buffer ({args.get('radius_meters', '?')}m)",
                          "gis_convex_hull": "Convex Hull", "gis_union": "Union"}[name]
-                await _send_action(ws, "add_geojson", {
+                if not await _send_action_if_allowed(ws, "add_geojson", {
                     "geojson": {"type": "FeatureCollection", "features": [result["geojson"]]},
                     "name": label,
-                })
+                }):
+                    return json.dumps({"status": "cancelled"})
 
             # Auto-display overlay/relational ops. intersection/difference return
             # a single Feature; clip/dissolve/spatial_join return a
@@ -1031,7 +1075,8 @@ async def _execute_tool(
                     "gis_dissolve": "Dissolved",
                     "gis_spatial_join": "Spatial join",
                 }[name]
-                await _send_action(ws, "add_geojson", {"geojson": fc, "name": label})
+                if not await _send_action_if_allowed(ws, "add_geojson", {"geojson": fc, "name": label}):
+                    return json.dumps({"status": "cancelled"})
                 collapsed: dict = {"displayed_on_map": True, "layer_name": label}
                 for k in ("area", "kept", "group_count", "points", "joined", "intersects", "empty", "message"):
                     if k in result:
@@ -1058,6 +1103,9 @@ async def _run_agent(
     max_rounds = 10
 
     for _ in range(max_rounds):
+        if _is_cancelled():
+            break
+
         accumulated_text = ""
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
@@ -1073,6 +1121,9 @@ async def _run_agent(
             )
 
             async for chunk in stream:
+                if _is_cancelled():
+                    break
+
                 choice = chunk.choices[0] if chunk.choices else None
                 if not choice:
                     continue
@@ -1107,6 +1158,10 @@ async def _run_agent(
             }))
             break
 
+        if _is_cancelled():
+            await ws.send_text(json.dumps({"type": "stopped"}))
+            break
+
         # Add assistant message to history
         assistant_msg: dict = {"role": "assistant"}
         if accumulated_text:
@@ -1127,6 +1182,9 @@ async def _run_agent(
 
         # Execute tool calls and collect results
         for tc in tool_calls_acc.values():
+            if _is_cancelled():
+                await ws.send_text(json.dumps({"type": "stopped"}))
+                break
             tool_name = tc["name"]
             args_raw = tc["arguments"] or ""
             try:
@@ -1182,11 +1240,72 @@ async def chat_websocket(websocket: WebSocket):
 
     # Persistent message history for this connection
     messages: list[dict] = []
+    stop_event: asyncio.Event | None = None
+    active_task: asyncio.Task | None = None
+    current_full_messages: list[dict] | None = None
 
     try:
         while True:
-            data = await websocket.receive_text()
-            payload = json.loads(data)
+            if active_task is not None and not active_task.done():
+                receive_task = asyncio.create_task(websocket.receive_text())
+                done, pending = await asyncio.wait({active_task, receive_task}, return_when=asyncio.FIRST_COMPLETED)
+
+                if active_task in done:
+                    for p in pending:
+                        p.cancel()
+                    try:
+                        await active_task
+                    except Exception:
+                        pass
+                    active_task = None
+                    if current_full_messages is not None:
+                        new_history = []
+                        for m in current_full_messages:
+                            if m["role"] == "system":
+                                continue
+                            if isinstance(m.get("content"), list):
+                                text_parts = [p["text"] for p in m["content"] if p.get("type") == "text"]
+                                new_history.append({"role": m["role"], "content": " ".join(text_parts)})
+                            else:
+                                new_history.append(m)
+                        messages = new_history
+                    current_full_messages = None
+                    await websocket.send_text(json.dumps({"type": "end"}))
+                    continue
+
+                if receive_task in done:
+                    for p in pending:
+                        if p is not active_task:
+                            p.cancel()
+                    try:
+                        data = receive_task.result()
+                    except Exception:
+                        data = None
+                    if data is None:
+                        continue
+                    payload = json.loads(data)
+                else:
+                    continue
+            else:
+                data = await websocket.receive_text()
+                payload = json.loads(data)
+
+            if payload.get("type") == "stop":
+                if stop_event is not None:
+                    stop_event.set()
+                await websocket.send_text(json.dumps({"type": "stopped"}))
+                continue
+
+            if active_task is not None and not active_task.done():
+                await websocket.send_text(json.dumps({
+                    "type": "error",
+                    "code": "busy",
+                    "message": "Another request is already running. Please wait or stop the current run first.",
+                }))
+                continue
+
+            stop_event = asyncio.Event()
+            _set_stop_event(stop_event)
             user_content = payload.get("content", "")
             map_context = payload.get("map_context")
             image_data = payload.get("image")  # {base64, mime_type} or None
@@ -1211,8 +1330,6 @@ async def chat_websocket(websocket: WebSocket):
             if not user_content.strip():
                 continue
 
-            # Renderer can replay prior conversation on reconnect/model-switch
-            # by passing `history`: a list of {role, content} pairs.
             if isinstance(history_payload, list):
                 replayed: list[dict] = []
                 for m in history_payload:
@@ -1226,13 +1343,9 @@ async def chat_websocket(websocket: WebSocket):
 
             if is_document_mode:
                 system = DOCUMENT_SYSTEM_PROMPT
-                # Document mode now bridges to the live map: model can fly_to,
-                # add markers, run osm_search, save artifacts. Map context is
-                # included when supplied.
                 if map_context:
                     system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
                 tools = _TOOLS
-                # Build vision message
                 user_msg: dict = {
                     "role": "user",
                     "content": [
@@ -1251,23 +1364,8 @@ async def chat_websocket(websocket: WebSocket):
 
             full_messages = [{"role": "system", "content": system}] + messages
             full_messages.append(user_msg)
-
-            await _run_agent(full_messages, websocket, client, tools=tools, map_context=map_context)
-
-            # Persist exchange into history, but strip system + image data (keep history lean)
-            new_history = []
-            for m in full_messages:
-                if m["role"] == "system":
-                    continue
-                if isinstance(m.get("content"), list):
-                    # Strip image parts from stored history to save memory
-                    text_parts = [p["text"] for p in m["content"] if p.get("type") == "text"]
-                    new_history.append({"role": m["role"], "content": " ".join(text_parts)})
-                else:
-                    new_history.append(m)
-            messages = new_history
-
-            await websocket.send_text(json.dumps({"type": "end"}))
+            current_full_messages = full_messages
+            active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context))
 
     except WebSocketDisconnect:
         pass

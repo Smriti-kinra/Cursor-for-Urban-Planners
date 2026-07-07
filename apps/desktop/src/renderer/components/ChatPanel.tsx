@@ -394,10 +394,17 @@ export default function ChatPanel({
         payload: (data.payload || {}) as never,
       } as MapAction)
     } else if (data.type === 'error') {
-      setChatError({
-        code: String(data.code || 'unknown'),
-        message: String(data.message || 'Unknown error'),
-      })
+      const msg = String(data.message || 'Unknown error')
+      const lower = msg.toLowerCase()
+      // Suppress noisy concurrency recv error when the user stops the run.
+      if (lower.includes('cannot call recv') || lower.includes('another coroutine is already') || lower.includes('recv while')) {
+        // Ignore this error as it originates from a cancelled/closed connection.
+      } else {
+        setChatError({
+          code: String(data.code || 'unknown'),
+          message: msg,
+        })
+      }
       // Treat error as terminal for the in-flight stream so the user can
       // send the next message; an `end` frame may or may not follow.
       setIsStreaming(false)
@@ -762,6 +769,14 @@ export default function ChatPanel({
       inFlightRef.current = null
     }
   }
+
+  const stopCurrentRun = useCallback(() => {
+    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
+    wsRef.current.send(JSON.stringify({ type: 'stop' }))
+    setIsStreaming(false)
+    setToolStatus(null)
+    setChatError(null)
+  }, [])
 
   const sendMessage = async (): Promise<void> => {
     if (!input.trim() || isStreaming) return
@@ -1187,22 +1202,32 @@ export default function ChatPanel({
             disabled={!apiKey.trim()}
             rows={1}
           />
-          <button
-            className="chat-send-btn"
-            onClick={sendMessage}
-            disabled={!input.trim() || isStreaming}
-            title="Send (Enter)"
-          >
-            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M2.5 8H13.5M13.5 8L8.5 3M13.5 8L8.5 13"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
-            </svg>
-          </button>
+          {isStreaming ? (
+            <button
+              className="chat-stop-btn"
+              onClick={stopCurrentRun}
+              title="Stop generating"
+            >
+              ■
+            </button>
+          ) : (
+            <button
+              className="chat-send-btn"
+              onClick={sendMessage}
+              disabled={!input.trim()}
+              title="Send (Enter)"
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <path
+                  d="M2.5 8H13.5M13.5 8L8.5 3M13.5 8L8.5 13"
+                  stroke="currentColor"
+                  strokeWidth="1.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </button>
+          )}
         </div>
         <div className="chat-input-footer">
           {availableModels.length > 0 && (

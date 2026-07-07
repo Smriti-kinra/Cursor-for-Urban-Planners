@@ -621,7 +621,8 @@
   color: var(--text-muted);
 }
 
-.chat-send-btn {
+.chat-send-btn,
+.chat-stop-btn {
   background: var(--accent);
   color: var(--bg-surface);
   border: none;
@@ -636,7 +637,15 @@
   transition: all 0.15s;
 }
 
-.chat-send-btn:hover:not(:disabled) {
+.chat-stop-btn {
+  background: #f38ba8;
+  color: white;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.chat-send-btn:hover:not(:disabled),
+.chat-stop-btn:hover {
   background: var(--accent-hover);
 }
 
