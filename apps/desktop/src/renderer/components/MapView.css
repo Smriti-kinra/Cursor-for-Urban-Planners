@@ -191,11 +191,36 @@
   cursor: pointer;
   transition: background 0.1s;
   line-height: 1.4;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
 }
 
 .search-result:hover {
   background: var(--bg-hover);
   color: var(--text-primary);
+}
+
+.search-result span {
+  min-width: 0;
+  overflow-wrap: anywhere;
+}
+
+.search-result-action {
+  flex: 0 0 auto;
+  border: 1px solid var(--border);
+  background: var(--bg-surface);
+  color: var(--text-secondary);
+  border-radius: 6px;
+  padding: 4px 6px;
+  font-size: 11px;
+  cursor: pointer;
+}
+
+.search-result-action:hover {
+  border-color: var(--accent);
+  color: var(--accent);
 }
 
 /* ── Basemap switcher ── */

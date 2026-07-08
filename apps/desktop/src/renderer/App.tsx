@@ -4,7 +4,10 @@ import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from
 import MapView, { type MapViewHandle } from './components/MapView'
 import FileTree from './components/FileTree'
 import ChatPanel from './components/ChatPanel'
-import StreetViewDialog from './components/StreetViewDialog'
+import StreetViewWorkspace, {
+  type RoadInspectionTarget,
+  type StreetViewTarget,
+} from './components/StreetViewWorkspace'
 import ArtifactsPanel from './components/ArtifactsPanel'
 import LayerPanel from './components/LayerPanel'
 import SymbologyPanel from './components/SymbologyPanel'
@@ -41,7 +44,7 @@ import { buildLegendEntries } from './lib/legend-data'
 
 type AppMode = 'map' | 'document'
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
-type RightTab = 'chat' | 'artifacts'
+type RightTab = 'chat' | 'artifacts' | 'streetview'
 
 function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -165,7 +168,8 @@ function App() {
   const [conversations, setConversations] = useState<Conversation[]>([])
   const [activeConversationId, setActiveConversationId] = useState<string | null>(null)
   const [mapActions, setMapActions] = useState<MapAction[]>([])
-  const [streetViewTarget, setStreetViewTarget] = useState<{ lng: number; lat: number } | null>(null)
+  const [streetViewTarget, setStreetViewTarget] = useState<StreetViewTarget | null>(null)
+  const [roadInspectionTarget, setRoadInspectionTarget] = useState<RoadInspectionTarget | null>(null)
   const [injectedMessage, setInjectedMessage] = useState<{ text: string; nonce: number } | null>(null)
   const [bookmarks, setBookmarks] = useState<MapBookmark[]>([])
   const [mapBounds, setMapBounds] = useState<{
@@ -255,6 +259,7 @@ function App() {
     setActiveConversationId(null)
     setMapActions([])
     setStreetViewTarget(null)
+    setRoadInspectionTarget(null)
     setInjectedMessage(null)
     setBookmarks([])
     setMapBounds(null)
@@ -1420,6 +1425,21 @@ function App() {
 
   const handleRightClickStreetView = useCallback((lng: number, lat: number) => {
     setStreetViewTarget({ lng, lat })
+    setActiveRightTab('streetview')
+  }, [])
+
+  const handleInspectRoad = useCallback((feature: Feature) => {
+    const geometry = feature.geometry
+    if (!geometry || (geometry.type !== 'LineString' && geometry.type !== 'MultiLineString')) return
+    const props = feature.properties || {}
+    const nameKey = ['name', 'title', 'label', 'Name', 'Label', 'road', 'street'].find(
+      (k) => props[k] != null && String(props[k]).trim() !== '',
+    )
+    setRoadInspectionTarget({
+      geometry,
+      name: nameKey ? String(props[nameKey]).trim() : 'Selected road',
+    })
+    setActiveRightTab('streetview')
   }, [])
 
   const handleRightClickAskChat = useCallback(
@@ -2008,6 +2028,7 @@ function App() {
                   onLayerStyleChange={handleLayerStyleChange}
                   onAddMarker={handleRightClickAddMarker}
                   onOpenStreetView={handleRightClickStreetView}
+                  onInspectRoad={handleInspectRoad}
                   onAskChat={handleRightClickAskChat}
                   onContextualQuery={handleContextualQuery}
                   onDrawComplete={handleDrawComplete}
@@ -2042,6 +2063,14 @@ function App() {
                 Artifacts
               </button>
             )}
+            {appMode === 'map' && (
+              <button
+                className={`tab ${activeRightTab === 'streetview' ? 'active' : ''}`}
+                onClick={() => setActiveRightTab('streetview')}
+              >
+                Street View
+              </button>
+            )}
           </div>
           {activeRightTab === 'chat' || appMode === 'document' ? (
             <ErrorBoundary label="Chat">
@@ -2059,7 +2088,7 @@ function App() {
                 onComposeMapFigure={composeMapFigure}
               />
             </ErrorBoundary>
-          ) : (
+          ) : activeRightTab === 'artifacts' ? (
             <ErrorBoundary label="Artifacts">
               <ArtifactsPanel
                 revision={artifactsRevision}
@@ -2071,10 +2100,21 @@ function App() {
                 }}
               />
             </ErrorBoundary>
+          ) : (
+            <ErrorBoundary label="Street View">
+              <StreetViewWorkspace
+                target={streetViewTarget}
+                roadTarget={roadInspectionTarget}
+                onArtifactsChanged={() => setArtifactsRevision((n) => n + 1)}
+                onClose={() => {
+                  setStreetViewTarget(null)
+                  setRoadInspectionTarget(null)
+                }}
+              />
+            </ErrorBoundary>
           )}
         </aside>
       </div>
-      <StreetViewDialog target={streetViewTarget} onClose={() => setStreetViewTarget(null)} />
     </div>
   )
 }

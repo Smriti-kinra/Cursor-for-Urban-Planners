@@ -3,7 +3,7 @@ import maplibregl from 'maplibre-gl'
 import type { DataDrivenPropertyValueSpecification, ExpressionSpecification } from 'maplibre-gl'
 import 'maplibre-gl/dist/maplibre-gl.css'
 import * as turf from '@turf/turf'
-import type { Feature, FeatureCollection } from 'geojson'
+import type { Feature, FeatureCollection, Geometry } from 'geojson'
 import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS } from '../types'
 import './MapView.css'
 
@@ -146,6 +146,7 @@ interface MapViewProps {
   ) => void
   onAddMarker?: (lng: number, lat: number) => void
   onOpenStreetView?: (lng: number, lat: number) => void
+  onInspectRoad?: (feature: Feature) => void
   onAskChat?: (lng: number, lat: number) => void
   onContextualQuery?: (feature: any, lngLat: { lng: number; lat: number }) => void
   /** A user finished drawing a shape. Coordinates are [lng,lat]; for 'point'
@@ -169,6 +170,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onLayerStyleChange,
     onAddMarker,
     onOpenStreetView,
+    onInspectRoad,
     onAskChat,
     onContextualQuery,
     onDrawComplete,
@@ -185,6 +187,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onAddMarkerRef.current = onAddMarker
   const onOpenStreetViewRef = useRef(onOpenStreetView)
   onOpenStreetViewRef.current = onOpenStreetView
+  const onInspectRoadRef = useRef(onInspectRoad)
+  onInspectRoadRef.current = onInspectRoad
   const onAskChatRef = useRef(onAskChat)
   onAskChatRef.current = onAskChat
   const onContextualQueryRef = useRef(onContextualQuery)
@@ -217,9 +221,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const [searchResults, setSearchResults] = useState<NominatimSearchResult[]>([])
   const [showSearch, setShowSearch] = useState(false)
   const [showBasemaps, setShowBasemaps] = useState(false)
-  const [ctxMenu, setCtxMenu] = useState<{ x: number; y: number; lng: number; lat: number } | null>(null)
+  const [ctxMenu, setCtxMenu] = useState<{
+    x: number
+    y: number
+    lng: number
+    lat: number
+    feature?: Feature
+  } | null>(null)
   const [drawMode, setDrawMode] = useState<DrawMode>(null)
   const [drawCount, setDrawCount] = useState(0) // vertices placed in the current draft
+  const [streetViewPickMode, setStreetViewPickMode] = useState(false)
 
   // ── Initialize map ──
 
@@ -274,7 +285,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     map.on('contextmenu', (e) => {
       e.preventDefault?.()
-      setCtxMenu({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat })
+      const ids = renderLayerIds()
+      const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
+      const feature = feats[0]
+        ? {
+            type: 'Feature' as const,
+            geometry: JSON.parse(JSON.stringify(feats[0].geometry)) as Geometry,
+            properties: { ...(feats[0].properties || {}) },
+          }
+        : undefined
+      setCtxMenu({ x: e.point.x, y: e.point.y, lng: e.lngLat.lng, lat: e.lngLat.lat, feature })
     })
     map.on('movestart', () => setCtxMenu(null))
 
@@ -716,6 +736,18 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
   const DRAW_SRC = '__draw__'
 
+  const featurePointCoordinates = (feature: { geometry?: Geometry | null }): number[] | null => {
+    const geometry = feature.geometry
+    if (geometry?.type !== 'Point') return null
+    const coords = geometry.coordinates
+    return Number.isFinite(coords[0]) && Number.isFinite(coords[1]) ? coords : null
+  }
+
+  const isRoadFeature = (feature?: Feature | null): boolean => {
+    const type = feature?.geometry?.type
+    return type === 'LineString' || type === 'MultiLineString'
+  }
+
   const redrawDraft = useCallback(() => {
     const map = mapRef.current
     if (!map) return
@@ -817,6 +849,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const onClick = (e: maplibregl.MapMouseEvent) => {
       const mode = drawModeRef.current
       if (!mode) {
+        if (streetViewPickMode) {
+          onOpenStreetViewRef.current?.(e.lngLat.lng, e.lngLat.lat)
+          setStreetViewPickMode(false)
+          return
+        }
         // Contextual query handling
         if (e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
           const ids = renderLayerIds()
@@ -865,6 +902,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             })
           }
         } else {
+          const ids = renderLayerIds()
+          const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
+          const pointCoords = feats.length ? featurePointCoordinates(feats[0]) : null
+          if (pointCoords) {
+            onOpenStreetViewRef.current?.(pointCoords[0], pointCoords[1])
+            return
+          }
           // Clear visual feedback if clicked elsewhere without ctrl/meta key
           const hlId = 'highlight-temp'
           for (const suffix of ['-fill', '-line', '-circle']) {
@@ -896,7 +940,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.off('click', onClick)
       map.off('dblclick', onDblClick)
     }
-  }, [mapReady, finishDraw, redrawDraft])
+  }, [mapReady, finishDraw, redrawDraft, streetViewPickMode])
 
   // ── Hover popups ──
   // Any feature in one of our layers (AI markers, AI-drawn shapes, user-drawn
@@ -1016,6 +1060,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         >
           🔍
         </button>
+        <button
+          className={`toolbar-btn ${streetViewPickMode ? 'active' : ''}`}
+          onClick={() => {
+            setStreetViewPickMode((v) => !v)
+            setShowSearch(false)
+            setShowBasemaps(false)
+          }}
+          title="Open Street View by clicking the map"
+        >
+          🛣
+        </button>
 
         <div className="toolbar-divider" />
 
@@ -1096,7 +1151,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             <div className="search-results">
               {searchResults.map((r, i) => (
                 <div key={i} className="search-result" onClick={() => flyToResult(r)}>
-                  {r.display_name}
+                  <span>{r.display_name}</span>
+                  <button
+                    className="search-result-action"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      onOpenStreetViewRef.current?.(parseFloat(r.lon), parseFloat(r.lat))
+                      flyToResult(r)
+                    }}
+                  >
+                    Street View
+                  </button>
                 </div>
               ))}
             </div>
@@ -1141,6 +1206,14 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           >
             🛣 Street View
           </button>
+          {isRoadFeature(ctxMenu.feature) && (
+            <button
+              className="ctx-item"
+              onClick={() => { onInspectRoadRef.current?.(ctxMenu.feature!); setCtxMenu(null) }}
+            >
+              Inspect Road
+            </button>
+          )}
           <button
             className="ctx-item"
             onClick={() => { onAskChatRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
