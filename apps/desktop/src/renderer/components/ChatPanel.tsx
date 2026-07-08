@@ -312,21 +312,6 @@ export default function ChatPanel({
   const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
 
-  // User report generator states
-  const [showReportModal, setShowReportModal] = useState(false)
-  const [reportType, setReportType] = useState('Comprehensive Mobility Plan')
-  const [reportLocation, setReportLocation] = useState('')
-
-  const handleGenerateReport = (type: string, location: string) => {
-    const prompt = `generate a ${type} report for ${location.trim()} (2052 vision)`
-    if (!activeConversation) {
-      pendingInputRef.current = prompt
-      onCreateConversation()
-    } else {
-      sendMessageDirect(prompt)
-    }
-    setShowReportModal(false)
-  }
 
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -1417,15 +1402,6 @@ export default function ChatPanel({
             </select>
           )}
 
-          <button
-            className="chat-report-btn"
-            onClick={() => setShowReportModal(true)}
-            disabled={isStreaming}
-            title="Generate a professional urban planning report"
-          >
-            📝 Generate Report
-          </button>
-
           {isSwitchingModel ? (
             <span className="chat-hint-text">Switching model...</span>
           ) : (
@@ -1433,58 +1409,6 @@ export default function ChatPanel({
           )}
         </div>
       </div>
-
-      {showReportModal && (
-        <div className="report-modal-overlay" onClick={() => setShowReportModal(false)}>
-          <div className="report-modal" onClick={(e) => e.stopPropagation()}>
-            <div className="report-modal-header">
-              <h3>📝 Generate Planning Report</h3>
-              <button className="report-modal-close" onClick={() => setShowReportModal(false)}>×</button>
-            </div>
-            <div className="report-modal-body">
-              <div className="report-form-group">
-                <label>Report Type</label>
-                <select
-                  value={reportType}
-                  onChange={(e) => setReportType(e.target.value)}
-                  className="report-select"
-                >
-                  <option value="Comprehensive Mobility Plan">Comprehensive Mobility Plan</option>
-                  <option value="Traffic Impact Assessment">Traffic Impact Assessment</option>
-                  <option value="Parking Strategy">Parking Strategy</option>
-                  <option value="Land Use Study">Land Use Study</option>
-                  <option value="Infrastructure Assessment">Infrastructure Assessment</option>
-                  <option value="Master Plan">Master Plan</option>
-                  <option value="Urban Design Report">Urban Design Report</option>
-                </select>
-              </div>
-              <div className="report-form-group">
-                <label>Location / Study Area</label>
-                <input
-                  type="text"
-                  value={reportLocation}
-                  onChange={(e) => setReportLocation(e.target.value)}
-                  placeholder="e.g. Chandigarh Tri-City, Mohali Sector 62..."
-                  className="report-input"
-                  autoFocus
-                />
-              </div>
-            </div>
-            <div className="report-modal-footer">
-              <button className="report-btn cancel" onClick={() => setShowReportModal(false)}>
-                Cancel
-              </button>
-              <button
-                className="report-btn submit"
-                onClick={() => handleGenerateReport(reportType, reportLocation)}
-                disabled={!reportLocation.trim()}
-              >
-                Generate Report
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   )
 }

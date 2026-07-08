@@ -4,6 +4,7 @@ import json
 import math
 from pathlib import Path
 from llm.base import ToolDeclaration
+from mcp_servers.osm_server import _overpass_post, OverpassError, _sanitize_osm_token
 
 def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """Calculate the Haversine distance in meters between two points (lng, lat)."""
@@ -66,7 +67,7 @@ def _build_networkx_graph(geojson_data: dict) -> any:
 
 class NetworkServer:
     description = "Street Network Analysis & Shortest Path Routing"
-    tool_names = {"analyze_street_network", "find_shortest_path", "route_multi_stop"}
+    tool_names = {"analyze_street_network", "find_shortest_path", "route_multi_stop", "fetch_street_network"}
 
     def get_declarations(self) -> list[ToolDeclaration]:
         return [
@@ -82,7 +83,11 @@ class NetworkServer:
                     "properties": {
                         "geojson": {
                             "type": "object",
-                            "description": "GeoJSON FeatureCollection containing LineString road/street lines."
+                            "description": "GeoJSON FeatureCollection containing LineString road/street lines. Optional if geojson_path is provided."
+                        },
+                        "geojson_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to a saved road network GeoJSON file in the workspace (preferred over passing huge geojson object)."
                         },
                         "workspace": {
                             "type": "string",
@@ -93,7 +98,7 @@ class NetworkServer:
                             "description": "Optional: Title for the map layer (e.g. 'Bottleneck Nodes')."
                         }
                     },
-                    "required": ["geojson", "workspace"]
+                    "required": ["workspace"]
                 }
             ),
             ToolDeclaration(
@@ -107,7 +112,11 @@ class NetworkServer:
                     "properties": {
                         "geojson": {
                             "type": "object",
-                            "description": "GeoJSON FeatureCollection containing LineString road lines."
+                            "description": "GeoJSON FeatureCollection containing LineString road lines. Optional if geojson_path is provided."
+                        },
+                        "geojson_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to a saved road network GeoJSON file in the workspace (preferred over passing huge geojson object)."
                         },
                         "start_lat": {"type": "number", "description": "Latitude coordinate of the starting point."},
                         "start_lng": {"type": "number", "description": "Longitude coordinate of the starting point."},
@@ -122,7 +131,7 @@ class NetworkServer:
                             "description": "Optional: Title for the map layer (e.g. 'Shortest Route')."
                         }
                     },
-                    "required": ["geojson", "start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
+                    "required": ["start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
                 }
             ),
             ToolDeclaration(
@@ -138,7 +147,11 @@ class NetworkServer:
                     "properties": {
                         "geojson": {
                             "type": "object",
-                            "description": "GeoJSON FeatureCollection containing LineString road lines."
+                            "description": "GeoJSON FeatureCollection containing LineString road lines. Optional if geojson_path is provided."
+                        },
+                        "geojson_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to a saved road network GeoJSON file in the workspace (preferred over passing huge geojson object)."
                         },
                         "waypoints": {
                             "type": "array",
@@ -162,7 +175,48 @@ class NetworkServer:
                             "description": "Name for the output route layer."
                         }
                     },
-                    "required": ["geojson", "waypoints", "workspace"]
+                    "required": ["waypoints", "workspace"]
+                }
+            ),
+            ToolDeclaration(
+                name="fetch_street_network",
+                description=(
+                    "Fetch a topologically connected street/road network from OpenStreetMap within the map view or coordinates. "
+                    "Saves a clean GeoJSON FeatureCollection of ways to the workspace and automatically displays it on the map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "workspace": {
+                            "type": "string",
+                            "description": "Absolute path to the active workspace folder."
+                        },
+                        "use_current_bounds": {
+                            "type": "boolean",
+                            "description": "If true, fetches streets within the current map viewport bounds instead of using lat/lng/radius_meters."
+                        },
+                        "lat": {
+                            "type": "number",
+                            "description": "Center latitude. Optional if use_current_bounds is true or if map center is available."
+                        },
+                        "lng": {
+                            "type": "number",
+                            "description": "Center longitude. Optional if use_current_bounds is true or if map center is available."
+                        },
+                        "radius_meters": {
+                            "type": "number",
+                            "description": "Search radius in meters (default 1500, max 10000)."
+                        },
+                        "highway_types": {
+                            "type": "string",
+                            "description": "Pipe-separated list of highway types to fetch (e.g. 'primary|secondary|tertiary|residential'). Defaults to standard drivable streets."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Optional name for the generated map layer (e.g. 'Downtown Streets'). Defaults to 'Street Network'."
+                        }
+                    },
+                    "required": ["workspace"]
                 }
             )
         ]
@@ -174,16 +228,26 @@ class NetworkServer:
             return await self._find_shortest_path(args)
         if tool_name == "route_multi_stop":
             return await self._route_multi_stop(args)
+        if tool_name == "fetch_street_network":
+            return await self._fetch_street_network(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _analyze_street_network(self, args: dict) -> dict:
+        geojson_path = args.get("geojson_path", "").strip()
         geojson = args.get("geojson")
         workspace = args.get("workspace", "").strip()
         title = args.get("title", "").strip() or "Junction Bottlenecks"
         ws = args.get("_ws")
 
+        if geojson_path:
+            try:
+                with open(geojson_path) as f:
+                    geojson = json.load(f)
+            except Exception as e:
+                return {"error": f"Failed to load GeoJSON from path '{geojson_path}': {str(e)}"}
+
         if not geojson:
-            return {"error": "geojson is required"}
+            return {"error": "Either 'geojson' or 'geojson_path' must be provided."}
         if not workspace:
             return {"error": "workspace is required to save output layers"}
 
@@ -282,6 +346,7 @@ class NetworkServer:
             return {"error": f"Topological network analysis failed: {str(e)}"}
 
     async def _find_shortest_path(self, args: dict) -> dict:
+        geojson_path = args.get("geojson_path", "").strip()
         geojson = args.get("geojson")
         start_lat = float(args.get("start_lat", 0))
         start_lng = float(args.get("start_lng", 0))
@@ -291,8 +356,15 @@ class NetworkServer:
         title = args.get("title", "").strip() or "Shortest Route"
         ws = args.get("_ws")
 
+        if geojson_path:
+            try:
+                with open(geojson_path) as f:
+                    geojson = json.load(f)
+            except Exception as e:
+                return {"error": f"Failed to load GeoJSON from path '{geojson_path}': {str(e)}"}
+
         if not geojson:
-            return {"error": "geojson is required"}
+            return {"error": "Either 'geojson' or 'geojson_path' must be provided."}
         if not workspace:
             return {"error": "workspace is required to save route outputs"}
 
@@ -386,14 +458,22 @@ class NetworkServer:
             return {"error": f"Shortest path calculation failed: {str(e)}"}
 
     async def _route_multi_stop(self, args: dict) -> dict:
+        geojson_path = args.get("geojson_path", "").strip()
         geojson = args.get("geojson")
         waypoints = args.get("waypoints", [])
         workspace = args.get("workspace", "").strip()
         title = args.get("title", "Multi-Stop Route").strip()
         ws = args.get("_ws")
 
+        if geojson_path:
+            try:
+                with open(geojson_path) as f:
+                    geojson = json.load(f)
+            except Exception as e:
+                return {"error": f"Failed to load GeoJSON from path '{geojson_path}': {str(e)}"}
+
         if not geojson:
-            return {"error": "geojson is required"}
+            return {"error": "Either 'geojson' or 'geojson_path' must be provided."}
         if len(waypoints) < 2:
             return {"error": "At least 2 waypoints are required for multi-stop routing."}
         if not workspace:
@@ -506,4 +586,140 @@ class NetworkServer:
 
         except Exception as e:
             return {"error": f"Multi-stop routing failed: {str(e)}"}
+
+    async def _fetch_street_network(self, args: dict) -> dict:
+        workspace = args.get("workspace", "").strip()
+        use_current_bounds = args.get("use_current_bounds", False)
+        title = args.get("title", "").strip() or "Street Network"
+        ws = args.get("_ws")
+        map_context = args.get("_map_context")
+
+        if not workspace:
+            return {"error": "workspace is required"}
+
+        # Determine bounding box or center+radius
+        bounds = map_context.get("bounds") if map_context else None
+        
+        if use_current_bounds and bounds and all(bounds.get(k) is not None for k in ["south", "west", "north", "east"]):
+            s = bounds["south"]
+            w = bounds["west"]
+            n = bounds["north"]
+            e = bounds["east"]
+            # Diagonal safety check
+            diag = haversine_distance((w, s), (e, n))
+            if diag > 15000:
+                return {
+                    "error": f"Requested search bounds are too large (diagonal {round(diag/1000, 1)}km > 15km). Please zoom in or specify coordinates with a smaller radius."
+                }
+            bbox_filter = f"({s},{w},{n},{e})"
+        else:
+            lat = args.get("lat")
+            lng = args.get("lng")
+            if lat is None or lng is None:
+                center = map_context.get("center") if map_context else None
+                if center and center.get("lat") is not None and center.get("lng") is not None:
+                    lat = center["lat"]
+                    lng = center["lng"]
+                else:
+                    return {"error": "Missing coordinates (lat/lng) or active map context to determine location."}
+            
+            radius = min(int(args.get("radius_meters", 1500)), 10000)
+            bbox_filter = f"(around:{radius},{lat},{lng})"
+
+        # Construct highway tag filter
+        highway_types = args.get("highway_types")
+        if highway_types:
+            if isinstance(highway_types, list):
+                vals = [_sanitize_osm_token(h) for h in highway_types if h]
+            else:
+                vals = [_sanitize_osm_token(h) for h in str(highway_types).split("|") if h]
+            vals = [v for v in vals if v]
+            if vals:
+                tag_filter = f'["highway"~"^({"|".join(vals)})$"]'
+            else:
+                tag_filter = '["highway"]'
+        else:
+            # Default to standard drivable streets (excluding footway, steps, path etc unless asked)
+            drivable_types = "motorway|primary|secondary|tertiary|unclassified|residential|living_street|service|motorway_link|trunk_link|primary_link|secondary_link|tertiary_link"
+            tag_filter = f'["highway"~"^({drivable_types})$"]'
+
+        overpass_query = f"""
+[out:json][timeout:30];
+(
+  way{tag_filter}{bbox_filter};
+);
+out body;
+>;
+out skel qt;
+"""
+
+        try:
+            data = await _overpass_post(overpass_query, timeout=35.0)
+            
+            nodes: dict[int, tuple[float, float]] = {}
+            ways: list[dict] = []
+            
+            for el in data.get("elements", []):
+                if el["type"] == "node":
+                    nodes[el["id"]] = (el.get("lon"), el.get("lat"))
+                elif el["type"] == "way":
+                    ways.append(el)
+                    
+            features = []
+            for el in ways:
+                tags = el.get("tags", {})
+                coords = [nodes[nid] for nid in el.get("nodes", []) if nid in nodes]
+                if len(coords) >= 2:
+                    # Filter keys to limit property size for context window efficiency, but keep basic attributes
+                    # Keys rule: "For spatial data layer transfers... size-gated context properties: key-value for <= 100 features"
+                    # We just copy all tags, but clean it up
+                    features.append({
+                        "type": "Feature",
+                        "geometry": {
+                            "type": "LineString",
+                            "coordinates": coords
+                        },
+                        "properties": {
+                            "osm_id": el["id"],
+                            "highway": tags.get("highway", ""),
+                            "name": tags.get("name", "unnamed"),
+                            **{k: v for k, v in tags.items() if k not in ["name", "highway"]}
+                        }
+                    })
+            
+            out_geojson = {
+                "type": "FeatureCollection",
+                "features": features
+            }
+            
+            # Slugify title for filename
+            slug = "".join(c if c.isalnum() or c in "._-" else "_" for c in title.lower())
+            filename = f"{slug}.geojson"
+            target_path = Path(workspace) / filename
+            
+            with open(target_path, "w") as f:
+                json.dump(out_geojson, f, indent=2)
+                
+            if ws:
+                await ws.send_text(json.dumps({
+                    "type": "action",
+                    "action": "add_geojson_file",
+                    "payload": {
+                        "path": str(target_path),
+                        "name": title
+                    }
+                }))
+                
+            return {
+                "status": "success",
+                "features_count": len(features),
+                "output_layer": str(target_path),
+                "title": title
+            }
+            
+        except OverpassError as e:
+            return {"error": f"Overpass API error: {str(e)}"}
+        except Exception as e:
+            return {"error": f"Failed to fetch street network: {str(e)}"}
+
 
