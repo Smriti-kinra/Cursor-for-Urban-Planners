@@ -25,4 +25,5 @@ contextBridge.exposeInMainWorld('electronAPI', {
   setAPIKey: (key: string) => ipcRenderer.invoke('set-api-key', key),
   getGoogleMapsKey: () => ipcRenderer.invoke('get-google-maps-key'),
   setGoogleMapsKey: (key: string) => ipcRenderer.invoke('set-google-maps-key', key),
+  savePDF: (htmlContent: string, defaultName: string) => ipcRenderer.invoke('save-pdf', htmlContent, defaultName),
 })

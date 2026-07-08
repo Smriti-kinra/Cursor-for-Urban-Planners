@@ -3,6 +3,7 @@
   display: flex;
   flex-direction: column;
   overflow: hidden;
+  position: relative;
 }
 
 /* ── Chat header ── */
@@ -101,10 +102,17 @@
 /* ── Conversation history ── */
 
 .chat-history-list {
-  max-height: 280px;
+  position: absolute;
+  top: 48px;
+  left: 12px;
+  right: 12px;
+  max-height: 350px;
   overflow-y: auto;
-  border-bottom: 1px solid var(--border);
-  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 12px;
+  background: var(--panel-bg, #181a22);
+  z-index: 100;
+  box-shadow: 0 12px 36px rgba(0, 0, 0, 0.48);
   flex-shrink: 0;
 }
 
@@ -182,6 +190,46 @@
 .chat-history-delete:hover {
   color: var(--danger);
   background: rgba(243, 139, 168, 0.1);
+}
+
+.chat-history-rename-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 12px;
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  opacity: 0;
+  transition: all 0.15s;
+  flex-shrink: 0;
+  line-height: 1;
+}
+
+.chat-history-item:hover .chat-history-rename-btn {
+  opacity: 0.6;
+}
+
+.chat-history-rename-btn:hover {
+  opacity: 1 !important;
+  color: var(--accent);
+  background: rgba(137, 180, 250, 0.1);
+}
+
+.chat-history-rename-input {
+  background: var(--input-bg, #1a1a26);
+  border: 1px solid var(--border, #343746);
+  border-radius: 6px;
+  color: var(--text-primary);
+  font-size: 12px;
+  padding: 4px 8px;
+  outline: none;
+  width: 90%;
+  box-sizing: border-box;
+}
+
+.chat-history-rename-input:focus {
+  border-color: var(--accent);
 }
 
 /* ── Messages area ── */
@@ -654,6 +702,30 @@
   cursor: not-allowed;
 }
 
+.chat-stop-btn {
+  background: var(--danger);
+  color: var(--bg-surface);
+  border: none;
+  width: 30px;
+  height: 30px;
+  border-radius: 8px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  flex-shrink: 0;
+  transition: all 0.15s ease-in-out;
+}
+
+.chat-stop-btn:hover {
+  background: #f5a0b8; /* slightly lighter than danger #f38ba8 */
+  transform: scale(1.05);
+}
+
+.chat-stop-btn:active {
+  transform: scale(0.95);
+}
+
 .chat-input-footer {
   display: flex;
   align-items: center;
@@ -943,12 +1015,15 @@
 
 .api-key-toggle-btn {
   background: var(--bg-hover);
-  color: var(--accent);
+  color: var(--text-muted);
   border: 1px solid transparent;
   border-radius: 6px;
-  padding: 4px 10px;
-  font-size: 11px;
-  font-weight: 600;
+  width: 24px;
+  height: 24px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-size: 14px;
   cursor: pointer;
   transition: all 0.15s ease;
 }
@@ -956,6 +1031,14 @@
 .api-key-toggle-btn:hover {
   background: var(--bg-surface);
   border-color: var(--accent);
+  color: var(--accent);
+}
+
+.api-key-toggle-btn.active {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+  transform: rotate(30deg);
 }
 
 .api-key-input-container {
@@ -1003,6 +1086,11 @@
 
 .api-key-save-btn:hover {
   opacity: 0.9;
+}
+
+.api-key-save-btn.success {
+  background: var(--success, #a6e3a1);
+  color: #1e1e2e;
 }
 
 .api-key-clear-btn {
@@ -1137,3 +1225,186 @@
   text-transform: uppercase;
   letter-spacing: 0.5px;
 }
+
+/* ── Generate Report Button & Modal ── */
+.chat-report-btn {
+  background: rgba(137, 180, 250, 0.08);
+  border: 1px solid rgba(137, 180, 250, 0.25);
+  border-radius: 4px;
+  color: var(--accent, #89b4fa);
+  font-size: 11px;
+  font-weight: 500;
+  padding: 4px 10px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  transition: all 0.15s ease;
+  outline: none;
+}
+
+.chat-report-btn:hover:not(:disabled) {
+  background: rgba(137, 180, 250, 0.16);
+  border-color: var(--accent, #89b4fa);
+}
+
+.chat-report-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.report-modal-overlay {
+  position: fixed;
+  top: 0;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  background: rgba(15, 15, 22, 0.7);
+  backdrop-filter: blur(8px);
+  z-index: 10000;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+}
+
+.report-modal {
+  width: 420px;
+  background: #11111b;
+  border: 1px solid var(--border, #313244);
+  border-radius: 12px;
+  box-shadow: 0 16px 40px rgba(0, 0, 0, 0.6);
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  animation: modalFadeIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+@keyframes modalFadeIn {
+  from {
+    opacity: 0;
+    transform: scale(0.95) translateY(10px);
+  }
+  to {
+    opacity: 1;
+    transform: scale(1) translateY(0);
+  }
+}
+
+.report-modal-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 16px 20px;
+  border-bottom: 1px solid var(--border, #313244);
+}
+
+.report-modal-header h3 {
+  margin: 0;
+  font-size: 15px;
+  font-weight: 600;
+  color: var(--text-primary, #cdd6f4);
+}
+
+.report-modal-close {
+  background: none;
+  border: none;
+  color: var(--text-muted, #7f849c);
+  font-size: 20px;
+  cursor: pointer;
+  transition: color 0.15s;
+  padding: 0;
+  line-height: 1;
+}
+
+.report-modal-close:hover {
+  color: var(--danger, #f38ba8);
+}
+
+.report-modal-body {
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.report-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.report-form-group label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-secondary, #bac2de);
+  text-transform: uppercase;
+  letter-spacing: 0.5px;
+}
+
+.report-select,
+.report-input {
+  background: var(--bg-panel, #181825);
+  border: 1px solid var(--border, #313244);
+  border-radius: 6px;
+  color: var(--text-primary, #cdd6f4);
+  font-size: 13px;
+  padding: 8px 12px;
+  outline: none;
+  transition: border-color 0.15s;
+  width: 100%;
+  box-sizing: border-box;
+}
+
+.report-select:focus,
+.report-input:focus {
+  border-color: var(--accent, #89b4fa);
+}
+
+.report-modal-footer {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+  gap: 12px;
+  padding: 16px 20px;
+  border-top: 1px solid var(--border, #313244);
+  background: #181825;
+}
+
+.report-btn {
+  border-radius: 6px;
+  font-size: 13px;
+  font-weight: 500;
+  padding: 8px 16px;
+  cursor: pointer;
+  transition: all 0.15s;
+  border: none;
+  outline: none;
+}
+
+.report-btn.cancel {
+  background: transparent;
+  color: var(--text-muted, #7f849c);
+  border: 1px solid var(--border, #313244);
+}
+
+.report-btn.cancel:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--text-primary, #cdd6f4);
+}
+
+.report-btn.submit {
+  background: var(--accent, #89b4fa);
+  color: #11111b;
+}
+
+.report-btn.submit:hover:not(:disabled) {
+  background: #a6e3a1; /* soft green on hover */
+  transform: translateY(-1px);
+}
+
+.report-btn.submit:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+  transform: none;
+}
+

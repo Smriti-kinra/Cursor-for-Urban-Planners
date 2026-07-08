@@ -2,6 +2,7 @@ import { app, BrowserWindow, ipcMain, dialog, shell, protocol, net, safeStorage 
 import { spawn, ChildProcess } from 'child_process'
 import path from 'path'
 import fs from 'fs'
+import os from 'os'
 
 const BACKEND_PORT = 8765
 const isDev = !app.isPackaged
@@ -375,6 +376,62 @@ ipcMain.handle('import-spatial-files', async (_e, workspacePath: string) => {
     }
   }
   return importedPaths
+})
+
+ipcMain.handle('save-pdf', async (_e, htmlContent: string, defaultName: string) => {
+  let tempFilePath: string | null = null
+  try {
+    const win = new BrowserWindow({
+      show: false,
+      webPreferences: {
+        nodeIntegration: false,
+        contextIsolation: true,
+      },
+    })
+
+    // Write HTML content to a temp file in the OS temp directory
+    const tempDir = os.tmpdir()
+    const tempFileName = `print_${Date.now()}_${Math.random().toString(36).substring(2, 9)}.html`
+    tempFilePath = path.join(tempDir, tempFileName)
+    fs.writeFileSync(tempFilePath, htmlContent, 'utf-8')
+
+    // Load local file to support internal relative hash anchor links
+    await win.loadFile(tempFilePath)
+
+    const pdfBuffer = await win.webContents.printToPDF({
+      printBackground: true,
+      margins: { marginType: 'default' },
+    })
+    win.close()
+
+    // Clean up temporary file
+    try {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath)
+      }
+    } catch (cleanupErr) {
+      console.error('Failed to delete temporary print file:', cleanupErr)
+    }
+
+    const result = await dialog.showSaveDialog(mainWindow!, {
+      title: 'Save PDF Report',
+      defaultPath: defaultName || 'report.pdf',
+      filters: [{ name: 'PDF Files', extensions: ['pdf'] }],
+    })
+    if (result.canceled || !result.filePath) return false
+
+    fs.writeFileSync(result.filePath, pdfBuffer)
+    return true
+  } catch (err) {
+    console.error('Failed to export PDF:', err)
+    // Clean up temp file on error
+    try {
+      if (tempFilePath && fs.existsSync(tempFilePath)) {
+        fs.unlinkSync(tempFilePath)
+      }
+    } catch {}
+    return false
+  }
 })
 
 // --- App lifecycle ---

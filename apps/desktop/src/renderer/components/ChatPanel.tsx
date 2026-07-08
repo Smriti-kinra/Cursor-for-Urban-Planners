@@ -136,7 +136,11 @@ function ResearchBubble({
           )}
           {markdown && (
             <div className="research-full-report streaming">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+                components={headingComponents}
+              >
                 {markdown}
               </ReactMarkdown>
             </div>
@@ -163,7 +167,11 @@ function ResearchBubble({
 
           {expanded && (
             <div className="research-full-report">
-              <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeHighlight]}>
+              <ReactMarkdown
+                remarkPlugins={[remarkGfm]}
+                rehypePlugins={[rehypeHighlight]}
+                components={headingComponents}
+              >
                 {markdown}
               </ReactMarkdown>
             </div>
@@ -192,6 +200,7 @@ interface ChatPanelProps {
   onSelectConversation: (id: string) => void
   onDeleteConversation: (id: string) => void
   onMessagesChange: (messages: ChatMessage[]) => void
+  onRenameConversation?: (id: string, title: string) => void
   mapContext: MapContext
   onMapAction: (action: MapAction) => void
   documentImage?: DocumentImage | null
@@ -224,6 +233,35 @@ function CodePre({ children, ...props }: React.HTMLAttributes<HTMLPreElement>) {
   )
 }
 
+const getSlug = (node: any): string => {
+  if (!node) return ''
+  if (typeof node === 'string') {
+    return node
+      .toLowerCase()
+      .trim()
+      .replace(/[^a-z0-9\s-]/g, '')
+      .replace(/\s+/g, '-')
+      .replace(/-+/g, '-')
+      .replace(/(^-|-$)/g, '')
+  }
+  if (Array.isArray(node)) {
+    return node.map(getSlug).join('-').replace(/-+/g, '-').replace(/(^-|-$)/g, '')
+  }
+  if (node.props && node.props.children) {
+    return getSlug(node.props.children)
+  }
+  return ''
+}
+
+const headingComponents = {
+  h1: ({ children, ...props }: any) => <h1 id={getSlug(children)} {...props}>{children}</h1>,
+  h2: ({ children, ...props }: any) => <h2 id={getSlug(children)} {...props}>{children}</h2>,
+  h3: ({ children, ...props }: any) => <h3 id={getSlug(children)} {...props}>{children}</h3>,
+  h4: ({ children, ...props }: any) => <h4 id={getSlug(children)} {...props}>{children}</h4>,
+  h5: ({ children, ...props }: any) => <h5 id={getSlug(children)} {...props}>{children}</h5>,
+  h6: ({ children, ...props }: any) => <h6 id={getSlug(children)} {...props}>{children}</h6>,
+}
+
 export default function ChatPanel({
   conversations,
   activeConversation,
@@ -231,6 +269,7 @@ export default function ChatPanel({
   onSelectConversation,
   onDeleteConversation,
   onMessagesChange,
+  onRenameConversation,
   mapContext,
   onMapAction,
   documentImage,
@@ -254,10 +293,15 @@ export default function ChatPanel({
   const [keyError, setKeyError] = useState<string | null>(null)
   const [isKeyLoaded, setIsKeyLoaded] = useState(false)
 
+  // Conversation renaming state
+  const [editingConversationId, setEditingConversationId] = useState<string | null>(null)
+  const [editingTitle, setEditingTitle] = useState('')
+
   // Google Maps API Key State
   const [googleKey, setGoogleKey] = useState('')
   const [isSavingGoogleKey, setIsSavingGoogleKey] = useState(false)
   const [googleKeyError, setGoogleKeyError] = useState<string | null>(null)
+  const [googleKeySuccess, setGoogleKeySuccess] = useState(false)
 
   // Deep research state
   const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
@@ -267,6 +311,22 @@ export default function ChatPanel({
   const [researchExpanded, setResearchExpanded] = useState(false)
   const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
+
+  // User report generator states
+  const [showReportModal, setShowReportModal] = useState(false)
+  const [reportType, setReportType] = useState('Comprehensive Mobility Plan')
+  const [reportLocation, setReportLocation] = useState('')
+
+  const handleGenerateReport = (type: string, location: string) => {
+    const prompt = `generate a ${type} report for ${location.trim()} (2052 vision)`
+    if (!activeConversation) {
+      pendingInputRef.current = prompt
+      onCreateConversation()
+    } else {
+      sendMessageDirect(prompt)
+    }
+    setShowReportModal(false)
+  }
 
   const wsRef = useRef<WebSocket | null>(null)
   const messagesEndRef = useRef<HTMLDivElement>(null)
@@ -280,6 +340,13 @@ export default function ChatPanel({
     base: ChatMessage[]
     accum: string
     timestamp: number
+    research?: {
+      phase: 'idle' | 'running' | 'done'
+      steps: string[]
+      reasoning: string
+      markdown: string
+      citations: Array<{ url: string; title: string }>
+    }
   } | null>(null)
   // Whether the current WS connection has already received the history
   // replay payload. Reset whenever we open a fresh connection.
@@ -411,38 +478,82 @@ export default function ChatPanel({
       setToolStatus(null)
       inFlightRef.current = null
     } else if (data.type === 'research_start') {
-      setResearchPhase('running')
-      setResearchSteps([])
-      setResearchMarkdown('')
-      setResearchCitations([])
-      setResearchExpanded(false)
-      setResearchReasoning('')
-      reportMdRef.current = ''
+      const slot = inFlightRef.current
+      if (slot) {
+        slot.research = {
+          phase: 'running',
+          steps: [],
+          reasoning: '',
+          markdown: '',
+          citations: []
+        }
+        onMessagesChangeRef.current([
+          ...slot.base,
+          { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+        ])
+      }
       setToolStatus('Deep Research in progress…')
     } else if (data.type === 'research_step') {
-      const q = data.query ?? ''
-      if (q) setResearchSteps((prev) => [...prev, q])
-    } else if (data.type === 'research_reasoning_delta') {
-      const d = data.delta ?? ''
-      if (d) setResearchReasoning((prev) => prev + d)
-    } else if (data.type === 'research_text_delta') {
-      const d = data.delta ?? ''
-      if (d) {
-        reportMdRef.current += d
-        setResearchMarkdown((prev) => prev + d)
-        setToolStatus(null)
+      const slot = inFlightRef.current
+      if (slot && slot.research) {
+        const q = data.query ?? ''
+        if (q) {
+          slot.research.steps = [...slot.research.steps, q]
+          onMessagesChangeRef.current([
+            ...slot.base,
+            { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+          ])
+        }
       }
+    } else if (data.type === 'research_reasoning_delta') {
+      const slot = inFlightRef.current
+      if (slot && slot.research) {
+        const d = data.delta ?? ''
+        if (d) {
+          slot.research.reasoning += d
+          onMessagesChangeRef.current([
+            ...slot.base,
+            { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+          ])
+        }
+      }
+    } else if (data.type === 'research_text_delta') {
+      const slot = inFlightRef.current
+      if (slot && slot.research) {
+        const d = data.delta ?? ''
+        if (d) {
+          slot.research.markdown += d
+          onMessagesChangeRef.current([
+            ...slot.base,
+            { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+          ])
+        }
+      }
+      setToolStatus(null)
     } else if (data.type === 'research_heartbeat') {
       // keep-alive ping — no UI update needed
     } else if (data.type === 'research_report') {
-      const md = data.markdown ?? ''
-      reportMdRef.current = md
-      setResearchMarkdown(md)
-      if (data.citations && data.citations.length) setResearchCitations(data.citations)
-      setResearchPhase('done')
+      const slot = inFlightRef.current
+      if (slot && slot.research) {
+        const md = data.markdown ?? ''
+        slot.research.markdown = md
+        slot.research.citations = data.citations || []
+        slot.research.phase = 'done'
+        onMessagesChangeRef.current([
+          ...slot.base,
+          { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+        ])
+      }
       setToolStatus(null)
     } else if (data.type === 'research_done') {
-      setResearchPhase((prev) => (prev !== 'done' ? 'done' : prev))
+      const slot = inFlightRef.current
+      if (slot && slot.research) {
+        slot.research.phase = 'done'
+        onMessagesChangeRef.current([
+          ...slot.base,
+          { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+        ])
+      }
       setToolStatus(null)
     } else if (data.type === 'end') {
       setIsStreaming(false)
@@ -477,8 +588,37 @@ export default function ChatPanel({
     })
   }, [handleWsMessage])
 
-  const downloadResearchMd = useCallback(() => {
-    const md = reportMdRef.current
+  const handleStopStreaming = useCallback(() => {
+    if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({ type: 'stop' }))
+    }
+    const slot = inFlightRef.current
+    if (slot) {
+      if (slot.research) {
+        if (slot.research.markdown || slot.research.steps.length > 0) {
+          slot.research.phase = 'done'
+          onMessagesChange([
+            ...slot.base,
+            { role: 'assistant', content: '', timestamp: slot.timestamp, research: { ...slot.research } }
+          ])
+        } else {
+          onMessagesChange(slot.base)
+        }
+      } else if (slot.accum) {
+        onMessagesChange([
+          ...slot.base,
+          { role: 'assistant', content: slot.accum, timestamp: slot.timestamp },
+        ])
+      } else {
+        onMessagesChange(slot.base)
+      }
+    }
+    setIsStreaming(false)
+    setToolStatus(null)
+    inFlightRef.current = null
+  }, [onMessagesChange])
+
+  const downloadResearchMd = useCallback((md: string) => {
     if (!md) return
     const blob = new Blob([md], { type: 'text/markdown' })
     const url = URL.createObjectURL(blob)
@@ -489,8 +629,7 @@ export default function ChatPanel({
     setTimeout(() => URL.revokeObjectURL(url), 150)
   }, [])
 
-  const downloadResearchPdf = useCallback(async () => {
-    const md = reportMdRef.current
+  const downloadResearchPdf = useCallback(async (md: string) => {
     if (!md) return
     const { jsPDF } = await import('jspdf')
     const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
@@ -691,6 +830,8 @@ export default function ChatPanel({
       if (ok) {
         setGoogleKey(keyToSave)
         setIsSavingGoogleKey(false)
+        setGoogleKeySuccess(true)
+        setTimeout(() => setGoogleKeySuccess(false), 2000)
         return true
       } else {
         setGoogleKeyError('Failed to save key securely to system keychain.')
@@ -770,13 +911,6 @@ export default function ChatPanel({
     }
   }
 
-  const stopCurrentRun = useCallback(() => {
-    if (!wsRef.current || wsRef.current.readyState !== WebSocket.OPEN) return
-    wsRef.current.send(JSON.stringify({ type: 'stop' }))
-    setIsStreaming(false)
-    setToolStatus(null)
-    setChatError(null)
-  }, [])
 
   const sendMessage = async (): Promise<void> => {
     if (!input.trim() || isStreaming) return
@@ -926,8 +1060,12 @@ export default function ChatPanel({
                 )}
               </div>
 
-              <button className="api-key-toggle-btn" onClick={() => setShowApiKeyInput(!showApiKeyInput)}>
-                {showApiKeyInput ? 'Hide Settings' : 'Settings'}
+              <button
+                className={`api-key-toggle-btn ${showApiKeyInput ? 'active' : ''}`}
+                onClick={() => setShowApiKeyInput(!showApiKeyInput)}
+                title={showApiKeyInput ? 'Hide settings' : 'Show settings'}
+              >
+                ⚙
               </button>
             </div>
           </div>
@@ -939,6 +1077,7 @@ export default function ChatPanel({
                 <label htmlFor="api-key-input-element" className="setting-field-label">OpenAI API Key (Required)</label>
                 <div className="api-key-input-wrapper">
                   <input
+                    key={apiKey}
                     type="password"
                     className="api-key-input-field"
                     defaultValue={apiKey}
@@ -980,6 +1119,7 @@ export default function ChatPanel({
                 <label htmlFor="google-key-input-element" className="setting-field-label">Google Maps API Key (Optional)</label>
                 <div className="api-key-input-wrapper">
                   <input
+                    key={googleKey}
                     type="password"
                     className="api-key-input-field"
                     defaultValue={googleKey}
@@ -994,14 +1134,14 @@ export default function ChatPanel({
                     }}
                   />
                   <button
-                    className="api-key-save-btn"
+                    className={`api-key-save-btn ${googleKeySuccess ? 'success' : ''}`}
                     onClick={() => {
                       const el = document.getElementById('google-key-input-element') as HTMLInputElement
                       if (el) saveGoogleKey(el.value)
                     }}
                     disabled={isSavingGoogleKey}
                   >
-                    {isSavingGoogleKey ? 'Saving...' : 'Save'}
+                    {isSavingGoogleKey ? 'Saving...' : googleKeySuccess ? 'Saved! ✓' : 'Save'}
                   </button>
                   {googleKey && (
                     <button
@@ -1031,6 +1171,7 @@ export default function ChatPanel({
                 key={conv.id}
                 className={`chat-history-item ${conv.id === activeConversation?.id ? 'active' : ''}`}
                 onClick={() => {
+                  if (editingConversationId === conv.id) return
                   onSelectConversation(conv.id)
                   setShowHistory(false)
                   wsRef.current?.close()
@@ -1038,12 +1179,48 @@ export default function ChatPanel({
                 }}
               >
                 <div className="chat-history-item-content">
-                  <span className="chat-history-item-title">{conv.title}</span>
+                  {editingConversationId === conv.id ? (
+                    <input
+                      type="text"
+                      className="chat-history-rename-input"
+                      value={editingTitle}
+                      onChange={(e) => setEditingTitle(e.target.value)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          onRenameConversation?.(conv.id, editingTitle.trim() || 'New chat')
+                          setEditingConversationId(null)
+                        } else if (e.key === 'Escape') {
+                          setEditingConversationId(null)
+                        }
+                      }}
+                      onBlur={() => {
+                        onRenameConversation?.(conv.id, editingTitle.trim() || 'New chat')
+                        setEditingConversationId(null)
+                      }}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                    />
+                  ) : (
+                    <span className="chat-history-item-title">{conv.title}</span>
+                  )}
                   <span className="chat-history-item-meta">
                     {conv.messages.length} msg{conv.messages.length !== 1 ? 's' : ''} &middot;{' '}
                     {formatTime(conv.createdAt)}
                   </span>
                 </div>
+                {editingConversationId !== conv.id && (
+                  <button
+                    className="chat-history-rename-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingConversationId(conv.id)
+                      setEditingTitle(conv.title)
+                    }}
+                    title="Rename conversation"
+                  >
+                    ✎
+                  </button>
+                )}
                 <button
                   className="chat-history-delete"
                   onClick={(e) => {
@@ -1122,20 +1299,31 @@ export default function ChatPanel({
           </div>
         )}
         {messages.map((msg, i) => {
-          // Don't render placeholder/empty assistant turns (e.g. a turn that
-          // only called a tool like generate_report) — they show as a blank
-          // "ASSISTANT" bubble. The research bubble below covers that case.
-          if (msg.role === 'assistant' && !msg.content.trim()) return null
+          // Don't render placeholder/empty assistant turns unless they contain inline research metadata
+          if (msg.role === 'assistant' && !msg.content.trim() && !msg.research) return null
           return (
             <div key={i} className={`chat-msg ${msg.role}`}>
               <div className="chat-msg-role">{msg.role === 'user' ? 'You' : 'Assistant'}</div>
               <div className="chat-msg-body">
-                {msg.role === 'assistant' ? (
+                {msg.research ? (
+                  <ResearchBubble
+                    phase={msg.research.phase}
+                    steps={msg.research.steps}
+                    reasoning={msg.research.reasoning}
+                    markdown={msg.research.markdown}
+                    citations={msg.research.citations}
+                    expanded={researchExpanded}
+                    onToggleExpand={() => setResearchExpanded((v) => !v)}
+                    onDownloadMd={() => downloadResearchMd(msg.research?.markdown || '')}
+                    onDownloadPdf={() => downloadResearchPdf(msg.research?.markdown || '')}
+                  />
+                ) : msg.role === 'assistant' ? (
                   <ReactMarkdown
                     remarkPlugins={[remarkGfm]}
                     rehypePlugins={[rehypeHighlight]}
                     components={{
                       pre: CodePre,
+                      ...headingComponents
                     }}
                   >
                     {msg.content}
@@ -1147,33 +1335,14 @@ export default function ChatPanel({
             </div>
           )
         })}
-        {researchPhase !== 'idle' && (
-          <div className="chat-msg assistant">
-            <div className="chat-msg-role">Assistant</div>
-            <div className="chat-msg-body">
-              <ResearchBubble
-                phase={researchPhase}
-                steps={researchSteps}
-                reasoning={researchReasoning}
-                markdown={researchMarkdown}
-                citations={researchCitations}
-                expanded={researchExpanded}
-                onToggleExpand={() => setResearchExpanded((v) => !v)}
-                onDownloadMd={downloadResearchMd}
-                onDownloadPdf={downloadResearchPdf}
-              />
-            </div>
-          </div>
-        )}
-        {/* Tool status + streaming dots are hidden while a research run owns
-            the screen — the ResearchBubble shows its own progress. */}
-        {toolStatus && researchPhase === 'idle' && (
+        {/* Tool status + streaming dots are hidden while a research run is active on the screen */}
+        {toolStatus && messages[messages.length - 1]?.research?.phase !== 'running' && (
           <div className="chat-tool-status">
             <span className="tool-dot" />
             {toolStatus}
           </div>
         )}
-        {isStreaming && !toolStatus && researchPhase === 'idle' && (
+        {isStreaming && !toolStatus && messages[messages.length - 1]?.research?.phase !== 'running' && (
           <div className="chat-streaming">
             <span className="streaming-dot" />
             <span className="streaming-dot" />
@@ -1205,10 +1374,12 @@ export default function ChatPanel({
           {isStreaming ? (
             <button
               className="chat-stop-btn"
-              onClick={stopCurrentRun}
+              onClick={handleStopStreaming}
               title="Stop generating"
             >
-              ■
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+                <rect x="4" y="4" width="8" height="8" rx="1" fill="currentColor" />
+              </svg>
             </button>
           ) : (
             <button
@@ -1245,6 +1416,16 @@ export default function ChatPanel({
               ))}
             </select>
           )}
+
+          <button
+            className="chat-report-btn"
+            onClick={() => setShowReportModal(true)}
+            disabled={isStreaming}
+            title="Generate a professional urban planning report"
+          >
+            📝 Generate Report
+          </button>
+
           {isSwitchingModel ? (
             <span className="chat-hint-text">Switching model...</span>
           ) : (
@@ -1252,6 +1433,58 @@ export default function ChatPanel({
           )}
         </div>
       </div>
+
+      {showReportModal && (
+        <div className="report-modal-overlay" onClick={() => setShowReportModal(false)}>
+          <div className="report-modal" onClick={(e) => e.stopPropagation()}>
+            <div className="report-modal-header">
+              <h3>📝 Generate Planning Report</h3>
+              <button className="report-modal-close" onClick={() => setShowReportModal(false)}>×</button>
+            </div>
+            <div className="report-modal-body">
+              <div className="report-form-group">
+                <label>Report Type</label>
+                <select
+                  value={reportType}
+                  onChange={(e) => setReportType(e.target.value)}
+                  className="report-select"
+                >
+                  <option value="Comprehensive Mobility Plan">Comprehensive Mobility Plan</option>
+                  <option value="Traffic Impact Assessment">Traffic Impact Assessment</option>
+                  <option value="Parking Strategy">Parking Strategy</option>
+                  <option value="Land Use Study">Land Use Study</option>
+                  <option value="Infrastructure Assessment">Infrastructure Assessment</option>
+                  <option value="Master Plan">Master Plan</option>
+                  <option value="Urban Design Report">Urban Design Report</option>
+                </select>
+              </div>
+              <div className="report-form-group">
+                <label>Location / Study Area</label>
+                <input
+                  type="text"
+                  value={reportLocation}
+                  onChange={(e) => setReportLocation(e.target.value)}
+                  placeholder="e.g. Chandigarh Tri-City, Mohali Sector 62..."
+                  className="report-input"
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="report-modal-footer">
+              <button className="report-btn cancel" onClick={() => setShowReportModal(false)}>
+                Cancel
+              </button>
+              <button
+                className="report-btn submit"
+                onClick={() => handleGenerateReport(reportType, reportLocation)}
+                disabled={!reportLocation.trim()}
+              >
+                Generate Report
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

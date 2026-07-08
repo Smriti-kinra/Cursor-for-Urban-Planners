@@ -100,8 +100,27 @@
 .layer-color {
   width: 12px;
   height: 12px;
-  border-radius: 3px;
+  border-radius: 3.5px;
   flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-sizing: border-box;
+}
+
+.layer-color.clickable {
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.layer-color.clickable:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2.5px var(--bg-hover, #252735), 0 0 0 4px var(--accent, #89b4fa);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.layer-color.active {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2.5px var(--bg-hover, #252735), 0 0 0 4px var(--accent, #89b4fa);
+  border-color: rgba(255, 255, 255, 0.4);
 }
 
 .layer-name {
@@ -113,7 +132,8 @@
   white-space: nowrap;
 }
 
-.layer-name-input {
+.layer-name-input,
+.layer-group-name-input {
   flex: 1;
   font-size: 13px;
   color: var(--text-primary);
@@ -127,8 +147,15 @@
   transition: border-color 0.15s, background 0.15s;
 }
 
+.layer-group-name-input {
+  font-size: 12px;
+  font-weight: 600;
+}
+
 .layer-name-input:focus,
-.layer-name-input:hover {
+.layer-name-input:hover,
+.layer-group-name-input:focus,
+.layer-group-name-input:hover {
   border-color: var(--border, #45475a);
   background: var(--input-bg, #1a1a26);
 }

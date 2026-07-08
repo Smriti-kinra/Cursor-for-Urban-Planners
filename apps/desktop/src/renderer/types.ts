@@ -16,6 +16,7 @@ export interface GeoJSONLayer {
   opacity?: number
   styleSpec?: LayerStyleSpec
   wmsSpec?: { url: string; layer_name: string }
+  geeSpec?: { url: string; dataset?: string; vis_params?: any }
 }
 
 // ── Data-driven symbology + labels ──
@@ -93,6 +94,13 @@ export interface ChatMessage {
   role: 'user' | 'assistant'
   content: string
   timestamp: number
+  research?: {
+    phase: 'idle' | 'running' | 'done'
+    steps: string[]
+    reasoning: string
+    markdown: string
+    citations: Array<{ url: string; title: string }>
+  }
 }
 
 export interface Conversation {
@@ -209,7 +217,21 @@ export type MapAction =
   | { type: 'refresh_artifacts'; payload: Record<string, never> }
   | { type: 'switch_basemap'; payload: { basemap: string } }
   | { type: 'add_wms_layer'; payload: { url: string; layer_name: string; title: string } }
+  | { type: 'add_gee_layer'; payload: { url: string; dataset: string; vis_params: any; title: string } }
   | { type: 'add_geojson_file'; payload: { path: string; name: string } }
+  | {
+      type: 'add_scenarios'
+      payload: {
+        scenarios: Array<{
+          name: string
+          description?: string
+          id?: string
+          createdAt?: number
+          layerIds?: string[]
+          layerVisibility?: Record<string, boolean>
+        }>
+      }
+    }
 
 export interface ChatErrorMessage {
   code: string
@@ -246,6 +268,8 @@ export interface ProjectData {
     lineDasharray?: number[]
     opacity?: number
     styleSpec?: LayerStyleSpec
+    wmsSpec?: { url: string; layer_name: string }
+    geeSpec?: { url: string; dataset?: string; vis_params?: any }
   }>
   conversations: Conversation[]
   activeConversationId: string | null

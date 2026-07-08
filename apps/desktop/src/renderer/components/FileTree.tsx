@@ -22,7 +22,10 @@ function TreeNode({ entry, depth, onFileClick }: TreeNodeProps) {
     if (entry.isDirectory) {
       if (!expanded) {
         const items = await window.electronAPI.readDirectory(entry.path)
-        setChildren(items)
+        const filtered = items.filter(
+          (item) => !['project.json', 'google-maps-key.json', 'api-key.json'].includes(item.name.toLowerCase())
+        )
+        setChildren(filtered)
       }
       setExpanded(!expanded)
     } else if (onFileClick) {
@@ -64,7 +67,10 @@ export default function FileTree({ workspacePath, onFileClick, onImportClick, re
   const loadDirectory = useCallback(async () => {
     if (!workspacePath) return
     const items = await window.electronAPI.readDirectory(workspacePath)
-    setEntries(items)
+    const filtered = items.filter(
+      (item) => !['project.json', 'google-maps-key.json', 'api-key.json'].includes(item.name.toLowerCase())
+    )
+    setEntries(filtered)
   }, [workspacePath])
 
   useEffect(() => {

@@ -16,6 +16,7 @@ import Legend from './components/Legend'
 import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
+import ScenarioPanel, { type Scenario } from './components/ScenarioPanel'
 
 import DocumentView, { type DocumentImage } from './components/DocumentView'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -42,8 +43,7 @@ import {
 import { composeFigure } from './lib/compose-figure'
 import { buildLegendEntries } from './lib/legend-data'
 
-type AppMode = 'map' | 'document'
-type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning'
+type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning' | 'scenarios'
 type RightTab = 'chat' | 'artifacts' | 'streetview'
 
 function genId() {
@@ -179,6 +179,8 @@ function App() {
     north: number
   } | null>(null)
   const [artifactsRevision, setArtifactsRevision] = useState(0)
+  const [scenarios, setScenarios] = useState<Scenario[]>([])
+  const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null)
 
   const mapViewRef = useRef<MapViewHandle>(null)
   const bookmarksRef = useRef<MapBookmark[]>([])
@@ -305,9 +307,19 @@ function App() {
       if (!content) return
       try {
         const raw = JSON.parse(content)
+        const validTypes = [
+          'FeatureCollection', 'Feature', 'Point', 'MultiPoint',
+          'LineString', 'MultiLineString', 'Polygon', 'MultiPolygon',
+          'GeometryCollection'
+        ]
+        if (!raw || typeof raw !== 'object' || !validTypes.includes(raw.type)) {
+          console.warn('Selected JSON is not a valid GeoJSON layer.')
+          return
+        }
         const data =
           raw.type === 'FeatureCollection'
             ? raw
+
             : raw.type === 'Feature'
               ? { type: 'FeatureCollection', features: [raw] }
               : {
@@ -349,6 +361,10 @@ function App() {
 
   const renameLayer = useCallback((id: string, name: string) => {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)))
+  }, [])
+
+  const renameGroup = useCallback((groupId: string, groupName: string) => {
+    setLayers((prev) => prev.map((l) => (l.groupId === groupId ? { ...l, groupName } : l)))
   }, [])
 
   const groupLayers = useCallback((sourceId: string, targetId: string) => {
@@ -1227,6 +1243,22 @@ function App() {
       setActiveLeftTab('layers')
       return
     }
+    if (action.type === 'add_gee_layer') {
+      const { url, dataset, vis_params, title } = action.payload
+      const id = `gee-${Date.now()}`
+      const newLayer: GeoJSONLayer = {
+        id,
+        name: title || dataset,
+        filePath: '',
+        visible: true,
+        data: { type: 'FeatureCollection', features: [] },
+        color: '#89b4fa',
+        geeSpec: { url, dataset, vis_params }
+      }
+      setLayers((prev) => [...prev, newLayer])
+      setActiveLeftTab('layers')
+      return
+    }
     if (action.type === 'add_geojson_file') {
       const { path, name } = action.payload
       void addLayer(name, path)
@@ -1362,6 +1394,24 @@ function App() {
           color,
         )
       }
+      return
+    }
+    if (action.type === 'add_scenarios') {
+      const list = Array.isArray(action.payload.scenarios) ? action.payload.scenarios : []
+      setScenarios((prev) => {
+        const newScenarios = list.map((s: any) => ({
+          id: s.id || `scenario-${Math.random().toString(36).substring(2, 9)}`,
+          name: String(s.name || 'Scenario'),
+          description: String(s.description || ''),
+          createdAt: Number(s.createdAt || Date.now()),
+          layerIds: Array.isArray(s.layerIds) ? s.layerIds : layers.map(l => l.id),
+          layerVisibility: typeof s.layerVisibility === 'object' && s.layerVisibility ? s.layerVisibility : Object.fromEntries(layers.map(l => [l.id, l.visible])),
+        }))
+        // Filter out any existing scenarios with the same name to avoid duplicates
+        const filteredPrev = prev.filter(p => !newScenarios.some(n => n.name === p.name))
+        return [...filteredPrev, ...newScenarios]
+      })
+      setActiveLeftTab('scenarios')
       return
     }
     setMapActions((prev) => [...prev, action])
@@ -1611,6 +1661,12 @@ function App() {
     [activeConversationId],
   )
 
+  const handleRenameConversation = useCallback((id: string, title: string) => {
+    setConversations((prev) =>
+      prev.map((c) => (c.id === id ? { ...c, title } : c))
+    )
+  }, [])
+
   // ── Project persistence ──
 
   const saveProject = useCallback(
@@ -1676,6 +1732,8 @@ function App() {
             ...(l.lineDasharray !== undefined ? { lineDasharray: l.lineDasharray } : {}),
             ...(l.opacity !== undefined ? { opacity: l.opacity } : {}),
             ...(l.styleSpec !== undefined ? { styleSpec: l.styleSpec } : {}),
+            ...(l.wmsSpec !== undefined ? { wmsSpec: l.wmsSpec } : {}),
+            ...(l.geeSpec !== undefined ? { geeSpec: l.geeSpec } : {}),
           })),
           conversations,
           activeConversationId,
@@ -1743,8 +1801,30 @@ function App() {
         const loadedLayers: GeoJSONLayer[] = []
         const wsPrefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`
         for (const info of data.layers) {
-          if (!info.filePath?.trim()) {
+          const isWmsOrGee = !!info.wmsSpec || !!info.geeSpec
+          if (!isWmsOrGee && !info.filePath?.trim()) {
             console.warn('Skipping layer with no file path (re-add from chat or disk):', info.name)
+            continue
+          }
+          if (isWmsOrGee) {
+            loadedLayers.push({
+              id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
+              name: info.name,
+              filePath: '',
+              visible: info.visible,
+              ...(info.groupId !== undefined ? { groupId: info.groupId } : {}),
+              ...(info.groupName !== undefined ? { groupName: info.groupName } : {}),
+              data: { type: 'FeatureCollection', features: [] },
+              color: info.color,
+              ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
+              ...(info.lineColor !== undefined ? { lineColor: info.lineColor } : {}),
+              ...(info.lineWidth !== undefined ? { lineWidth: info.lineWidth } : {}),
+              ...(info.lineDasharray !== undefined ? { lineDasharray: info.lineDasharray } : {}),
+              ...(info.opacity !== undefined ? { opacity: info.opacity } : {}),
+              styleSpec: info.styleSpec,
+              wmsSpec: info.wmsSpec,
+              geeSpec: info.geeSpec,
+            })
             continue
           }
           // Resolve relative paths against the current workspace so the
@@ -1850,12 +1930,17 @@ function App() {
   }, [])
 
   const workspaceLabel = workspacePath ? workspacePath.split('/').pop() : 'Open Workspace'
+  const workspaceName = workspacePath
+    ? (workspacePath.includes('/') ? workspacePath.split('/').pop() : workspacePath.split('\\').pop())
+    : ''
 
   return (
     <div className="app">
       <header className="titlebar">
         <div className="titlebar-drag" />
-        <span className="titlebar-text">Cursor for Urban Planners</span>
+        <span className="titlebar-text">
+          Cursor for Urban Planners{workspaceName ? ` - ${workspaceName}` : ''}
+        </span>
         <div className="mode-switcher">
           <button
             className={`mode-btn ${appMode === 'map' ? 'active' : ''}`}
@@ -1865,7 +1950,7 @@ function App() {
           </button>
           <button
             className={`mode-btn ${appMode === 'document' ? 'active' : ''}`}
-            onClick={() => { setAppMode('document'); setDocumentImage(null) }}
+            onClick={() => setAppMode('document')}
           >
             Document
           </button>
@@ -1922,6 +2007,13 @@ function App() {
             >
               Zones
             </button>
+            <button
+              className={`tab ${activeLeftTab === 'scenarios' ? 'active' : ''}`}
+              onClick={() => setActiveLeftTab('scenarios')}
+            >
+              Scenarios
+              {scenarios.length > 0 && <span className="tab-badge">{scenarios.length}</span>}
+            </button>
           </div>
           {activeLeftTab === 'files' && (
             <>
@@ -1956,6 +2048,7 @@ function App() {
                 onGroupWith={groupLayers}
                 onUngroup={ungroupLayer}
                 onToggleGroup={toggleLayerGroup}
+                onRenameGroup={renameGroup}
               />
               {stylingLayer && (
                 <SymbologyPanel
@@ -1998,6 +2091,58 @@ function App() {
             />
           )}
           {activeLeftTab === 'zoning' && <ZoningPanel />}
+          {activeLeftTab === 'scenarios' && (
+            <ScenarioPanel
+              scenarios={scenarios}
+              activeScenarioId={activeScenarioId}
+              layers={layers}
+              onCreateScenario={(name, description) => {
+                const id = `scenario-${genId()}`
+                setScenarios(prev => [...prev, {
+                  id, name, description,
+                  createdAt: Date.now(),
+                  layerIds: layers.map(l => l.id),
+                  layerVisibility: Object.fromEntries(layers.map(l => [l.id, l.visible]))
+                }])
+              }}
+              onActivate={(id) => {
+                setActiveScenarioId(id)
+                if (!id) {
+                  // Restore all layers to visible
+                  setLayers(prev => prev.map(l => ({ ...l, visible: true })))
+                } else {
+                  const scenario = scenarios.find(s => s.id === id)
+                  if (scenario) {
+                    setLayers(prev => prev.map(l => ({
+                      ...l,
+                      visible: scenario.layerIds.includes(l.id)
+                        ? (scenario.layerVisibility[l.id] ?? true)
+                        : false
+                    })))
+                  }
+                }
+              }}
+              onDelete={(id) => {
+                setScenarios(prev => prev.filter(s => s.id !== id))
+                if (activeScenarioId === id) setActiveScenarioId(null)
+              }}
+              onRename={(id, name) => setScenarios(prev =>
+                prev.map(s => s.id === id ? { ...s, name } : s)
+              )}
+              onAddLayer={(scenarioId, layerId) => setScenarios(prev =>
+                prev.map(s => s.id === scenarioId
+                  ? { ...s, layerIds: s.layerIds.includes(layerId) ? s.layerIds : [...s.layerIds, layerId] }
+                  : s
+                )
+              )}
+              onRemoveLayer={(scenarioId, layerId) => setScenarios(prev =>
+                prev.map(s => s.id === scenarioId
+                  ? { ...s, layerIds: s.layerIds.filter(id => id !== layerId) }
+                  : s
+                )
+              )}
+            />
+          )}
         </aside>
         )}
 
@@ -2006,41 +2151,41 @@ function App() {
 
         {/* Center */}
         <main className="center-panel">
-          {appMode === 'map' ? (
-            <div className="map-stack">
-              {!workspacePath && (
-                <div className="workspace-hint-banner">
-                  Open a workspace folder (title bar) to save the map and export. Layers from chat still
-                  appear, but they will not persist until a folder is open.
-                </div>
-              )}
-              <ErrorBoundary label="Map">
-                <MapView
-                  ref={mapViewRef}
-                  layers={layers}
-                  basemap={basemap}
-                  initialState={mapViewState}
-                  mapActions={mapActions}
-                  onMapMove={setMapViewState}
-                  onBoundsChange={setMapBounds}
-                  onBasemapChange={setBasemap}
-                  onActionsProcessed={() => setMapActions([])}
-                  onLayerStyleChange={handleLayerStyleChange}
-                  onAddMarker={handleRightClickAddMarker}
-                  onOpenStreetView={handleRightClickStreetView}
-                  onInspectRoad={handleInspectRoad}
-                  onAskChat={handleRightClickAskChat}
-                  onContextualQuery={handleContextualQuery}
-                  onDrawComplete={handleDrawComplete}
-                />
-              </ErrorBoundary>
-              <Legend layers={layers} />
-            </div>
-          ) : (
+          <div className="map-stack" style={{ display: appMode === 'map' ? 'flex' : 'none' }}>
+            {!workspacePath && (
+              <div className="workspace-hint-banner">
+                Open a workspace folder (title bar) to save the map and export. Layers from chat still
+                appear, but they will not persist until a folder is open.
+              </div>
+            )}
+            <ErrorBoundary label="Map">
+              <MapView
+                ref={mapViewRef}
+                layers={layers}
+                basemap={basemap}
+                initialState={mapViewState}
+                mapActions={mapActions}
+                onMapMove={setMapViewState}
+                onBoundsChange={setMapBounds}
+                onBasemapChange={setBasemap}
+                onActionsProcessed={() => setMapActions([])}
+                onLayerStyleChange={handleLayerStyleChange}
+                onAddMarker={handleRightClickAddMarker}
+                onOpenStreetView={handleRightClickStreetView}
+                onInspectRoad={handleInspectRoad}
+                onAskChat={handleRightClickAskChat}
+                onContextualQuery={handleContextualQuery}
+                onDrawComplete={handleDrawComplete}
+              />
+            </ErrorBoundary>
+            <Legend layers={layers} />
+          </div>
+
+          <div style={{ display: appMode === 'document' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Document">
               <DocumentView onImageChange={setDocumentImage} />
             </ErrorBoundary>
-          )}
+          </div>
         </main>
 
         {/* Right resize handle */}
@@ -2055,14 +2200,12 @@ function App() {
             >
               Chat
             </button>
-            {appMode === 'map' && (
-              <button
-                className={`tab ${activeRightTab === 'artifacts' ? 'active' : ''}`}
-                onClick={() => setActiveRightTab('artifacts')}
-              >
-                Artifacts
-              </button>
-            )}
+            <button
+              className={`tab ${activeRightTab === 'artifacts' ? 'active' : ''}`}
+              onClick={() => setActiveRightTab('artifacts')}
+            >
+              Artifacts
+            </button>
             {appMode === 'map' && (
               <button
                 className={`tab ${activeRightTab === 'streetview' ? 'active' : ''}`}
@@ -2072,7 +2215,7 @@ function App() {
               </button>
             )}
           </div>
-          {activeRightTab === 'chat' || appMode === 'document' ? (
+          {activeRightTab === 'chat' ? (
             <ErrorBoundary label="Chat">
               <ChatPanel
                 conversations={conversations}
@@ -2081,6 +2224,7 @@ function App() {
                 onSelectConversation={handleSelectConversation}
                 onDeleteConversation={handleDeleteConversation}
                 onMessagesChange={handleConversationMessagesChange}
+                onRenameConversation={handleRenameConversation}
                 mapContext={mapContext}
                 onMapAction={handleMapAction}
                 documentImage={appMode === 'document' ? documentImage : null}

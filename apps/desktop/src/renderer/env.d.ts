@@ -32,6 +32,7 @@ declare global {
     setAPIKey: (key: string) => Promise<boolean>
     getGoogleMapsKey: () => Promise<string>
     setGoogleMapsKey: (key: string) => Promise<boolean>
+    savePDF: (htmlContent: string, defaultName: string) => Promise<boolean>
   }
 
   interface Window {

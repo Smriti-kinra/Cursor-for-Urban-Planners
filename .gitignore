@@ -15,3 +15,4 @@ __pycache__/
 .claude/settings.local.json
 project.json
 chandigarh_plan.pdf
+ee-*.json

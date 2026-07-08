@@ -15,9 +15,18 @@ interface DocumentViewProps {
   onImageChange: (img: DocumentImage | null) => void
 }
 
+interface OpenDocument {
+  id: string
+  filePath: string
+  fileName: string
+  displayUrl: string
+  isPdf: boolean
+  pdfPage: number
+  pdfTotalPages: number
+  documentImage: DocumentImage | null
+}
+
 const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
-// Cap rasterization size — vision works fine at 1.5x scale, and bigger
-// canvases blow up base64 payloads.
 const PDF_RASTER_SCALE = 1.5
 const PDF_MAX_PIXELS = 2200
 
@@ -32,15 +41,11 @@ async function rasterizePdfPage(
 ): Promise<{ base64: string; totalPages: number } | null> {
   const base64Pdf = await window.electronAPI.readFileBase64(absPath)
   if (!base64Pdf) return null
-  // Decode base64 → Uint8Array (pdfjs accepts a typed-array data source).
   const binary = atob(base64Pdf)
   const bytes = new Uint8Array(binary.length)
   for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
 
   const pdfjs = await import('pdfjs-dist')
-  // Disable the worker — we run inside a chromium renderer in Electron and
-  // the bundled worker URL doesn't survive electron-vite's prod build. The
-  // main-thread fallback is slower but works for one-off planning PDFs.
   type GlobalOptions = { disableWorker?: boolean }
   ;(pdfjs as unknown as { GlobalWorkerOptions: GlobalOptions }).GlobalWorkerOptions.disableWorker = true
 
@@ -48,7 +53,6 @@ async function rasterizePdfPage(
   const total = doc.numPages
   const page = await doc.getPage(Math.max(1, Math.min(pageNumber, total)))
   let viewport = page.getViewport({ scale: PDF_RASTER_SCALE })
-  // Clamp the longer axis so we don't hand vision a 6000px image.
   const longer = Math.max(viewport.width, viewport.height)
   if (longer > PDF_MAX_PIXELS) {
     const adj = PDF_MAX_PIXELS / longer
@@ -68,14 +72,12 @@ async function rasterizePdfPage(
 }
 
 export default function DocumentView({ onImageChange }: DocumentViewProps) {
-  const [filePath, setFilePath] = useState<string | null>(null)
-  const [fileName, setFileName] = useState('')
-  const [displayUrl, setDisplayUrl] = useState<string | null>(null)
-  const [isPdf, setIsPdf] = useState(false)
+  const [openDocs, setOpenDocs] = useState<OpenDocument[]>([])
+  const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
-  const [pdfPage, setPdfPage] = useState(1)
-  const [pdfTotalPages, setPdfTotalPages] = useState(1)
   const [pdfRasterError, setPdfRasterError] = useState<string | null>(null)
+
+  const activeDoc = openDocs.find((d) => d.id === activeDocId) || null
 
   const openFile = async () => {
     const chosen = await window.electronAPI.openFile({
@@ -90,85 +92,114 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
     const name = chosen.split('/').pop() || chosen
     const ext = name.split('.').pop()?.toLowerCase() || ''
     const pdf = ext === 'pdf'
+    const id = Math.random().toString(36).substring(2, 9)
 
-    setFilePath(chosen)
-    setFileName(name)
-    setIsPdf(pdf)
-    setDisplayUrl(null)
-    setPdfRasterError(null)
-    setPdfPage(1)
-    setPdfTotalPages(1)
-    onImageChange(null)
-
-    setDisplayUrl(toLocalFileUrl(chosen))
-
-    if (IMAGE_EXTS.includes(ext)) {
-      setLoading(true)
-      const base64 = await window.electronAPI.readFileBase64(chosen)
-      setLoading(false)
-      if (base64) {
-        const mimes: Record<string, string> = {
-          png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-          webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
-        }
-        onImageChange({ base64, mimeType: mimes[ext] || 'image/png', fileName: name })
-      }
-      return
+    const newDoc: OpenDocument = {
+      id,
+      filePath: chosen,
+      fileName: name,
+      displayUrl: toLocalFileUrl(chosen),
+      isPdf: pdf,
+      pdfPage: 1,
+      pdfTotalPages: 1,
+      documentImage: null,
     }
 
-    if (pdf) {
-      setLoading(true)
-      try {
+    setLoading(true)
+    setPdfRasterError(null)
+
+    try {
+      if (IMAGE_EXTS.includes(ext)) {
+        const base64 = await window.electronAPI.readFileBase64(chosen)
+        if (base64) {
+          const mimes: Record<string, string> = {
+            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
+            webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
+          }
+          newDoc.documentImage = { base64, mimeType: mimes[ext] || 'image/png', fileName: name }
+        }
+      } else if (pdf) {
         const out = await rasterizePdfPage(chosen, 1)
         if (out) {
-          setPdfTotalPages(out.totalPages)
-          onImageChange({
+          newDoc.pdfTotalPages = out.totalPages
+          newDoc.documentImage = {
             base64: out.base64,
             mimeType: 'image/png',
             fileName: name,
             page: 1,
             totalPages: out.totalPages,
-          })
+          }
         } else {
           setPdfRasterError('Could not read the PDF.')
         }
-      } catch (e) {
-        setPdfRasterError(`PDF rasterization failed: ${(e as Error).message}`)
-      } finally {
-        setLoading(false)
       }
-    }
-  }
 
-  const switchPdfPage = async (delta: number) => {
-    if (!filePath || !isPdf || loading) return
-    const next = Math.max(1, Math.min(pdfPage + delta, pdfTotalPages))
-    if (next === pdfPage) return
-    setLoading(true)
-    setPdfRasterError(null)
-    try {
-      const out = await rasterizePdfPage(filePath, next)
-      if (!out) {
-        setPdfRasterError('Could not read the PDF.')
-        return
-      }
-      setPdfPage(next)
-      setPdfTotalPages(out.totalPages)
-      onImageChange({
-        base64: out.base64,
-        mimeType: 'image/png',
-        fileName,
-        page: next,
-        totalPages: out.totalPages,
-      })
+      setOpenDocs((prev) => [...prev, newDoc])
+      setActiveDocId(id)
+      onImageChange(newDoc.documentImage)
     } catch (e) {
-      setPdfRasterError(`PDF rasterization failed: ${(e as Error).message}`)
+      setPdfRasterError(`Failed to load document: ${(e as Error).message}`)
     } finally {
       setLoading(false)
     }
   }
 
-  if (!filePath) {
+  const switchPdfPage = async (delta: number) => {
+    if (!activeDoc || !activeDoc.isPdf || loading) return
+    const next = Math.max(1, Math.min(activeDoc.pdfPage + delta, activeDoc.pdfTotalPages))
+    if (next === activeDoc.pdfPage) return
+
+    setLoading(true)
+    setPdfRasterError(null)
+    try {
+      const out = await rasterizePdfPage(activeDoc.filePath, next)
+      if (!out) {
+        setPdfRasterError('Could not read the PDF.')
+        return
+      }
+
+      const updatedDoc: OpenDocument = {
+        ...activeDoc,
+        pdfPage: next,
+        pdfTotalPages: out.totalPages,
+        documentImage: {
+          base64: out.base64,
+          mimeType: 'image/png',
+          fileName: activeDoc.fileName,
+          page: next,
+          totalPages: out.totalPages,
+        }
+      }
+
+      setOpenDocs((prev) => prev.map((d) => (d.id === activeDoc.id ? updatedDoc : d)))
+      onImageChange(updatedDoc.documentImage)
+    } catch (e) {
+      setPdfRasterError(`PDF page change failed: ${(e as Error).message}`)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleSelectDoc = (id: string) => {
+    setActiveDocId(id)
+    const doc = openDocs.find((d) => d.id === id)
+    onImageChange(doc ? doc.documentImage : null)
+    setPdfRasterError(null)
+  }
+
+  const handleCloseDoc = (id: string) => {
+    const nextDocs = openDocs.filter((d) => d.id !== id)
+    setOpenDocs(nextDocs)
+    if (activeDocId === id) {
+      const nextActiveId = nextDocs.length > 0 ? nextDocs[0].id : null
+      setActiveDocId(nextActiveId)
+      const doc = nextDocs.find((d) => d.id === nextActiveId)
+      onImageChange(doc ? doc.documentImage : null)
+    }
+    setPdfRasterError(null)
+  }
+
+  if (openDocs.length === 0) {
     return (
       <div className="doc-empty">
         <div className="doc-empty-icon">🗺</div>
@@ -184,45 +215,83 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
 
   return (
     <div className="doc-view">
-      <div className="doc-toolbar">
-        <span className="doc-filename" title={filePath}>{fileName}</span>
-        {isPdf && (
-          <span className="doc-pdf-note">
-            PDF — AI sees page {pdfPage}{pdfTotalPages > 1 ? ` of ${pdfTotalPages}` : ''}
-          </span>
-        )}
-        {isPdf && pdfTotalPages > 1 && (
-          <span className="doc-pdf-pager">
+      {/* ── Document Tabs ── */}
+      <div className="doc-tabs-bar">
+        {openDocs.map((doc) => (
+          <div
+            key={doc.id}
+            className={`doc-tab ${doc.id === activeDocId ? 'active' : ''}`}
+            onClick={() => handleSelectDoc(doc.id)}
+          >
+            <span className="doc-tab-name" title={doc.filePath}>
+              {doc.fileName}
+            </span>
             <button
-              className="doc-pdf-pager-btn"
-              onClick={() => switchPdfPage(-1)}
-              disabled={loading || pdfPage <= 1}
-              title="Previous page"
+              className="doc-tab-close"
+              onClick={(e) => {
+                e.stopPropagation()
+                handleCloseDoc(doc.id)
+              }}
+              title="Close document"
             >
-              ‹
+              ×
             </button>
-            <span className="doc-pdf-pager-label">{pdfPage} / {pdfTotalPages}</span>
-            <button
-              className="doc-pdf-pager-btn"
-              onClick={() => switchPdfPage(1)}
-              disabled={loading || pdfPage >= pdfTotalPages}
-              title="Next page"
-            >
-              ›
-            </button>
-          </span>
-        )}
-        {loading && <span className="doc-loading-inline">Rendering…</span>}
-        {pdfRasterError && <span className="doc-loading-inline doc-error">{pdfRasterError}</span>}
-        <button className="doc-change-btn" onClick={openFile}>Change…</button>
+          </div>
+        ))}
+        <button className="doc-tab-add" onClick={openFile} title="Open another document">
+          + Open File
+        </button>
       </div>
-      <div className="doc-content">
-        {displayUrl && (
-          isPdf
-            ? <iframe src={displayUrl} className="doc-pdf" title={fileName} />
-            : <img src={displayUrl} alt={fileName} className="doc-img" />
-        )}
-      </div>
+
+      {activeDoc && (
+        <>
+          <div className="doc-toolbar">
+            <span className="doc-filename" title={activeDoc.filePath}>
+              {activeDoc.fileName}
+            </span>
+            {activeDoc.isPdf && (
+              <span className="doc-pdf-note">
+                PDF — AI sees page {activeDoc.pdfPage} of {activeDoc.pdfTotalPages}
+              </span>
+            )}
+            {activeDoc.isPdf && activeDoc.pdfTotalPages > 1 && (
+              <span className="doc-pdf-pager">
+                <button
+                  className="doc-pdf-pager-btn"
+                  onClick={() => switchPdfPage(-1)}
+                  disabled={loading || activeDoc.pdfPage <= 1}
+                  title="Previous page"
+                >
+                  ‹
+                </button>
+                <span className="doc-pdf-pager-label">
+                  {activeDoc.pdfPage} / {activeDoc.pdfTotalPages}
+                </span>
+                <button
+                  className="doc-pdf-pager-btn"
+                  onClick={() => switchPdfPage(1)}
+                  disabled={loading || activeDoc.pdfPage >= activeDoc.pdfTotalPages}
+                  title="Next page"
+                >
+                  ›
+                </button>
+              </span>
+            )}
+            {loading && <span className="doc-loading-inline">Rendering…</span>}
+            {pdfRasterError && <span className="doc-loading-inline doc-error">{pdfRasterError}</span>}
+          </div>
+
+          <div className="doc-content">
+            {activeDoc.displayUrl && (
+              activeDoc.isPdf ? (
+                <iframe src={activeDoc.displayUrl} className="doc-pdf" title={activeDoc.fileName} />
+              ) : (
+                <img src={activeDoc.displayUrl} alt={activeDoc.fileName} className="doc-img" />
+              )
+            )}
+          </div>
+        </>
+      )}
     </div>
   )
 }

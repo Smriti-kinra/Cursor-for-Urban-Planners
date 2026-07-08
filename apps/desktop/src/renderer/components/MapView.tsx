@@ -352,6 +352,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             layout: { visibility: layer.visible ? 'visible' : 'none' },
           })
           ownLayerIds.current.add(layer.id)
+        } else if (layer.geeSpec) {
+          const { url } = layer.geeSpec
+          map.addSource(layer.id, {
+            type: 'raster',
+            tiles: [url],
+            tileSize: 256,
+          })
+          map.addLayer({
+            id: `${layer.id}-raster`,
+            type: 'raster',
+            source: layer.id,
+            layout: { visibility: layer.visible ? 'visible' : 'none' },
+          })
+          ownLayerIds.current.add(layer.id)
         } else {
           map.addSource(layer.id, { type: 'geojson', data: layer.data })
           ownLayerIds.current.add(layer.id)
@@ -466,10 +480,11 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       }
       } else {
         // Existing source — sync data + visibility + style overrides.
-        if (layer.wmsSpec) {
+        if (layer.wmsSpec || layer.geeSpec) {
           const vis = layer.visible ? 'visible' : 'none'
           if (map.getLayer(`${layer.id}-raster`)) {
             map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
+            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 1.0)
           }
         } else {
           const previous = layerRevisionRef.current.get(layer.id)

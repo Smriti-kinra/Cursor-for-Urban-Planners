@@ -1,12 +1,112 @@
 from __future__ import annotations
+import json
 from pathlib import Path
 import httpx
 from llm.base import ToolDeclaration
 from tools.action_utils import send_action
 
+# ── DataMeet & Public India GIS Dataset Catalog ───────────────────────────────
+# A curated catalog of publicly available Indian GIS datasets
+# keyed by short identifiers the AI can use.
+
+DATAMEET_CATALOG = {
+    # Administrative boundaries
+    "india_states": {
+        "title": "India State Boundaries",
+        "description": "State-level administrative boundaries for all 28 states and 8 UTs",
+        "source": "datta07/INDIAN-SHAPEFILES",
+        "url": "https://raw.githubusercontent.com/datta07/INDIAN-SHAPEFILES/master/INDIA/INDIA_STATES.geojson",
+        "category": "administrative",
+        "tags": ["states", "boundaries", "india"],
+    },
+    "india_districts": {
+        "title": "India District Boundaries",
+        "description": "District-level administrative boundaries (~700+ districts)",
+        "source": "datta07/INDIAN-SHAPEFILES",
+        "url": "https://raw.githubusercontent.com/datta07/INDIAN-SHAPEFILES/master/INDIA/INDIA_DISTRICTS.geojson",
+        "category": "administrative",
+        "tags": ["districts", "boundaries", "india"],
+    },
+    "india_assembly_constituencies": {
+        "title": "Vidhan Sabha Constituencies",
+        "description": "State legislative assembly constituency boundaries",
+        "source": "datameet/maps",
+        "url": "https://raw.githubusercontent.com/datameet/maps/master/assembly-constituencies/assembly_constituencies.geojson",
+        "category": "political",
+        "tags": ["elections", "constituencies", "boundaries"],
+    },
+    "india_parliamentary_constituencies": {
+        "title": "Lok Sabha Constituencies",
+        "description": "Parliamentary constituency boundaries for 543 Lok Sabha seats",
+        "source": "datameet/maps",
+        "url": "https://raw.githubusercontent.com/datameet/maps/master/lok-sabha-constituencies/lok_sabha.geojson",
+        "category": "political",
+        "tags": ["elections", "parliament", "constituencies"],
+    },
+    "india_urban_agglomerations": {
+        "title": "Urban Agglomerations",
+        "description": "Urban agglomeration boundaries from Census 2011",
+        "source": "datameet/maps",
+        "url": "https://raw.githubusercontent.com/datameet/maps/master/urban-agglomerations/urban_agglomerations.geojson",
+        "category": "urban",
+        "tags": ["urban", "cities", "census"],
+    },
+    "india_rivers": {
+        "title": "Major River Networks",
+        "description": "Major river and stream networks across India",
+        "source": "datameet/maps",
+        "url": "https://raw.githubusercontent.com/datameet/maps/master/rivers/india-rivers.geojson",
+        "category": "environment",
+        "tags": ["rivers", "hydrology", "water"],
+    },
+    "india_railway_lines": {
+        "title": "Indian Railway Network",
+        "description": "Railway line network including broad gauge, meter gauge, and narrow gauge",
+        "source": "datameet/railways",
+        "url": "https://raw.githubusercontent.com/datameet/railways/master/trains/trains.geojson",
+        "category": "transport",
+        "tags": ["railways", "transport", "infrastructure"],
+    },
+    "india_railway_stations": {
+        "title": "Railway Stations",
+        "description": "Indian railway station locations with station codes and names",
+        "source": "datameet/railways",
+        "url": "https://raw.githubusercontent.com/datameet/railways/master/stations/stations.geojson",
+        "category": "transport",
+        "tags": ["railways", "stations", "transport"],
+    },
+    "chandigarh_boundary": {
+        "title": "Chandigarh Tricity Boundary",
+        "description": "Chandigarh, Panchkula, and Mohali municipal boundaries",
+        "source": "opendata",
+        "url": "https://raw.githubusercontent.com/datta07/INDIAN-SHAPEFILES/master/STATES/CHANDIGARH.geojson",
+        "category": "urban",
+        "tags": ["chandigarh", "tricity", "punjab"],
+    },
+    "india_national_highways": {
+        "title": "National Highway Network",
+        "description": "National highway alignments across India",
+        "source": "datameet/maps",
+        "url": "https://raw.githubusercontent.com/datameet/maps/master/national_highways/national_highways.geojson",
+        "category": "transport",
+        "tags": ["roads", "highways", "transport"],
+    },
+}
+
+# State code → shapefile mappings for village-level data
+STATE_VILLAGE_CODES = {
+    "ka": "Karnataka", "mh": "Maharashtra", "gj": "Gujarat",
+    "rj": "Rajasthan", "up": "Uttar Pradesh", "mp": "Madhya Pradesh",
+    "tn": "Tamil Nadu", "ap": "Andhra Pradesh", "ts": "Telangana",
+    "kl": "Kerala", "wb": "West Bengal", "od": "Odisha",
+    "pb": "Punjab", "hr": "Haryana", "br": "Bihar",
+    "jh": "Jharkhand", "as": "Assam", "hp": "Himachal Pradesh",
+    "uk": "Uttarakhand", "ch": "Chandigarh",
+}
+
 class DatameetServer:
-    description = "DataMeet boundaries downloader (States, Districts, Villages)"
-    tool_names = {"import_datameet_boundary"}
+    description = "DataMeet & public India GIS dataset browser and downloader"
+    tool_names = {"import_datameet_boundary", "browse_datameet_catalog", "import_public_dataset"}
 
     def get_declarations(self) -> list[ToolDeclaration]:
         return [
@@ -36,12 +136,173 @@ class DatameetServer:
                     "required": ["level", "workspace"],
                 },
             ),
+            ToolDeclaration(
+                name="browse_datameet_catalog",
+                description=(
+                    "Browse the catalog of available public India GIS datasets. "
+                    "Returns a list of dataset IDs, titles, descriptions, categories, and tags. "
+                    "Use this before import_public_dataset to discover what's available. "
+                    "Can filter by category (administrative, transport, urban, environment, political)."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "category": {
+                            "type": "string",
+                            "enum": ["all", "administrative", "transport", "urban", "environment", "political"],
+                            "description": "Filter datasets by category. Use 'all' to see everything."
+                        },
+                        "search": {
+                            "type": "string",
+                            "description": "Optional keyword to filter by (e.g. 'railway', 'river', 'highway')."
+                        }
+                    },
+                    "required": []
+                }
+            ),
+            ToolDeclaration(
+                name="import_public_dataset",
+                description=(
+                    "Download and load a named public India GIS dataset from the DataMeet / open-data catalog "
+                    "directly onto the map. Use browse_datameet_catalog first to get available dataset_ids. "
+                    "Examples: 'india_states', 'india_districts', 'india_railway_lines', "
+                    "'india_rivers', 'india_national_highways', 'chandigarh_boundary'."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "dataset_id": {
+                            "type": "string",
+                            "description": "The dataset identifier from browse_datameet_catalog (e.g. 'india_railway_lines')."
+                        },
+                        "workspace": {
+                            "type": "string",
+                            "description": "Absolute path to the active workspace folder."
+                        }
+                    },
+                    "required": ["dataset_id", "workspace"]
+                }
+            )
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
         if tool_name == "import_datameet_boundary":
             return await self._import_boundary(args)
+        if tool_name == "browse_datameet_catalog":
+            return await self._browse_catalog(args)
+        if tool_name == "import_public_dataset":
+            return await self._import_public_dataset(args)
         return {"error": f"Unknown tool: {tool_name}"}
+
+    async def _browse_catalog(self, args: dict) -> dict:
+        category = args.get("category", "all").strip().lower()
+        search = args.get("search", "").strip().lower()
+
+        results = []
+        for dataset_id, meta in DATAMEET_CATALOG.items():
+            # Category filter
+            if category != "all" and meta.get("category") != category:
+                continue
+            # Keyword search
+            if search:
+                searchable = (
+                    dataset_id + " " + meta["title"] + " " + meta["description"] + " " +
+                    " ".join(meta.get("tags", []))
+                ).lower()
+                if search not in searchable:
+                    continue
+            results.append({
+                "dataset_id": dataset_id,
+                "title": meta["title"],
+                "description": meta["description"],
+                "category": meta["category"],
+                "tags": meta.get("tags", []),
+                "source": meta.get("source", ""),
+            })
+
+        categories = list({m["category"] for m in DATAMEET_CATALOG.values()})
+
+        return {
+            "status": "success",
+            "total": len(results),
+            "datasets": results,
+            "available_categories": sorted(categories),
+            "note": "Use import_public_dataset with the dataset_id to load any of these onto the map."
+        }
+
+    async def _import_public_dataset(self, args: dict) -> dict:
+        dataset_id = args.get("dataset_id", "").strip()
+        workspace = args.get("workspace", "").strip()
+        ws = args.get("_ws")
+
+        if not dataset_id:
+            return {"error": "dataset_id is required. Use browse_datameet_catalog to discover available datasets."}
+        if not workspace:
+            return {"error": "workspace path is required"}
+
+        if dataset_id not in DATAMEET_CATALOG:
+            close = [k for k in DATAMEET_CATALOG if dataset_id.lower() in k or k in dataset_id.lower()]
+            return {
+                "error": f"Unknown dataset_id: '{dataset_id}'.",
+                "suggestions": close[:5] if close else list(DATAMEET_CATALOG.keys())[:8],
+                "note": "Use browse_datameet_catalog to see all available datasets."
+            }
+
+        meta = DATAMEET_CATALOG[dataset_id]
+        url = meta["url"]
+        filename = f"{dataset_id}.geojson"
+        workspace_path = Path(workspace)
+        target_file = workspace_path / filename
+
+        if not workspace_path.exists():
+            return {"error": f"Workspace path does not exist: {workspace}"}
+
+        # Serve from cache if already downloaded
+        if target_file.exists():
+            if ws:
+                await ws.send_text(json.dumps({
+                    "type": "action", "action": "add_geojson_file",
+                    "payload": {"path": str(target_file.resolve()), "name": meta["title"]}
+                }))
+            return {
+                "status": "already_cached",
+                "dataset_id": dataset_id,
+                "title": meta["title"],
+                "path": str(target_file.resolve()),
+                "message": f"'{meta['title']}' was already in workspace and loaded onto the map."
+            }
+
+        # Download
+        try:
+            async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
+                async with client.stream("GET", url) as response:
+                    if response.status_code != 200:
+                        return {
+                            "error": f"Failed to download '{meta['title']}'. HTTP {response.status_code}",
+                            "url": url
+                        }
+                    tmp = workspace_path / f"{filename}.tmp"
+                    with open(tmp, "wb") as f:
+                        async for chunk in response.iter_bytes(chunk_size=32768):
+                            f.write(chunk)
+                    tmp.rename(target_file)
+        except Exception as e:
+            return {"error": f"Download failed for '{meta['title']}': {e}"}
+
+        if ws:
+            await ws.send_text(json.dumps({
+                "type": "action", "action": "add_geojson_file",
+                "payload": {"path": str(target_file.resolve()), "name": meta["title"]}
+            }))
+
+        return {
+            "status": "success",
+            "dataset_id": dataset_id,
+            "title": meta["title"],
+            "description": meta["description"],
+            "path": str(target_file.resolve()),
+            "message": f"'{meta['title']}' downloaded and loaded onto the map."
+        }
 
     async def _import_boundary(self, args: dict) -> dict:
         level = args.get("level", "").strip().lower()
@@ -51,12 +312,11 @@ class DatameetServer:
 
         if not workspace:
             return {"error": "workspace path is required to save boundaries"}
-        
+
         workspace_path = Path(workspace)
         if not workspace_path.exists():
             return {"error": f"Workspace path does not exist: {workspace}"}
 
-        # Determine download URL and target name
         if level == "state":
             url = "https://raw.githubusercontent.com/datta07/INDIAN-SHAPEFILES/master/INDIA/INDIA_STATES.geojson"
             filename = "india_states.geojson"
@@ -65,15 +325,17 @@ class DatameetServer:
             filename = "india_districts.geojson"
         elif level == "village":
             if not state_code:
-                return {"error": "state_code is required for village boundaries"}
+                return {
+                    "error": "state_code is required for village boundaries",
+                    "available_states": STATE_VILLAGE_CODES
+                }
             url = f"https://raw.githubusercontent.com/datameet/indian_village_boundaries/master/{state_code}/{state_code}.json"
             filename = f"village_boundaries_{state_code}.geojson"
         else:
-            return {"error": f"Invalid level: {level}"}
+            return {"error": f"Invalid level: '{level}'. Must be 'state', 'district', or 'village'."}
 
         target_file = workspace_path / filename
 
-        # Check if file already exists in workspace
         if target_file.exists():
             if ws:
                 try:
@@ -81,52 +343,38 @@ class DatameetServer:
                         "path": str(target_file.resolve()),
                         "name": filename.replace(".geojson", "").replace("_", " ").title()
                     })
-                    return {
-                        "status": "already_imported",
-                        "path": str(target_file.resolve()),
-                        "message": f"Boundaries file '{filename}' was already present in the workspace and loaded."
-                    }
-                except Exception as e:
-                    return {"error": f"Failed to send map action: {str(e)}"}
-            else:
-                return {"error": "WebSocket connection not available to send load action."}
+                except Exception:
+                    pass
+            return {
+                "status": "already_imported",
+                "path": str(target_file.resolve()),
+                "message": f"'{filename}' was already in workspace and loaded onto the map."
+            }
 
-        # Download the file dynamically
         try:
             async with httpx.AsyncClient(timeout=120.0, follow_redirects=True) as client:
                 async with client.stream("GET", url) as response:
                     if response.status_code != 200:
-                        return {"error": f"Failed to download boundary file from source. Status code: {response.status_code}"}
-                    
-                    temp_file = workspace_path / f"{filename}.tmp"
-                    with open(temp_file, "wb") as f:
+                        return {"error": f"Failed to download boundary. HTTP {response.status_code}"}
+                    tmp = workspace_path / f"{filename}.tmp"
+                    with open(tmp, "wb") as f:
                         async for chunk in response.iter_bytes(chunk_size=32768):
                             f.write(chunk)
-                    
-                    if temp_file.exists():
-                        temp_file.rename(target_file)
+                    tmp.rename(target_file)
         except Exception as e:
-            temp_file = workspace_path / f"{filename}.tmp"
-            if temp_file.exists():
-                try:
-                    temp_file.unlink()
-                except:
-                    pass
-            return {"error": f"Failed to download boundary file: {str(e)}"}
+            return {"error": f"Download failed: {e}"}
 
-        # Instruct client to load it
         if ws:
             try:
                 await send_action(ws, "add_geojson_file", {
                     "path": str(target_file.resolve()),
                     "name": filename.replace(".geojson", "").replace("_", " ").title()
                 })
-                return {
-                    "status": "success",
-                    "path": str(target_file.resolve()),
-                    "message": f"Boundaries file '{filename}' successfully downloaded and loaded."
-                }
-            except Exception as e:
-                return {"error": f"Failed to send map action: {str(e)}"}
-        else:
-            return {"error": "WebSocket connection not available to send load action."}
+            except Exception:
+                pass
+
+        return {
+            "status": "success",
+            "path": str(target_file.resolve()),
+            "message": f"'{filename}' downloaded and loaded onto the map."
+        }

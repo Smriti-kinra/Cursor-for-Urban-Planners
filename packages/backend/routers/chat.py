@@ -36,6 +36,10 @@ from mcp_servers.google_environment_server import GoogleEnvironmentServer
 from mcp_servers.wms_server import WMSServer
 from mcp_servers.gee_server import GEEServer
 from mcp_servers.datameet_server import DatameetServer
+from mcp_servers.network_server import NetworkServer
+from mcp_servers.gtfs_server import GTFSServer
+from mcp_servers.od_server import ODServer
+from mcp_servers.scenario_server import ScenarioServer
 from tools.utility import UtilityServer
 from tools.config import get_model as _get_model
 from tools.google import google_maps_key_var
@@ -86,6 +90,10 @@ _servers = {
     "wms": WMSServer(),
     "gee": GEEServer(),
     "datameet": DatameetServer(),
+    "network": NetworkServer(),
+    "gtfs": GTFSServer(),
+    "od": ODServer(),
+    "scenario": ScenarioServer(),
     "utility": UtilityServer(db_path=DB_PATH),
 }
 
@@ -96,6 +104,7 @@ _ACTION_TOOLS = {
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
     "highlight_features", "set_layer_style", "style_layer", "toggle_layer", "remove_layer",
     "save_bookmark", "go_to_bookmark", "export_region_clip", "switch_basemap", "add_geojson_file",
+    "add_gee_layer",
 }
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -144,7 +153,30 @@ SYSTEM_PROMPT = (
     "  extract_attribute_table extracts layer or shapefile properties/columns into a tabular artifact.\n"
     "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n"
     "- Reports: generate_report — generates a deep research urban planning report using web search. "
-    "Use when user asks to generate/create/write a report or planning analysis.\n\n"
+    "Use when user asks to generate/create/write a report or planning analysis.\n"
+    "- Street Network (NetworkX): analyze_street_network (topology metrics & bottleneck centrality on a road GeoJSON), "
+    "find_shortest_path (Dijkstra routing between two coordinates on a road layer), "
+    "route_multi_stop (generate a continuous multi-waypoint route along the road network).\n"
+    "- GTFS Transit: import_gtfs_feed (download & parse a GTFS ZIP — loads stops + route lines on the map), "
+    "analyze_gtfs_service (compute service stats: route counts, trip frequencies, highest-frequency corridors).\n"
+    "- OD Matrix: import_od_matrix (import CSV-based Origin-Destination matrix from a URL), "
+    "visualize_od_flows (render desire lines on the map weighted by trip volume; supports min_trips filter and top_n).\n"
+    "- Planning Scenarios: generate_planning_scenarios (generate structured Baseline/Compact/TOD/Green scenario alternatives "
+    "for a study area context; returns a markdown report with comparison table — always save the result to an artifact), "
+    "compare_scenarios (score and rank 2+ named scenarios across sustainability/cost/equity/mobility criteria; "
+    "returns a ranked table and recommended scenario).\n"
+    "- Google Land Classification (GEE): get_land_cover (fetch Dynamic World or ESA WorldCover LULC layer "
+    "for a given year — shows water/trees/grass/crops/built/bare classes), "
+    "analyze_lulc_change (compare two years of Dynamic World to detect built-up expansion, deforestation, "
+    "or wetland loss — adds a changed-areas mask + class-transition layer), "
+    "get_ndvi_layer (compute NDVI from Sentinel-2 to map vegetation density, green space, and urban heat islands). "
+    "All GEE tools require the ee-*.json service account credentials file in the workspace root.\n"
+    "- DataMeet & Public India GIS: browse_datameet_catalog (list all available public India GIS datasets "
+    "with dataset_ids, titles, and categories — call this first before importing), "
+    "import_public_dataset (download and load a named dataset: india_states, india_districts, "
+    "india_railway_lines, india_railway_stations, india_rivers, india_national_highways, "
+    "india_urban_agglomerations, india_assembly_constituencies, chandigarh_boundary, etc.), "
+    "import_datameet_boundary (fetch state/district/village boundaries by administrative level).\n\n"
     "MAP CONTEXT:\n"
     "The current map state is appended to every message. It includes:\n"
     "- bounds: current viewport (west,south,east,north) when available.\n"
@@ -163,7 +195,7 @@ SYSTEM_PROMPT = (
     "polygon. Use overture_places_search only when the Google tools return empty or "
     "upstream_unavailable. Use osm_search for non-commercial OSM-tagged features (water, "
     "infrastructure, hand-mapped local data).\n"
-    "4. When using osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches.\n"
+    "4. When using osm_boundary, ALWAYS pass country_code (e.g. 'IN' for India) to avoid wrong matches. If osm_boundary returns an error (no boundary polygon is mapped in OSM), do NOT try to draw a wrong fallback polygon or building footprint. Instead, call the geocode tool to resolve the place's coordinates, fly_to that centroid, and add a pin marker using add_marker with the place name as the label.\n"
     "5. Only call the tools the user's request requires. Do not add extra actions.\n"
     "6. When the user asks to navigate somewhere, use fly_to. Do not add markers unless asked.\n"
     "7. SUB-CITY BOUNDARIES (sectors, neighborhoods, colonies, suburbs): call osm_boundary with "
@@ -267,6 +299,10 @@ Examples include:
 If no report type is explicitly requested,
 generate the most appropriate professional planning report.
 
+CRITICAL FORMATTING REQUIREMENT:
+You MUST always include a "Table of Contents" (Index) section at the very beginning of the report (immediately after the main title `# ...`).
+Every entry in the Table of Contents MUST be a clickable Markdown link pointing to its corresponding section heading (e.g. `[1. Executive Summary](#1-executive-summary)` pointing to `## 1. Executive Summary`). Make sure the anchor slugs are fully lowercase, spaces are replaced with hyphens, and punctuation is removed.
+
 Respond ONLY with Markdown.
 """
 
@@ -360,7 +396,12 @@ For every report
 
 ----------------------------
 
-The report should read like a document prepared by professional urban planning consultants.
+CRITICAL STYLE & FORMATTING RULES:
+1. Always start the report with the main `# [Report Title]` followed immediately by a **Table of Contents** section.
+2. Under the "Table of Contents" header, list all subsequent sections and subsections as clickable Markdown anchor links pointing to their respective headers in the document.
+   - For example: `[1. Executive Summary](#1-executive-summary)` pointing to `## 1. Executive Summary`.
+   - Ensure the anchor names are fully lowercase, spaces are replaced with hyphens, and punctuation is removed, matching standard Markdown page-jumping navigation.
+3. The report should read like a document prepared by professional urban planning consultants.
 """
 
 
@@ -886,6 +927,11 @@ async def _execute_tool(
                     return json.dumps({"status": "cancelled"})
                 return json.dumps(result)
 
+            # Side-effect: dispatch generated scenarios to frontend
+            if name == "generate_planning_scenarios" and result.get("status") == "success":
+                await _send_action(ws, "add_scenarios", {"scenarios": result.get("scenarios_data", [])})
+                return json.dumps(result)
+
             # Auto-display osm_search result on map
             if name == "osm_search" and "geojson" in result and result.get("count", 0) > 0:
                 label = f"{args.get('feature_value', 'features')} ({args.get('feature_type', '')})"
@@ -1104,11 +1150,12 @@ async def _run_agent(
 
     for _ in range(max_rounds):
         if _is_cancelled():
-            break
+            raise asyncio.CancelledError()
 
         accumulated_text = ""
         tool_calls_acc: dict[int, dict] = {}
         finish_reason = None
+        assistant_msg_created = False
 
         try:
             stream = await client.chat.completions.create(
@@ -1122,7 +1169,7 @@ async def _run_agent(
 
             async for chunk in stream:
                 if _is_cancelled():
-                    break
+                    raise asyncio.CancelledError()
 
                 choice = chunk.choices[0] if chunk.choices else None
                 if not choice:
@@ -1150,69 +1197,81 @@ async def _run_agent(
                             if tc.function.arguments:
                                 tool_calls_acc[idx]["arguments"] += tc.function.arguments
 
+            # Add assistant message to history
+            assistant_msg: dict = {"role": "assistant"}
+            if accumulated_text:
+                assistant_msg["content"] = accumulated_text
+            else:
+                assistant_msg["content"] = None
+            if tool_calls_acc:
+                assistant_msg["tool_calls"] = [
+                    {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
+                    for tc in tool_calls_acc.values()
+                ]
+            messages.append(assistant_msg)
+            assistant_msg_created = True
+
+            # If no tool calls, we're done. Tool calls MUST be answered even if
+            # finish_reason == "stop" — leaving them unanswered breaks the next turn.
+            if not tool_calls_acc:
+                break
+
+            # Execute tool calls and collect results
+            for tc in tool_calls_acc.values():
+                if _is_cancelled():
+                    raise asyncio.CancelledError()
+                tool_name = tc["name"]
+                args_raw = tc["arguments"] or ""
+                try:
+                    args = json.loads(args_raw) if args_raw else {}
+                    args_error = None
+                except json.JSONDecodeError as e:
+                    args = {}
+                    args_error = str(e)
+
+                await ws.send_text(json.dumps({"type": "tool_use", "tool": tool_name, "args": args}))
+
+                if args_error:
+                    # Streaming was interrupted; return a structured error so the
+                    # tool_call_id has a matching tool message and the next turn
+                    # is well-formed.
+                    result_str = json.dumps({
+                        "error": "Arguments could not be parsed; streaming was interrupted.",
+                        "detail": args_error,
+                    })
+                else:
+                    result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context, client=client)
+                messages.append({
+                    "role": "tool",
+                    "tool_call_id": tc["id"],
+                    "content": result_str,
+                })
+
+            if finish_reason == "stop":
+                break
+
+        except asyncio.CancelledError:
+            # Handle task cancellation
+            if not assistant_msg_created:
+                if accumulated_text:
+                    messages.append({"role": "assistant", "content": accumulated_text})
+            else:
+                # The assistant message is already in messages. Ensure all tool calls are answered.
+                existing_tool_ids = {m["tool_call_id"] for m in messages if m.get("role") == "tool"}
+                for tc in tool_calls_acc.values():
+                    if tc.get("id") and tc["id"] not in existing_tool_ids:
+                        messages.append({
+                            "role": "tool",
+                            "tool_call_id": tc["id"],
+                            "content": json.dumps({"status": "cancelled", "message": "Tool execution was cancelled by user."})
+                        })
+            raise
         except Exception as e:
             await ws.send_text(json.dumps({
                 "type": "error",
                 "code": _classify_error(e),
                 "message": str(e),
             }))
-            break
-
-        if _is_cancelled():
-            await ws.send_text(json.dumps({"type": "stopped"}))
-            break
-
-        # Add assistant message to history
-        assistant_msg: dict = {"role": "assistant"}
-        if accumulated_text:
-            assistant_msg["content"] = accumulated_text
-        else:
-            assistant_msg["content"] = None
-        if tool_calls_acc:
-            assistant_msg["tool_calls"] = [
-                {"id": tc["id"], "type": "function", "function": {"name": tc["name"], "arguments": tc["arguments"]}}
-                for tc in tool_calls_acc.values()
-            ]
-        messages.append(assistant_msg)
-
-        # If no tool calls, we're done. Tool calls MUST be answered even if
-        # finish_reason == "stop" — leaving them unanswered breaks the next turn.
-        if not tool_calls_acc:
-            break
-
-        # Execute tool calls and collect results
-        for tc in tool_calls_acc.values():
-            if _is_cancelled():
-                await ws.send_text(json.dumps({"type": "stopped"}))
-                break
-            tool_name = tc["name"]
-            args_raw = tc["arguments"] or ""
-            try:
-                args = json.loads(args_raw) if args_raw else {}
-                args_error = None
-            except json.JSONDecodeError as e:
-                args = {}
-                args_error = str(e)
-
-            await ws.send_text(json.dumps({"type": "tool_use", "tool": tool_name, "args": args}))
-
-            if args_error:
-                # Streaming was interrupted; return a structured error so the
-                # tool_call_id has a matching tool message and the next turn
-                # is well-formed.
-                result_str = json.dumps({
-                    "error": "Arguments could not be parsed; streaming was interrupted.",
-                    "detail": args_error,
-                })
-            else:
-                result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context, client=client)
-            messages.append({
-                "role": "tool",
-                "tool_call_id": tc["id"],
-                "content": result_str,
-            })
-
-        if finish_reason == "stop":
             break
 
 
@@ -1255,15 +1314,16 @@ async def chat_websocket(websocket: WebSocket):
                         p.cancel()
                     try:
                         await active_task
-                    except Exception:
+                    except (Exception, asyncio.CancelledError):
                         pass
                     active_task = None
                     if current_full_messages is not None:
                         new_history = []
                         for m in current_full_messages:
-                            if m["role"] == "system":
+                            if m.get("role") == "system":
                                 continue
                             if isinstance(m.get("content"), list):
+                                # Strip image parts from stored history to save memory
                                 text_parts = [p["text"] for p in m["content"] if p.get("type") == "text"]
                                 new_history.append({"role": m["role"], "content": " ".join(text_parts)})
                             else:
@@ -1293,6 +1353,13 @@ async def chat_websocket(websocket: WebSocket):
             if payload.get("type") == "stop":
                 if stop_event is not None:
                     stop_event.set()
+                if active_task and not active_task.done():
+                    active_task.cancel()
+                    try:
+                        await active_task
+                    except (Exception, asyncio.CancelledError):
+                        pass
+                    active_task = None
                 await websocket.send_text(json.dumps({"type": "stopped"}))
                 continue
 
@@ -1304,8 +1371,6 @@ async def chat_websocket(websocket: WebSocket):
                 }))
                 continue
 
-            stop_event = asyncio.Event()
-            _set_stop_event(stop_event)
             user_content = payload.get("content", "")
             map_context = payload.get("map_context")
             image_data = payload.get("image")  # {base64, mime_type} or None
@@ -1330,6 +1395,8 @@ async def chat_websocket(websocket: WebSocket):
             if not user_content.strip():
                 continue
 
+            # Renderer can replay prior conversation on reconnect/model-switch
+            # by passing `history`: a list of {role, content} pairs.
             if isinstance(history_payload, list):
                 replayed: list[dict] = []
                 for m in history_payload:
@@ -1343,9 +1410,13 @@ async def chat_websocket(websocket: WebSocket):
 
             if is_document_mode:
                 system = DOCUMENT_SYSTEM_PROMPT
+                # Document mode now bridges to the live map: send map_context too so
+                # the model can fly_to / add markers / run GIS tools while looking at
+                # the document. Backend accepts both fields in either mode.
                 if map_context:
                     system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
                 tools = _TOOLS
+                # Build vision message
                 user_msg: dict = {
                     "role": "user",
                     "content": [
@@ -1364,12 +1435,26 @@ async def chat_websocket(websocket: WebSocket):
 
             full_messages = [{"role": "system", "content": system}] + messages
             full_messages.append(user_msg)
+
+            stop_event = asyncio.Event()
+            _set_stop_event(stop_event)
             current_full_messages = full_messages
             active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context))
 
     except WebSocketDisconnect:
-        pass
+        if active_task and not active_task.done():
+            active_task.cancel()
+            try:
+                await active_task
+            except (Exception, asyncio.CancelledError):
+                pass
     except Exception as e:
+        if active_task and not active_task.done():
+            active_task.cancel()
+            try:
+                await active_task
+            except (Exception, asyncio.CancelledError):
+                pass
         try:
             await websocket.send_text(json.dumps({
                 "type": "error", "code": _classify_error(e), "message": str(e),

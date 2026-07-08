@@ -124,6 +124,63 @@ async def download_artifact(artifact_id: int):
     )
 
 
+@router.get("/{artifact_id}/docx")
+async def download_artifact_docx(artifact_id: int):
+    import tempfile
+    from tools.doc_exporter import markdown_to_docx
+    from fastapi.responses import FileResponse
+
+    row = read_artifact(artifact_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+    
+    content = row.get("content", "")
+    title = row.get("title") or "artifact"
+    title_safe = title.replace(" ", "_").replace("/", "-")[:40]
+    
+    with tempfile.NamedTemporaryFile(suffix=".docx", delete=False) as tmp:
+        tmp_path = tmp.name
+        
+    try:
+        markdown_to_docx(content, tmp_path)
+        return FileResponse(
+            tmp_path,
+            media_type="application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            filename=f"{title_safe}.docx"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate Word document: {str(e)}")
+
+
+@router.get("/{artifact_id}/latex")
+async def download_artifact_latex(artifact_id: int):
+    import tempfile
+    from tools.latex_exporter import save_latex
+
+    row = read_artifact(artifact_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    content = row.get("content", "")
+    title = row.get("title") or "Urban Planning Report"
+    title_safe = title.replace(" ", "_").replace("/", "-")[:50]
+
+    with tempfile.NamedTemporaryFile(suffix=".tex", delete=False, mode="w", encoding="utf-8") as tmp:
+        tmp_path = tmp.name
+
+    try:
+        save_latex(content, tmp_path, title=title)
+        return FileResponse(
+            tmp_path,
+            media_type="application/x-tex",
+            filename=f"{title_safe}.tex"
+        )
+    except Exception as e:
+        raise HTTPException(status_code=500, detail=f"Failed to generate LaTeX document: {str(e)}")
+
+
+
+
 @router.put("/{artifact_id}")
 async def update_artifact(artifact_id: int, update: ArtifactUpdate):
     conn = get_connection()

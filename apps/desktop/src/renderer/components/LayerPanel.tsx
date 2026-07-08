@@ -15,6 +15,7 @@ interface LayerPanelProps {
   onGroupWith?: (sourceId: string, targetId: string) => void
   onUngroup?: (id: string) => void
   onToggleGroup?: (groupId: string, visible: boolean) => void
+  onRenameGroup?: (groupId: string, name: string) => void
 }
 
 type LayerRow =
@@ -34,6 +35,7 @@ export default function LayerPanel({
   onGroupWith,
   onUngroup,
   onToggleGroup,
+  onRenameGroup,
 }: LayerPanelProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
   const [menu, setMenu] = useState<{ layerId: string; x: number; y: number } | null>(null)
@@ -101,7 +103,12 @@ export default function LayerPanel({
       >
         {layer.visible ? '👁' : '⊘'}
       </button>
-      <span className="layer-color" style={{ background: layer.color }} />
+      <span
+        className={`layer-color ${onStyle ? 'clickable' : ''} ${activeStyleId === layer.id ? 'active' : ''}`}
+        style={{ background: layer.color }}
+        onClick={() => onStyle?.(layer.id)}
+        title="Symbology & labels"
+      />
       {onRename ? (
         <input
           type="text"
@@ -116,22 +123,13 @@ export default function LayerPanel({
         </span>
       )}
       <span className="layer-count">{layer.data?.features?.length || 0}</span>
-      {onAttributes && (
+      {onAttributes && (layer.data?.features?.length || 0) > 0 && (
         <button
           className={`layer-style ${activeAttrId === layer.id ? 'active' : ''}`}
           onClick={() => onAttributes(layer.id)}
           title="Edit attributes"
         >
           ✎
-        </button>
-      )}
-      {onStyle && (
-        <button
-          className={`layer-style ${activeStyleId === layer.id ? 'active' : ''}`}
-          onClick={() => onStyle(layer.id)}
-          title="Symbology & labels"
-        >
-          🎨
         </button>
       )}
       <button
@@ -182,9 +180,19 @@ export default function LayerPanel({
               >
                 {allVisible ? '👁' : '⊘'}
               </button>
-              <span className="layer-group-name" title={row.groupName}>
-                {row.groupName}
-              </span>
+              {onRenameGroup ? (
+                <input
+                  type="text"
+                  className="layer-group-name-input"
+                  value={row.groupName}
+                  onChange={(e) => onRenameGroup(row.groupId, e.target.value)}
+                  title="Rename group"
+                />
+              ) : (
+                <span className="layer-group-name" title={row.groupName}>
+                  {row.groupName}
+                </span>
+              )}
               <span className="layer-count">{row.layers.length}</span>
             </div>
             {!collapsed && row.layers.map((layer) => renderLayer(layer, true))}

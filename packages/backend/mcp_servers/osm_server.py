@@ -830,31 +830,41 @@ out skel qt;
         if not results:
             return None
 
+        # Restrict strictly to boundary, place, and landuse features (prevent lakes, buildings, shops, etc.)
+        allowed_classes = {"boundary", "place", "landuse"}
+        filtered_results = [
+            r for r in results 
+            if r.get("class") in allowed_classes
+        ]
+
+        if not filtered_results:
+            return None
+
         # Pick best match. If place_type is set, prefer that; otherwise prefer
         # relations (admin boundaries), then ways.
         chosen = None
         if place_type:
-            for r in results:
+            for r in filtered_results:
                 if r.get("type") == place_type:
                     chosen = r
                     break
             if not chosen:
-                for r in results:
+                for r in filtered_results:
                     if r.get("class") == "place":
                         chosen = r
                         break
         if not chosen:
-            for r in results:
+            for r in filtered_results:
                 if r.get("osm_type") == "relation":
                     chosen = r
                     break
         if not chosen:
-            for r in results:
+            for r in filtered_results:
                 if r.get("osm_type") == "way":
                     chosen = r
                     break
         if not chosen:
-            chosen = results[0]
+            chosen = filtered_results[0]
 
         polygon = chosen.get("geojson")
         if polygon and polygon.get("type") in ("Polygon", "MultiPolygon"):

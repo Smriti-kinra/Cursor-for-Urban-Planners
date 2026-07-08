@@ -177,3 +177,91 @@
   border: none;
   border-radius: 4px;
 }
+
+/* ── Document Tabs Bar ── */
+.doc-tabs-bar {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background: var(--bg-surface, #1e1e2e);
+  padding: 6px 12px 0;
+  border-bottom: 1px solid var(--border, #313244);
+  flex-shrink: 0;
+}
+
+.doc-tab {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 6px 12px;
+  background: var(--bg-panel, #181825);
+  border: 1px solid var(--border, #313244);
+  border-bottom: none;
+  border-top-left-radius: 6px;
+  border-top-right-radius: 6px;
+  cursor: pointer;
+  max-width: 160px;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.doc-tab:hover {
+  background: var(--bg-hover, #252735);
+  color: var(--text-primary);
+}
+
+.doc-tab.active {
+  background: #0f0f14;
+  color: var(--accent, #89b4fa);
+  border-bottom: 1px solid #0f0f14;
+  margin-bottom: -1px;
+}
+
+.doc-tab-name {
+  font-size: 11px;
+  font-weight: 500;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.doc-tab-close {
+  background: none;
+  border: none;
+  color: var(--text-muted, #7f849c);
+  font-size: 14px;
+  cursor: pointer;
+  line-height: 1;
+  padding: 2px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.15s;
+}
+
+.doc-tab-close:hover {
+  color: var(--danger, #f38ba8);
+  background: rgba(243, 139, 168, 0.12);
+}
+
+.doc-tab-add {
+  background: none;
+  border: 1px dashed var(--border, #313244);
+  border-radius: 4px;
+  color: var(--text-muted, #7f849c);
+  font-size: 11px;
+  padding: 4px 8px;
+  cursor: pointer;
+  margin-bottom: 6px;
+  margin-left: 6px;
+  transition: all 0.15s;
+}
+
+.doc-tab-add:hover {
+  color: var(--text-primary);
+  border-color: var(--text-muted);
+  background: var(--bg-hover);
+}
+
