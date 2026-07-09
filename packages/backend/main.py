@@ -11,7 +11,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import files, chat, artifacts, geocode, streetview
+from routers import files, chat, artifacts, geocode, streetview, wms, gee
 from tools import http as http_client
 
 
@@ -58,6 +58,8 @@ app.include_router(chat.router, prefix="/api/chat", tags=["chat"])
 app.include_router(artifacts.router, prefix="/api/artifacts", tags=["artifacts"])
 app.include_router(geocode.router, prefix="/api/geocode", tags=["geocode"])
 app.include_router(streetview.router, prefix="/api/streetview", tags=["streetview"])
+app.include_router(wms.router, prefix="/api/wms", tags=["wms"])
+app.include_router(gee.router, prefix="/api/gee", tags=["gee"])
 
 
 @app.get("/health")

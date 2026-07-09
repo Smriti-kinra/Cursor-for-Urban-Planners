@@ -28,24 +28,53 @@ function rangeLabel(breaks: number[], i: number): string {
 export function buildLegendEntries(layers: GeoJSONLayer[]): LegendEntry[] {
   const entries: LegendEntry[] = []
   for (const l of layers) {
+    if (!l.visible) continue
     const s = l.styleSpec
-    if (!l.visible || !s) continue
-    if (s.mode === 'categorized' && s.categories?.length) {
-      entries.push({
-        title: l.name,
-        property: s.property,
-        rows: s.categories.map((c) => ({ color: c.color, label: c.value || '(empty)' })),
-      })
-    } else if (s.mode === 'graduated' && s.rampColors?.length) {
-      entries.push({
-        title: l.name,
-        property: s.property,
-        rows: s.rampColors.map((color, i) => ({
-          color,
-          label: rangeLabel(s.breaks || [], i),
-        })),
-      })
+    if (s) {
+      if (s.mode === 'categorized' && s.categories?.length) {
+        entries.push({
+          title: l.name,
+          property: s.property,
+          rows: s.categories.map((c) => ({ color: c.color, label: c.value || '(empty)' })),
+        })
+      } else if (s.mode === 'graduated' && s.rampColors?.length) {
+        entries.push({
+          title: l.name,
+          property: s.property,
+          rows: s.rampColors.map((color, i) => ({
+            color,
+            label: rangeLabel(s.breaks || [], i),
+          })),
+        })
+      }
+    } else if (l.geeSpec?.vis_params) {
+      const vis = l.geeSpec.vis_params
+      const palette = vis.palette
+      if (Array.isArray(palette)) {
+        const min = vis.min ?? 0
+        const max = vis.max ?? 100
+        const labels = vis.palette_labels || []
+        
+        const rows = palette.map((color: string, i: number) => {
+          const hexColor = color.startsWith('#') ? color : `#${color}`
+          let label = ''
+          if (labels[i]) {
+            label = labels[i]
+          } else {
+            const val = min + (i / (palette.length - 1)) * (max - min)
+            label = val % 1 === 0 ? val.toString() : val.toFixed(1)
+          }
+          return { color: hexColor, label }
+        })
+        
+        entries.push({
+          title: l.name,
+          property: 'Value',
+          rows,
+        })
+      }
     }
   }
+
   return entries
 }

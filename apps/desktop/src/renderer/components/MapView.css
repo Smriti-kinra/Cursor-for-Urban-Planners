@@ -341,6 +341,25 @@
   font-weight: 500;
 }
 
+/* Divider between multiple WMS features in the same popup */
+.mv-hover-popup .mv-popup-divider {
+  border: none;
+  border-top: 1px solid var(--border);
+  margin: 6px 0;
+}
+
+/* WMS popup has a close button — make it fit the dark theme */
+.mv-wms-popup .maplibregl-popup-close-button {
+  color: var(--text-secondary);
+  font-size: 14px;
+  padding: 2px 6px;
+  line-height: 1;
+}
+.mv-wms-popup .maplibregl-popup-close-button:hover {
+  color: var(--text-primary);
+  background: transparent;
+}
+
 /* ── Redesigned Basemap Panel ── */
 .basemap-panel-redesigned {
   position: absolute;

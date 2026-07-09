@@ -463,7 +463,21 @@ function App() {
 
   const zoomToLayer = useCallback((id: string) => {
     const layer = layers.find((l) => l.id === id)
-    if (!layer?.data) return
+    if (!layer) return
+    // WMS/GEE raster layers have no GeoJSON data to compute a bbox from.
+    // Fall back to the current visible map bounds so the button still does
+    // something useful (e.g., zooms back if user panned away).
+    if (layer.wmsSpec || layer.geeSpec) {
+      const b = mapBoundsRef.current
+      if (b) {
+        setMapActions((prev) => [
+          ...prev,
+          { type: 'fit_bounds', payload: { west: b.west, south: b.south, east: b.east, north: b.north } },
+        ])
+      }
+      return
+    }
+    if (!layer.data) return
     try {
       const bbox = turf.bbox(layer.data) as [number, number, number, number]
       if (bbox.every((v) => isFinite(v))) {
@@ -1286,6 +1300,18 @@ function App() {
     }
     if (action.type === 'add_wms_layer') {
       const { url, layer_name, title } = action.payload
+      // Deduplicate: if this exact WMS url+layer is already loaded, just make
+      // it visible instead of adding a second copy.
+      const existing = layers.find(
+        (l) => l.wmsSpec && l.wmsSpec.url === url && l.wmsSpec.layer_name === layer_name,
+      )
+      if (existing) {
+        setLayers((prev) =>
+          prev.map((l) => (l.id === existing.id ? { ...l, visible: true } : l)),
+        )
+        setActiveLeftTab('layers')
+        return
+      }
       const id = `wms-${Date.now()}`
       const newLayer: GeoJSONLayer = {
         id,
@@ -1302,6 +1328,23 @@ function App() {
     }
     if (action.type === 'add_gee_layer') {
       const { url, dataset, vis_params, title } = action.payload
+      // Deduplicate by dataset name. GEE tile tokens expire after ~24h, so if
+      // the same dataset is re-added we update the URL (refresh token) and
+      // make the layer visible rather than creating a duplicate entry.
+      const existing = layers.find(
+        (l) => l.geeSpec && l.geeSpec.dataset === dataset,
+      )
+      if (existing) {
+        setLayers((prev) =>
+          prev.map((l) =>
+            l.id === existing.id
+              ? { ...l, visible: true, geeSpec: { url, dataset, vis_params } }
+              : l,
+          ),
+        )
+        setActiveLeftTab('layers')
+        return
+      }
       const id = `gee-${Date.now()}`
       const newLayer: GeoJSONLayer = {
         id,
@@ -1667,16 +1710,22 @@ function App() {
 
         return {
           name: l.name,
+          filePath: l.filePath,
           featureCount,
           geometryTypes,
           properties,
           visible: l.visible,
+          // Layer type helps the LLM know this is a raster (no features to query)
+          layerType: l.wmsSpec ? 'wms' : l.geeSpec ? 'gee' : 'vector',
+          ...(l.wmsSpec ? { wmsUrl: l.wmsSpec.url, wmsLayerName: l.wmsSpec.layer_name } : {}),
+          ...(l.geeSpec ? { geeDataset: l.geeSpec.dataset } : {}),
           ...(l.groupId !== undefined ? { groupId: l.groupId } : {}),
           ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
           ...(geometry_data ? { geometry_data } : {}),
           ...(features_data ? { features_data } : {}),
           style,
         }
+
       }),
       basemap,
     }),
@@ -2124,7 +2173,13 @@ function App() {
                 onToggle={toggleLayer}
                 onRemove={removeLayer}
                 onZoomTo={zoomToLayer}
-                onStyle={(id) => { setStylingLayerId((cur) => (cur === id ? null : id)); setAttrLayerId(null) }}
+                onStyle={(id) => {
+                  // Raster layers (WMS/GEE) have no vector symbology — block the panel.
+                  const layer = layers.find((l) => l.id === id)
+                  if (layer?.wmsSpec || layer?.geeSpec) return
+                  setStylingLayerId((cur) => (cur === id ? null : id))
+                  setAttrLayerId(null)
+                }}
                 activeStyleId={stylingLayerId}
                 onAttributes={(id) => { setAttrLayerId((cur) => (cur === id ? null : id)); setStylingLayerId(null) }}
                 activeAttrId={attrLayerId}

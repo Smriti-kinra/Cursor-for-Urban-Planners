@@ -1,0 +1,3487 @@
+{
+  "type": "FeatureCollection",
+  "features": [
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8058588,
+            30.7546828
+          ],
+          [
+            76.805927,
+            30.7544762
+          ],
+          [
+            76.8058822,
+            30.7543579
+          ],
+          [
+            76.8058444,
+            30.7542579
+          ],
+          [
+            76.8057691,
+            30.7540918
+          ],
+          [
+            76.805556,
+            30.7538052
+          ],
+          [
+            76.8053965,
+            30.7536338
+          ],
+          [
+            76.8050582,
+            30.7533538
+          ],
+          [
+            76.8048539,
+            30.7532046
+          ],
+          [
+            76.8045959,
+            30.7530504
+          ],
+          [
+            76.804449,
+            30.7529627
+          ],
+          [
+            76.8044213,
+            30.7529461
+          ],
+          [
+            76.8043437,
+            30.7528997
+          ],
+          [
+            76.8043093,
+            30.7528791
+          ],
+          [
+            76.8041891,
+            30.7528073
+          ],
+          [
+            76.8041477,
+            30.7527826
+          ],
+          [
+            76.8040352,
+            30.7527153
+          ],
+          [
+            76.803944,
+            30.7526608
+          ],
+          [
+            76.8035065,
+            30.7523994
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129720694,
+        "highway": "unclassified",
+        "name": "unnamed",
+        "lit": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8006353,
+            30.7560372
+          ],
+          [
+            76.8008681,
+            30.7562146
+          ],
+          [
+            76.8020844,
+            30.7571938
+          ],
+          [
+            76.8024252,
+            30.7574682
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722895,
+        "highway": "tertiary",
+        "name": "Jan Marg",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80310956491549,
+            30.752874157792743
+          ],
+          [
+            76.8033359,
+            30.7530164
+          ],
+          [
+            76.8037888,
+            30.7533009
+          ],
+          [
+            76.8043267,
+            30.7536389
+          ],
+          [
+            76.8057294,
+            30.7545202
+          ],
+          [
+            76.8058588,
+            30.7546828
+          ],
+          [
+            76.8058973,
+            30.7547311
+          ],
+          [
+            76.8060135,
+            30.7549032
+          ],
+          [
+            76.8060813,
+            30.7549587
+          ],
+          [
+            76.8062331,
+            30.7550641
+          ],
+          [
+            76.8063913,
+            30.7551002
+          ],
+          [
+            76.8066141,
+            30.755103
+          ],
+          [
+            76.8068167,
+            30.7552254
+          ],
+          [
+            76.807048,
+            30.7553462
+          ],
+          [
+            76.8076895,
+            30.7557529
+          ],
+          [
+            76.8078138,
+            30.755828
+          ],
+          [
+            76.8079534,
+            30.7559124
+          ],
+          [
+            76.8080849,
+            30.7560105
+          ],
+          [
+            76.8082029,
+            30.7561082
+          ],
+          [
+            76.8082891,
+            30.7561939
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722900,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8024252,
+            30.7574682
+          ],
+          [
+            76.8023844,
+            30.7575592
+          ],
+          [
+            76.8023967,
+            30.7576551
+          ],
+          [
+            76.8024215,
+            30.7577492
+          ],
+          [
+            76.8025249,
+            30.7579268
+          ],
+          [
+            76.8025889,
+            30.7580209
+          ],
+          [
+            76.8026799,
+            30.7580795
+          ],
+          [
+            76.8027729,
+            30.7580866
+          ],
+          [
+            76.8028741,
+            30.7580671
+          ],
+          [
+            76.8029772,
+            30.7580169
+          ],
+          [
+            76.8030352,
+            30.7579587
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722903,
+        "highway": "tertiary",
+        "name": "unnamed",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8049766,
+            30.7591598
+          ],
+          [
+            76.8047102,
+            30.758994
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722904,
+        "highway": "service",
+        "name": "unnamed",
+        "layer": "-1",
+        "surface": "asphalt",
+        "tunnel": "yes"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80044728838482,
+            30.75605712402059
+          ],
+          [
+            76.800482,
+            30.7560724
+          ],
+          [
+            76.8005451,
+            30.7560767
+          ],
+          [
+            76.8005922,
+            30.7560645
+          ],
+          [
+            76.8006353,
+            30.7560372
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722915,
+        "highway": "secondary",
+        "name": "unnamed",
+        "junction": "roundabout",
+        "lane_markings": "no",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8047102,
+            30.758994
+          ],
+          [
+            76.8033755,
+            30.7581636
+          ],
+          [
+            76.8030352,
+            30.7579587
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722920,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8058588,
+            30.7546828
+          ],
+          [
+            76.8056522,
+            30.7549308
+          ],
+          [
+            76.805314,
+            30.7553369
+          ],
+          [
+            76.8052429,
+            30.7554314
+          ],
+          [
+            76.8048363,
+            30.7558982
+          ],
+          [
+            76.804814,
+            30.7559247
+          ],
+          [
+            76.8044152,
+            30.7563988
+          ],
+          [
+            76.803516,
+            30.7574626
+          ],
+          [
+            76.8032186,
+            30.7578144
+          ],
+          [
+            76.8031979,
+            30.7578389
+          ],
+          [
+            76.8030679,
+            30.7578654
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722932,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8094364,
+            30.7576724
+          ],
+          [
+            76.8071955,
+            30.7603789
+          ],
+          [
+            76.807162,
+            30.7604066
+          ],
+          [
+            76.8071164,
+            30.760432
+          ],
+          [
+            76.8070507,
+            30.760432
+          ],
+          [
+            76.8070078,
+            30.7604181
+          ],
+          [
+            76.8066759,
+            30.7602427
+          ],
+          [
+            76.8052709,
+            30.7593428
+          ],
+          [
+            76.8049766,
+            30.7591598
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722936,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8027729,
+            30.7580866
+          ],
+          [
+            76.8027386,
+            30.7582961
+          ],
+          [
+            76.802703,
+            30.7584154
+          ],
+          [
+            76.8026352,
+            30.7585097
+          ],
+          [
+            76.8013731,
+            30.7599992
+          ],
+          [
+            76.80065,
+            30.7608411
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722941,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79753096147425,
+            30.759516210631713
+          ],
+          [
+            76.7974437,
+            30.7596239
+          ],
+          [
+            76.7969849,
+            30.7601639
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129722952,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7983584,
+            30.7618751
+          ],
+          [
+            76.7975589,
+            30.7627865
+          ],
+          [
+            76.7973531,
+            30.7630211
+          ],
+          [
+            76.7972716,
+            30.7631134
+          ],
+          [
+            76.7971922,
+            30.7631632
+          ],
+          [
+            76.7970549,
+            30.7631816
+          ],
+          [
+            76.7969327,
+            30.763158
+          ],
+          [
+            76.7968137,
+            30.7630924
+          ],
+          [
+            76.7967266,
+            30.7630363
+          ],
+          [
+            76.795811,
+            30.7624471
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129777125,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7932583292401,
+            30.764626126860172
+          ],
+          [
+            76.7932603,
+            30.7646273
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779637,
+        "highway": "residential",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7915936,
+            30.7672874
+          ],
+          [
+            76.7916486,
+            30.7674258
+          ],
+          [
+            76.7914196,
+            30.7683176
+          ],
+          [
+            76.7913717,
+            30.7686279
+          ],
+          [
+            76.7913785,
+            30.7687453
+          ],
+          [
+            76.79139124718326,
+            30.76881632730509
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779639,
+        "highway": "tertiary",
+        "name": "Dhillon",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7939957021427,
+            30.770081530830797
+          ],
+          [
+            76.7942067,
+            30.7701417
+          ],
+          [
+            76.7943346,
+            30.7701881
+          ],
+          [
+            76.7944444,
+            30.7702345
+          ],
+          [
+            76.79535547125913,
+            30.77066283140569
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779639,
+        "highway": "tertiary",
+        "name": "Dhillon",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.796757507804,
+            30.770740937437427
+          ],
+          [
+            76.7967809,
+            30.7707405
+          ],
+          [
+            76.7971246,
+            30.7707341
+          ],
+          [
+            76.7973517,
+            30.7707329
+          ],
+          [
+            76.7975138,
+            30.7707472
+          ],
+          [
+            76.7976325,
+            30.7707747
+          ],
+          [
+            76.7981297,
+            30.7709617
+          ],
+          [
+            76.7982891,
+            30.7710215
+          ],
+          [
+            76.7987443,
+            30.7711953
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779639,
+        "highway": "tertiary",
+        "name": "Dhillon",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7947803,
+            30.7627989
+          ],
+          [
+            76.7966517,
+            30.7639735
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779643,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8017187,
+            30.7628083
+          ],
+          [
+            76.8027394,
+            30.7615665
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779645,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7989665,
+            30.7600574
+          ],
+          [
+            76.798764,
+            30.760319
+          ],
+          [
+            76.7987412,
+            30.7603317
+          ],
+          [
+            76.7987146,
+            30.7603273
+          ],
+          [
+            76.7985905,
+            30.7602586
+          ],
+          [
+            76.7979927,
+            30.7599277
+          ],
+          [
+            76.7974437,
+            30.7596239
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779647,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8019216,
+            30.7629403
+          ],
+          [
+            76.8018571,
+            30.7629513
+          ],
+          [
+            76.8018054,
+            30.7629733
+          ],
+          [
+            76.8017488,
+            30.7630103
+          ],
+          [
+            76.8016892,
+            30.7630618
+          ],
+          [
+            76.8013778,
+            30.7633378
+          ],
+          [
+            76.8009132,
+            30.7630621
+          ],
+          [
+            76.8007783,
+            30.7629731
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779663,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7961681,
+            30.7645737
+          ],
+          [
+            76.7966517,
+            30.7639735
+          ],
+          [
+            76.7969545,
+            30.7635874
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779666,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8061143,
+            30.7584292
+          ],
+          [
+            76.8070583,
+            30.7590333
+          ],
+          [
+            76.8072393,
+            30.7587741
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779667,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7933429,
+            30.7645279
+          ],
+          [
+            76.7936789,
+            30.7647377
+          ],
+          [
+            76.795812,
+            30.7660695
+          ],
+          [
+            76.7960364,
+            30.7662096
+          ],
+          [
+            76.7967472,
+            30.7666555
+          ],
+          [
+            76.7985702,
+            30.7677992
+          ],
+          [
+            76.7995471,
+            30.7683527
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779670,
+        "highway": "residential",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8037888,
+            30.7533009
+          ],
+          [
+            76.8034195,
+            30.7532302
+          ],
+          [
+            76.80316,
+            30.7532334
+          ],
+          [
+            76.8029615,
+            30.7532367
+          ],
+          [
+            76.80276466940018,
+            30.753286618672302
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779674,
+        "highway": "residential",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7995271,
+            30.7603079
+          ],
+          [
+            76.7996551,
+            30.7603237
+          ],
+          [
+            76.7998222,
+            30.7603719
+          ],
+          [
+            76.7999502,
+            30.7604269
+          ],
+          [
+            76.800109,
+            30.760544
+          ],
+          [
+            76.800519,
+            30.7608428
+          ],
+          [
+            76.8005823,
+            30.7608576
+          ],
+          [
+            76.80065,
+            30.7608411
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779678,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80490607806394,
+            30.764805636503997
+          ],
+          [
+            76.8047084,
+            30.7646777
+          ],
+          [
+            76.8030281,
+            30.7635967
+          ],
+          [
+            76.8019216,
+            30.7629403
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779685,
+        "highway": "service",
+        "name": "unnamed",
+        "cycleway:right": "track",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7987443,
+            30.7711953
+          ],
+          [
+            76.79876141737948,
+            30.771179067671202
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779686,
+        "highway": "unclassified",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80302133270472,
+            30.767090525887895
+          ],
+          [
+            76.80307992124897,
+            30.767033563259133
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779686,
+        "highway": "unclassified",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80421042737069,
+            30.765684888401076
+          ],
+          [
+            76.8045866,
+            30.7652303
+          ],
+          [
+            76.80464443802273,
+            30.765167140154492
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 129779686,
+        "highway": "unclassified",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79232194365383,
+            30.765755548420746
+          ],
+          [
+            76.7923222,
+            30.7657557
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 155968842,
+        "highway": "residential",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8065168,
+            30.7566395
+          ],
+          [
+            76.806828,
+            30.7568242
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573686,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8082029,
+            30.7561082
+          ],
+          [
+            76.80785,
+            30.7565411
+          ],
+          [
+            76.8075825,
+            30.7568791
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573687,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8080849,
+            30.7560105
+          ],
+          [
+            76.8077163,
+            30.7564596
+          ],
+          [
+            76.8074242,
+            30.7568224
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573688,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8070583,
+            30.7590333
+          ],
+          [
+            76.8069193,
+            30.7595884
+          ],
+          [
+            76.806867,
+            30.7597486
+          ],
+          [
+            76.8068053,
+            30.7599399
+          ],
+          [
+            76.8066759,
+            30.7602427
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573689,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8079534,
+            30.7559124
+          ],
+          [
+            76.8075813,
+            30.7563773
+          ],
+          [
+            76.8072724,
+            30.75676
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573690,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8078138,
+            30.755828
+          ],
+          [
+            76.8074435,
+            30.7562934
+          ],
+          [
+            76.8071536,
+            30.7566636
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573691,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8073202,
+            30.7562183
+          ],
+          [
+            76.8074435,
+            30.7562934
+          ],
+          [
+            76.8075813,
+            30.7563773
+          ],
+          [
+            76.8077163,
+            30.7564596
+          ],
+          [
+            76.80785,
+            30.7565411
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573692,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8064178,
+            30.7567719
+          ],
+          [
+            76.8066153,
+            30.7568612
+          ],
+          [
+            76.8067345,
+            30.7569273
+          ],
+          [
+            76.8067972,
+            30.7568621
+          ],
+          [
+            76.806828,
+            30.7568242
+          ],
+          [
+            76.8073202,
+            30.7562183
+          ],
+          [
+            76.8076895,
+            30.7557529
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573693,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8063751,
+            30.7568291
+          ],
+          [
+            76.8064178,
+            30.7567719
+          ],
+          [
+            76.8065168,
+            30.7566395
+          ],
+          [
+            76.8065809,
+            30.7564535
+          ],
+          [
+            76.806665,
+            30.7563193
+          ],
+          [
+            76.8071019,
+            30.7557784
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 308573694,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80140622502883,
+            30.754911183606783
+          ],
+          [
+            76.8014114,
+            30.7549141
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 491118718,
+        "highway": "unclassified",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79828969006093,
+            30.771074509425933
+          ],
+          [
+            76.7982891,
+            30.7710215
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 492921368,
+        "highway": "residential",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8045894175028,
+            30.765232776280225
+          ],
+          [
+            76.8045866,
+            30.7652303
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 636050287,
+        "highway": "unclassified",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7981016207124,
+            30.77099949141766
+          ],
+          [
+            76.7981297,
+            30.7709617
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 636050288,
+        "highway": "residential",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8059,
+            30.7551053
+          ],
+          [
+            76.8064633,
+            30.7554234
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902729,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8056761,
+            30.7553738
+          ],
+          [
+            76.805786,
+            30.7552413
+          ],
+          [
+            76.8059,
+            30.7551053
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902730,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8061066,
+            30.7558129
+          ],
+          [
+            76.8055648,
+            30.7555087
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902731,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8056761,
+            30.7553738
+          ],
+          [
+            76.8062514,
+            30.7556965
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902732,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.805314,
+            30.7553369
+          ],
+          [
+            76.8055648,
+            30.7555087
+          ],
+          [
+            76.8056761,
+            30.7553738
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902733,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8059,
+            30.7551053
+          ],
+          [
+            76.8056522,
+            30.7549308
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902734,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8063802,
+            30.7555594
+          ],
+          [
+            76.805786,
+            30.7552413
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902735,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8064633,
+            30.7554234
+          ],
+          [
+            76.8064418,
+            30.7554948
+          ],
+          [
+            76.8063802,
+            30.7555594
+          ],
+          [
+            76.8062514,
+            30.7556965
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902736,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8062514,
+            30.7556965
+          ],
+          [
+            76.8061817,
+            30.7557899
+          ],
+          [
+            76.8061508,
+            30.7558141
+          ],
+          [
+            76.8061066,
+            30.7558129
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902737,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8063721,
+            30.7561183
+          ],
+          [
+            76.807048,
+            30.7553462
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902738,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8052429,
+            30.7554314
+          ],
+          [
+            76.8055728,
+            30.7556677
+          ],
+          [
+            76.8060315,
+            30.7559155
+          ],
+          [
+            76.8061495,
+            30.7559939
+          ],
+          [
+            76.8063721,
+            30.7561183
+          ],
+          [
+            76.806525,
+            30.7562497
+          ],
+          [
+            76.806665,
+            30.7563193
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 675902739,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8007783,
+            30.7629731
+          ],
+          [
+            76.7998543,
+            30.7623876
+          ],
+          [
+            76.7997957,
+            30.7623515
+          ],
+          [
+            76.7988698,
+            30.7617819
+          ],
+          [
+            76.7987761,
+            30.7617607
+          ],
+          [
+            76.7986903,
+            30.7617607
+          ],
+          [
+            76.7985499,
+            30.7617894
+          ],
+          [
+            76.7983584,
+            30.7618751
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 734674627,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7990105,
+            30.7614668
+          ],
+          [
+            76.7988002,
+            30.761332
+          ],
+          [
+            76.7986447,
+            30.761521
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 734674628,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7983584,
+            30.7618751
+          ],
+          [
+            76.7986447,
+            30.761521
+          ],
+          [
+            76.7988713,
+            30.76166
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 734674629,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7988713,
+            30.76166
+          ],
+          [
+            76.8002191,
+            30.7624867
+          ],
+          [
+            76.8003076,
+            30.7624521
+          ],
+          [
+            76.8003559,
+            30.7623784
+          ],
+          [
+            76.800364,
+            30.7623346
+          ],
+          [
+            76.7990105,
+            30.7614668
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 734674630,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8081715,
+            30.7565838
+          ],
+          [
+            76.8080753,
+            30.7566162
+          ],
+          [
+            76.8079922,
+            30.7566911
+          ],
+          [
+            76.807791,
+            30.7569423
+          ],
+          [
+            76.8077625,
+            30.7570627
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 758617497,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8048363,
+            30.7558982
+          ],
+          [
+            76.8061841,
+            30.7567497
+          ],
+          [
+            76.8063751,
+            30.7568291
+          ],
+          [
+            76.8067074,
+            30.7569642
+          ],
+          [
+            76.8067744,
+            30.7569804
+          ],
+          [
+            76.80682,
+            30.7569688
+          ],
+          [
+            76.8069689,
+            30.7567798
+          ],
+          [
+            76.8070051,
+            30.7567591
+          ],
+          [
+            76.8070541,
+            30.7567657
+          ],
+          [
+            76.8076636,
+            30.757076
+          ],
+          [
+            76.8077625,
+            30.7570627
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 758617498,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8077625,
+            30.7570627
+          ],
+          [
+            76.8078178,
+            30.7570553
+          ],
+          [
+            76.8079627,
+            30.7569873
+          ],
+          [
+            76.808086,
+            30.7567695
+          ],
+          [
+            76.8081715,
+            30.7565838
+          ],
+          [
+            76.8082711,
+            30.7563753
+          ],
+          [
+            76.8082891,
+            30.7561939
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 758618848,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7989255,
+            30.7599011
+          ],
+          [
+            76.7991409,
+            30.7596956
+          ],
+          [
+            76.7992602,
+            30.7595757
+          ],
+          [
+            76.7994426,
+            30.7593498
+          ],
+          [
+            76.7995982,
+            30.7591297
+          ],
+          [
+            76.7998074,
+            30.7588301
+          ],
+          [
+            76.7998852,
+            30.7586872
+          ],
+          [
+            76.7999375,
+            30.758595
+          ],
+          [
+            76.7999348,
+            30.7585604
+          ],
+          [
+            76.7999187,
+            30.7585373
+          ],
+          [
+            76.7998785,
+            30.7585224
+          ],
+          [
+            76.799857,
+            30.7584993
+          ],
+          [
+            76.7998503,
+            30.758474
+          ],
+          [
+            76.7998637,
+            30.7584279
+          ],
+          [
+            76.7999375,
+            30.7583334
+          ],
+          [
+            76.8005624,
+            30.7575174
+          ],
+          [
+            76.8010077,
+            30.756955
+          ],
+          [
+            76.8010654,
+            30.7568985
+          ],
+          [
+            76.8011203,
+            30.7568617
+          ],
+          [
+            76.8011565,
+            30.7568467
+          ],
+          [
+            76.8012169,
+            30.7568386
+          ],
+          [
+            76.8012705,
+            30.7568375
+          ],
+          [
+            76.8012974,
+            30.7568513
+          ],
+          [
+            76.8013564,
+            30.7569181
+          ],
+          [
+            76.8017372,
+            30.7573446
+          ],
+          [
+            76.8018016,
+            30.7574079
+          ],
+          [
+            76.8018579,
+            30.7574494
+          ],
+          [
+            76.8018995,
+            30.7575359
+          ],
+          [
+            76.8019558,
+            30.7576384
+          ],
+          [
+            76.8020403,
+            30.7577894
+          ],
+          [
+            76.8020739,
+            30.7578908
+          ],
+          [
+            76.8020819,
+            30.7579749
+          ],
+          [
+            76.8020685,
+            30.7580752
+          ],
+          [
+            76.802047,
+            30.7582446
+          ],
+          [
+            76.8020216,
+            30.7584325
+          ],
+          [
+            76.8019921,
+            30.7585373
+          ],
+          [
+            76.8019626,
+            30.7586676
+          ],
+          [
+            76.8018392,
+            30.7588497
+          ],
+          [
+            76.8016192,
+            30.7590686
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571415,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7989692,
+            30.7595273
+          ],
+          [
+            76.7986872,
+            30.7598701
+          ],
+          [
+            76.7985535,
+            30.7600424
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571416,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7985905,
+            30.7602586
+          ],
+          [
+            76.7987224,
+            30.7601173
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571417,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7979927,
+            30.7599277
+          ],
+          [
+            76.7980465,
+            30.7598984
+          ],
+          [
+            76.7981189,
+            30.7598857
+          ],
+          [
+            76.7982423,
+            30.7598707
+          ],
+          [
+            76.7983617,
+            30.7598638
+          ],
+          [
+            76.7984636,
+            30.7598615
+          ],
+          [
+            76.7986594,
+            30.7598673
+          ],
+          [
+            76.7986872,
+            30.7598701
+          ],
+          [
+            76.7987085,
+            30.7598723
+          ],
+          [
+            76.7988056,
+            30.7598822
+          ],
+          [
+            76.7989255,
+            30.7599011
+          ],
+          [
+            76.7989665,
+            30.7599076
+          ],
+          [
+            76.7990658,
+            30.7599387
+          ],
+          [
+            76.7991462,
+            30.7599629
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571418,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8036434,
+            30.7530109
+          ],
+          [
+            76.8038666,
+            30.7527293
+          ],
+          [
+            76.8039681,
+            30.7527887
+          ],
+          [
+            76.8040867,
+            30.7528581
+          ],
+          [
+            76.8042495,
+            30.7529535
+          ],
+          [
+            76.8043929,
+            30.7530374
+          ],
+          [
+            76.8045387,
+            30.7531227
+          ],
+          [
+            76.8043155,
+            30.7534043
+          ],
+          [
+            76.8041697,
+            30.7533189
+          ],
+          [
+            76.8040264,
+            30.753235
+          ],
+          [
+            76.8038635,
+            30.7531397
+          ],
+          [
+            76.8037449,
+            30.7530703
+          ],
+          [
+            76.8036434,
+            30.7530109
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571430,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8036434,
+            30.7530109
+          ],
+          [
+            76.8032082,
+            30.7527562
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571430,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8043929,
+            30.7530374
+          ],
+          [
+            76.8041697,
+            30.7533189
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571431,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8042495,
+            30.7529535
+          ],
+          [
+            76.8040264,
+            30.753235
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571432,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8040867,
+            30.7528581
+          ],
+          [
+            76.8038635,
+            30.7531397
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571433,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8039681,
+            30.7527887
+          ],
+          [
+            76.8037449,
+            30.7530703
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 802571434,
+        "highway": "service",
+        "name": "unnamed",
+        "service": "parking_aisle"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8013731,
+            30.7599992
+          ],
+          [
+            76.8018153,
+            30.7602389
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 994188296,
+        "highway": "service",
+        "name": "unnamed",
+        "source": "maxar"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8013778,
+            30.7633378
+          ],
+          [
+            76.8016779,
+            30.763561
+          ],
+          [
+            76.801695,
+            30.7635952
+          ],
+          [
+            76.8016956,
+            30.7636291
+          ],
+          [
+            76.801682,
+            30.7636613
+          ],
+          [
+            76.8009996,
+            30.7646505
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1026259648,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.80192232362279,
+            30.754293980800266
+          ],
+          [
+            76.8014114,
+            30.7549141
+          ],
+          [
+            76.8007055,
+            30.7557695
+          ],
+          [
+            76.800634,
+            30.7558576
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1030701175,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "cycleway:left": "track",
+        "cycleway:right": "lane",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8019216,
+            30.7629403
+          ],
+          [
+            76.8017187,
+            30.7628083
+          ],
+          [
+            76.8001124,
+            30.7617295
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1037517258,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7973531,
+            30.7630211
+          ],
+          [
+            76.7974423,
+            30.7630754
+          ],
+          [
+            76.798303,
+            30.763599
+          ],
+          [
+            76.7983559,
+            30.7636408
+          ],
+          [
+            76.7983706,
+            30.763686
+          ],
+          [
+            76.7983755,
+            30.7637353
+          ],
+          [
+            76.7983558,
+            30.7637723
+          ],
+          [
+            76.7982555,
+            30.7639405
+          ],
+          [
+            76.7981768,
+            30.7639767
+          ],
+          [
+            76.797991,
+            30.7640473
+          ],
+          [
+            76.7978549,
+            30.7641228
+          ],
+          [
+            76.7977846,
+            30.7641587
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103393121,
+        "highway": "service",
+        "name": "unnamed",
+        "access": "private",
+        "source": "maxar"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7999454,
+            30.7645895
+          ],
+          [
+            76.8004452,
+            30.7638053
+          ],
+          [
+            76.8009132,
+            30.7630621
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103393122,
+        "highway": "service",
+        "name": "unnamed",
+        "source": "maxar"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7985686,
+            30.7633168
+          ],
+          [
+            76.7992356,
+            30.7625643
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103393123,
+        "highway": "service",
+        "name": "unnamed",
+        "access": "private",
+        "source": "maxar"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7985686,
+            30.7633168
+          ],
+          [
+            76.798856,
+            30.7634602
+          ],
+          [
+            76.7993147,
+            30.7636891
+          ],
+          [
+            76.7993709,
+            30.7637045
+          ],
+          [
+            76.7994194,
+            30.7636957
+          ],
+          [
+            76.7994678,
+            30.763654
+          ],
+          [
+            76.7999859,
+            30.7630247
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103393124,
+        "highway": "service",
+        "name": "unnamed",
+        "access": "private",
+        "source": "maxar"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79487617747093,
+            30.7626747590685
+          ],
+          [
+            76.7947803,
+            30.7627989
+          ],
+          [
+            76.7933429,
+            30.7645279
+          ],
+          [
+            76.7932603,
+            30.7646273
+          ],
+          [
+            76.7923222,
+            30.7657557
+          ],
+          [
+            76.79218608312729,
+            30.76591941660727
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427160,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79525616500192,
+            30.76221643707322
+          ],
+          [
+            76.7952565,
+            30.7622167
+          ],
+          [
+            76.7952893,
+            30.762229
+          ],
+          [
+            76.7953251,
+            30.7622311
+          ],
+          [
+            76.7953596,
+            30.7622229
+          ],
+          [
+            76.7953828,
+            30.7622106
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427161,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7954038,
+            30.7620917
+          ],
+          [
+            76.7956007,
+            30.7618656
+          ],
+          [
+            76.7956402,
+            30.7617984
+          ],
+          [
+            76.79566809370155,
+            30.761726494380117
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427163,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79495543571215,
+            30.762579161733584
+          ],
+          [
+            76.794997,
+            30.7625608
+          ],
+          [
+            76.7950396,
+            30.7625263
+          ],
+          [
+            76.7952893,
+            30.762229
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427165,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.795811,
+            30.7624471
+          ],
+          [
+            76.7957803,
+            30.7624128
+          ],
+          [
+            76.7957395,
+            30.7623763
+          ],
+          [
+            76.795411,
+            30.7621787
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427166,
+        "highway": "service",
+        "name": "unnamed",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7953828,
+            30.7622106
+          ],
+          [
+            76.7957093,
+            30.7624086
+          ],
+          [
+            76.7957501,
+            30.7624242
+          ],
+          [
+            76.795811,
+            30.7624471
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1103427167,
+        "highway": "service",
+        "name": "unnamed",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79678100044846,
+            30.77074224618879
+          ],
+          [
+            76.7967809,
+            30.7707405
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1127729620,
+        "highway": "residential",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7967266,
+            30.7630363
+          ],
+          [
+            76.7966121,
+            30.7632196
+          ],
+          [
+            76.7964488,
+            30.763442
+          ],
+          [
+            76.7963317,
+            30.7636167
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1192067399,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.804814,
+            30.7559247
+          ],
+          [
+            76.8047494,
+            30.7558843
+          ],
+          [
+            76.8044714,
+            30.7557008
+          ],
+          [
+            76.8043755,
+            30.7555576
+          ],
+          [
+            76.8043242,
+            30.7554809
+          ],
+          [
+            76.804249,
+            30.7551147
+          ],
+          [
+            76.8042977,
+            30.7537152
+          ],
+          [
+            76.8043267,
+            30.7536389
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1202222116,
+        "highway": "service",
+        "name": "unnamed",
+        "surface": "paving_stones"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.79122280102348,
+            30.767130431500266
+          ],
+          [
+            76.7915936,
+            30.7672874
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1213994993,
+        "highway": "secondary",
+        "name": "Vidya Marg",
+        "cycleway:left": "track",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7915936,
+            30.7672874
+          ],
+          [
+            76.79123894357849,
+            30.76706180906073
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1213996170,
+        "highway": "secondary",
+        "name": "Vidya Marg",
+        "cycleway:left": "track",
+        "oneway": "yes",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8030352,
+            30.7579587
+          ],
+          [
+            76.8030679,
+            30.7578654
+          ],
+          [
+            76.8030512,
+            30.7577901
+          ],
+          [
+            76.8029588,
+            30.757696
+          ],
+          [
+            76.8027956,
+            30.7575716
+          ],
+          [
+            76.8025786,
+            30.7574704
+          ],
+          [
+            76.8024732,
+            30.7574509
+          ],
+          [
+            76.8024252,
+            30.7574682
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215103868,
+        "highway": "tertiary",
+        "name": "unnamed",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.800634,
+            30.7558576
+          ],
+          [
+            76.80062229897253,
+            30.75584868153394
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215103870,
+        "highway": "secondary",
+        "name": "unnamed",
+        "junction": "roundabout",
+        "lane_markings": "no",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.8006353,
+            30.7560372
+          ],
+          [
+            76.8006452,
+            30.7560272
+          ],
+          [
+            76.8006695,
+            30.7559874
+          ],
+          [
+            76.8006753,
+            30.7559313
+          ],
+          [
+            76.8006683,
+            30.7559057
+          ],
+          [
+            76.8006526,
+            30.7558778
+          ],
+          [
+            76.800634,
+            30.7558576
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215103871,
+        "highway": "secondary",
+        "name": "unnamed",
+        "junction": "roundabout",
+        "lane_markings": "no",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7954038,
+            30.7620917
+          ],
+          [
+            76.7953798,
+            30.7620689
+          ],
+          [
+            76.79537961892822,
+            30.762068814325094
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215704369,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.795411,
+            30.7621787
+          ],
+          [
+            76.7954197,
+            30.7621508
+          ],
+          [
+            76.7954177,
+            30.76212
+          ],
+          [
+            76.7954038,
+            30.7620917
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215704370,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7953828,
+            30.7622106
+          ],
+          [
+            76.795411,
+            30.7621787
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1215704371,
+        "highway": "secondary",
+        "name": "Uttar Marg",
+        "junction": "roundabout",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7987443,
+            30.7711953
+          ],
+          [
+            76.7987632338623,
+            30.77120286359627
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1216185444,
+        "highway": "tertiary",
+        "name": "unnamed",
+        "surface": "asphalt"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7985686,
+            30.7633168
+          ],
+          [
+            76.7976382,
+            30.7628241
+          ],
+          [
+            76.7975589,
+            30.7627865
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1357154325,
+        "highway": "service",
+        "name": "unnamed",
+        "access": "private"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.798856,
+            30.7634602
+          ],
+          [
+            76.799027,
+            30.7632303
+          ],
+          [
+            76.7992063,
+            30.7630723
+          ],
+          [
+            76.7996807,
+            30.7625038
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1357154326,
+        "highway": "service",
+        "name": "unnamed",
+        "access": "private"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.795812,
+            30.7660695
+          ],
+          [
+            76.7967492,
+            30.7649884
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1448399274,
+        "highway": "residential",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7966607,
+            30.7667633
+          ],
+          [
+            76.7967472,
+            30.7666555
+          ],
+          [
+            76.7968738,
+            30.7664976
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1448399278,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    },
+    {
+      "type": "Feature",
+      "geometry": {
+        "type": "LineString",
+        "coordinates": [
+          [
+            76.7936789,
+            30.7647377
+          ],
+          [
+            76.793574,
+            30.7648638
+          ]
+        ]
+      },
+      "properties": {
+        "osm_id": 1448399279,
+        "highway": "service",
+        "name": "unnamed"
+      }
+    }
+  ]
+}

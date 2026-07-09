@@ -30,47 +30,48 @@ _OVERPASS_HEADERS = {
 
 
 async def _overpass_post(query: str, timeout: float = 30.0) -> dict:
-    """Resilient Overpass call with mirror failover.
-
-    Returns a dict, or raises a single OverpassError with a human-readable
-    message — never the raw `JSONDecodeError("Expecting value: line 1 column 1")`
-    that bubbled up before. Callers should `try/except OverpassError`.
-    """
+    """Resilient Overpass call with mirror failover and rate-limit auto-retries."""
     last_status: int | None = None
     last_body_snippet: str = ""
     for url in _OVERPASS_MIRRORS:
-        try:
-            async with httpx.AsyncClient(timeout=timeout, headers=_OVERPASS_HEADERS) as http:
-                resp = await http.post(url, data={"data": query})
-        except httpx.RequestError as e:
-            last_body_snippet = f"network error: {e}"
-            continue
-        last_status = resp.status_code
-        # Overpass returns 429 (rate limit) and 504 (gateway timeout) frequently.
-        # Body is often empty or HTML on those — fail over to the next mirror.
-        if resp.status_code in (403, 429, 502, 503, 504):
-            last_body_snippet = (resp.text or "").strip()[:200]
-            await asyncio.sleep(0.4)
-            continue
-        if resp.status_code != 200:
-            last_body_snippet = (resp.text or "").strip()[:200]
-            continue
-        text = resp.text or ""
-        if not text.strip():
-            last_body_snippet = "<empty body>"
-            continue
-        try:
-            return _json.loads(text)
-        except _json.JSONDecodeError:
-            # Some Overpass mirrors return an HTML error page with status 200.
-            last_body_snippet = text.strip()[:200]
-            continue
+        # Retry up to 3 times per mirror on rate limits (429) or gateway timeouts (504/502)
+        for attempt in range(3):
+            try:
+                async with httpx.AsyncClient(timeout=timeout, headers=_OVERPASS_HEADERS) as http:
+                    resp = await http.post(url, data={"data": query})
+            except httpx.RequestError as e:
+                last_body_snippet = f"network error: {e}"
+                if attempt < 2:
+                    await asyncio.sleep(0.5 * (attempt + 1))
+                    continue
+                break
+                
+            last_status = resp.status_code
+            if resp.status_code in (403, 429, 502, 503, 504):
+                last_body_snippet = (resp.text or "").strip()[:200]
+                # Wait longer on each attempt (exponential backoff: 0.5s, 1s, 2s)
+                await asyncio.sleep(0.5 * (2 ** attempt))
+                continue
+            if resp.status_code != 200:
+                last_body_snippet = (resp.text or "").strip()[:200]
+                break
+            text = resp.text or ""
+            if not text.strip():
+                last_body_snippet = "<empty body>"
+                break
+            try:
+                return _json.loads(text)
+            except _json.JSONDecodeError:
+                last_body_snippet = text.strip()[:200]
+                break
+                
     raise OverpassError(
         f"Overpass mirrors all failed (last status {last_status}). "
         f"This is usually a transient rate-limit or upstream outage; "
         f"please retry in 30–60 seconds."
         + (f" Last body: {last_body_snippet!r}" if last_body_snippet else "")
     )
+
 
 
 class OverpassError(RuntimeError):

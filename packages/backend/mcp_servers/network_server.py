@@ -6,6 +6,20 @@ from pathlib import Path
 from llm.base import ToolDeclaration
 from mcp_servers.osm_server import _overpass_post, OverpassError, _sanitize_osm_token
 
+def _resolve_workspace(workspace_arg: str) -> str:
+    """Resolve workspace path to the actual repository root.
+    
+    If the path is empty, relative, or the placeholder '/workspace',
+    we resolve it dynamically to the repository root.
+    """
+    arg = workspace_arg.strip()
+    if not arg or arg == "/workspace" or arg == "." or not Path(arg).is_absolute():
+        here = Path(__file__).resolve()
+        # packages/backend/mcp_servers/network_server.py -> repo root
+        return str(here.parent.parent.parent.parent)
+    return arg
+
+
 def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float]) -> float:
     """Calculate the Haversine distance in meters between two points (lng, lat)."""
     lon1, lat1 = coord1
@@ -21,10 +35,60 @@ def haversine_distance(coord1: tuple[float, float], coord2: tuple[float, float])
     c = 2 * math.atan2(math.sqrt(a), math.sqrt(1-a))
     return R * c
 
+def _get_z_level(properties: dict) -> int:
+    """Parse Z-level of a feature from layer, tunnel, or bridge tags."""
+    if "layer" in properties:
+        try:
+            return int(properties["layer"])
+        except (ValueError, TypeError):
+            pass
+    if properties.get("tunnel") in ("yes", "true", "1", 1):
+        return -1
+    if properties.get("bridge") in ("yes", "true", "1", 1):
+        return 1
+    return 0
+
+
+def _is_oneway(properties: dict) -> str:
+    """Determine the one-way status of a road way."""
+    oneway = str(properties.get("oneway", "")).lower().strip()
+    if oneway in ("yes", "true", "1"):
+        return "yes"
+    if oneway in ("-1", "reverse"):
+        return "reverse"
+    if properties.get("highway") == "motorway" and oneway != "no":
+        return "yes"
+    if properties.get("junction") == "roundabout" and oneway != "no":
+        return "yes"
+    return "no"
+
+def _get_edge_weight(props: dict, distance_meters: float) -> float:
+    """Calculate penalized routing weight to prevent routing through private/service alleys."""
+    multiplier = 1.0
+    highway = str(props.get("highway", "")).lower()
+    service = str(props.get("service", "")).lower()
+    access = str(props.get("access", "")).lower()
+    
+    if access in ("private", "no"):
+        multiplier *= 10.0
+    if service in ("parking_aisle", "driveway"):
+        multiplier *= 5.0
+    elif highway == "service":
+        multiplier *= 3.0
+        
+    if highway in ("footway", "pedestrian", "path", "cycleway", "steps"):
+        multiplier *= 5.0
+        
+    return distance_meters * multiplier
+
 def _build_networkx_graph(geojson_data: dict) -> any:
-    """Build a networkx MultiGraph from GeoJSON LineStrings."""
+    """Build a networkx MultiDiGraph from GeoJSON LineStrings with Z-levels, one-ways, weights, and filters."""
     import networkx as nx
-    G = nx.MultiGraph()
+    G = nx.MultiDiGraph()
+    
+    # Store restriction relations in graph metadata if present in geojson
+    if isinstance(geojson_data, dict) and "restrictions" in geojson_data:
+        G.graph["restrictions"] = geojson_data["restrictions"]
     
     features = []
     if not geojson_data:
@@ -43,27 +107,183 @@ def _build_networkx_graph(geojson_data: dict) -> any:
         g_type = geom.get("type")
         props = feat.get("properties") or {}
         
+        # 1. Construction & Proposed Road Filter
+        highway = str(props.get("highway", "")).lower()
+        if highway in ("construction", "proposed"):
+            continue
+        if "construction" in props or "proposed" in props:
+            continue
+            
         coords_list = []
         if g_type == "LineString":
             coords_list = [geom.get("coordinates", [])]
         elif g_type == "MultiLineString":
             coords_list = geom.get("coordinates", [])
             
+        z_level = _get_z_level(props)
+        oneway_status = _is_oneway(props)
+        
         for coords in coords_list:
-            if len(coords) < 2:
+            L = len(coords)
+            if L < 2:
                 continue
-            for idx in range(len(coords) - 1):
-                u = tuple(coords[idx])   # (lng, lat)
-                v = tuple(coords[idx+1]) # (lng, lat)
                 
-                length = haversine_distance(u, v)
-                G.add_edge(
-                    u, v,
-                    length=length,
-                    highway=props.get("highway", "residential"),
-                    name=props.get("name", "unnamed")
-                )
+            for idx in range(L - 1):
+                u_lng, u_lat = coords[idx][0], coords[idx][1]
+                # Use z=0 for endpoints to allow connections/ramps
+                u_z = 0 if (idx == 0) else z_level
+                u = (u_lng, u_lat, u_z)
+                
+                v_lng, v_lat = coords[idx+1][0], coords[idx+1][1]
+                v_z = 0 if (idx+1 == L - 1) else z_level
+                v = (v_lng, v_lat, v_z)
+                
+                length = haversine_distance((u_lng, u_lat), (v_lng, v_lat))
+                weight = _get_edge_weight(props, length)
+                
+                edge_props = {
+                    "length": length,
+                    "weight": weight,
+                    "highway": props.get("highway", "residential"),
+                    "name": props.get("name", "unnamed"),
+                    "osm_id": props.get("osm_id") or props.get("id"),
+                    "access": props.get("access"),
+                    "service": props.get("service")
+                }
+                
+                if oneway_status == "yes":
+                    G.add_edge(u, v, **edge_props)
+                elif oneway_status == "reverse":
+                    G.add_edge(v, u, **edge_props)
+                else:
+                    G.add_edge(u, v, **edge_props)
+                    G.add_edge(v, u, **edge_props)
     return G
+
+
+def simplify_graph_topology(G: nx.MultiDiGraph) -> nx.MultiDiGraph:
+    """Simplify the graph topology by consolidating degree-2 pseudo-nodes in a single pass."""
+    import networkx as nx
+    H = G.copy()
+    
+    for node in list(H.nodes):
+        if node not in H:
+            continue
+        predecessors = list(H.predecessors(node))
+        successors = list(H.successors(node))
+        neighbors = set(predecessors + successors)
+        if node in neighbors:
+            neighbors.remove(node)
+        if len(neighbors) != 2:
+            continue
+            
+        u, v = list(neighbors)
+        
+        has_uv_path = False
+        has_vu_path = False
+        
+        # Check u -> node -> v
+        if H.has_edge(u, node) and H.has_edge(node, v):
+            len_u_n = min(d.get("length", 0) for d in H[u][node].values())
+            len_n_v = min(d.get("length", 0) for d in H[node][v].values())
+            wt_u_n = min(d.get("weight", len_u_n) for d in H[u][node].values())
+            wt_n_v = min(d.get("weight", len_n_v) for d in H[node][v].values())
+            H.add_edge(u, v, length=len_u_n + len_n_v, weight=wt_u_n + wt_n_v)
+            has_uv_path = True
+            
+        # Check v -> node -> u
+        if H.has_edge(v, node) and H.has_edge(node, u):
+            len_v_n = min(d.get("length", 0) for d in H[v][node].values())
+            len_n_u = min(d.get("length", 0) for d in H[node][u].values())
+            wt_v_n = min(d.get("weight", len_v_n) for d in H[v][node].values())
+            wt_n_u = min(d.get("weight", len_n_u) for d in H[node][u].values())
+            H.add_edge(v, u, length=len_v_n + len_n_u, weight=wt_v_n + wt_n_u)
+            has_vu_path = True
+
+            
+        if has_uv_path or has_vu_path:
+            H.remove_node(node)
+            
+    return H
+
+def _build_expanded_graph(G: nx.MultiDiGraph) -> nx.DiGraph:
+    """Build a dual expanded DiGraph where nodes are edges of G, and transitions are allowed."""
+    import networkx as nx
+    E = nx.DiGraph()
+    
+    restrictions = G.graph.get("restrictions", [])
+    
+    # Create nodes in E corresponding to edges in G
+    for u, v, key, data in G.edges(keys=True, data=True):
+        E.add_node((u, v, key), length=data.get("length", 0), weight=data.get("weight", 0))
+        
+    # Create transitions in E
+    for v in G.nodes:
+        in_edges = list(G.in_edges(v, keys=True, data=True))
+        out_edges = list(G.out_edges(v, keys=True, data=True))
+        
+        for u, _, k1, d1 in in_edges:
+            for _, w, k2, d2 in out_edges:
+                is_restricted = False
+                w1_id = d1.get("osm_id")
+                w2_id = d2.get("osm_id")
+                
+                v_lng, v_lat = v[0], v[1]
+                
+                for r in restrictions:
+                    r_type = r.get("type", "")
+                    r_from = r.get("from_way")
+                    r_to = r.get("to_way")
+                    r_lng = r.get("via_lng")
+                    r_lat = r.get("via_lat")
+                    
+                    # Coordinate matching with floating point tolerance
+                    if abs(v_lng - r_lng) < 1e-6 and abs(v_lat - r_lat) < 1e-6:
+                        if w1_id == r_from and w2_id == r_to:
+                            if "no_" in r_type or r_type in ("no_left_turn", "no_right_turn", "no_straight_on", "no_u_turn"):
+                                is_restricted = True
+                                break
+                                
+                if not is_restricted:
+                    E.add_edge((u, v, k1), (v, w, k2), weight=d2.get("weight", 0), length=d2.get("length", 0))
+                    
+    return E
+
+def _find_shortest_path_with_restrictions(G: nx.MultiDiGraph, source: tuple, target: tuple) -> tuple[list, float]:
+
+    """Find shortest path in G from source to target enforcing turn restrictions."""
+    import networkx as nx
+    restrictions = G.graph.get("restrictions", [])
+    if not restrictions:
+        path = nx.shortest_path(G, source=source, target=target, weight="weight")
+        path_length = 0.0
+        for i in range(len(path) - 1):
+            u, v = path[i], path[i+1]
+            path_length += min(d.get("length", 0) for d in G[u][v].values())
+        return path, path_length
+        
+    E = _build_expanded_graph(G)
+    E.add_node("__start__")
+    for _, v, key, data in G.out_edges(source, keys=True, data=True):
+        E.add_edge("__start__", (source, v, key), weight=data.get("weight", 0), length=data.get("length", 0))
+        
+    E.add_node("__end__")
+    for u, _, key, data in G.in_edges(target, keys=True, data=True):
+        E.add_edge((u, target, key), "__end__", weight=0, length=0)
+        
+    path_edges = nx.shortest_path(E, source="__start__", target="__end__", weight="weight")
+    path = []
+    path_length = 0.0
+    for edge in path_edges:
+        if isinstance(edge, tuple) and len(edge) == 3:
+            u_node, v_node, k_node = edge
+            if not path:
+                path.append(u_node)
+            path.append(v_node)
+            path_length += G[u_node][v_node][k_node].get("length", 0)
+            
+    return path, path_length
+
 
 class NetworkServer:
     description = "Street Network Analysis & Shortest Path Routing"
@@ -214,6 +434,10 @@ class NetworkServer:
                         "title": {
                             "type": "string",
                             "description": "Optional name for the generated map layer (e.g. 'Downtown Streets'). Defaults to 'Street Network'."
+                        },
+                        "boundary_layer_name": {
+                            "type": "string",
+                            "description": "Optional: Name of a polygon layer in the active map context (e.g., 'Sector 1 boundary'). If provided, the fetched streets will be strictly clipped to the boundaries of this polygon."
                         }
                     },
                     "required": ["workspace"]
@@ -235,7 +459,7 @@ class NetworkServer:
     async def _analyze_street_network(self, args: dict) -> dict:
         geojson_path = args.get("geojson_path", "").strip()
         geojson = args.get("geojson")
-        workspace = args.get("workspace", "").strip()
+        workspace = _resolve_workspace(args.get("workspace", ""))
         title = args.get("title", "").strip() or "Junction Bottlenecks"
         ws = args.get("_ws")
 
@@ -285,10 +509,13 @@ class NetworkServer:
             density = total_intersections / max(0.001, area_sq_km)
 
             # 2. Compute Traffic Bottlenecks (Betweenness Centrality)
-            centrality = nx.betweenness_centrality(G, weight="length")
+            G_simplified = simplify_graph_topology(G)
+            centrality = nx.betweenness_centrality(G_simplified, weight="weight")
+
             sorted_nodes = sorted(centrality.items(), key=lambda x: x[1], reverse=True)
             top_count = max(1, int(len(sorted_nodes) * 0.05))
             top_nodes = sorted_nodes[:top_count]
+
 
             # Generate GeoJSON Point layer
             bottleneck_features = []
@@ -352,7 +579,7 @@ class NetworkServer:
         start_lng = float(args.get("start_lng", 0))
         end_lat = float(args.get("end_lat", 0))
         end_lng = float(args.get("end_lng", 0))
-        workspace = args.get("workspace", "").strip()
+        workspace = _resolve_workspace(args.get("workspace", ""))
         title = args.get("title", "").strip() or "Shortest Route"
         ws = args.get("_ws")
 
@@ -378,7 +605,14 @@ class NetworkServer:
             if not G.nodes:
                 return {"error": "GeoJSON contains no valid LineString coordinates."}
 
-            # Find closest nodes to start and end points
+            # Snap coordinates to the largest weakly connected component (ensures routable paths)
+            components = list(nx.weakly_connected_components(G))
+            if components:
+                largest_cc = max(components, key=len)
+                nodes_to_search = largest_cc
+            else:
+                nodes_to_search = G.nodes
+
             start_coord = (start_lng, start_lat)
             end_coord = (end_lng, end_lat)
             
@@ -387,23 +621,25 @@ class NetworkServer:
             min_d_start = float("inf")
             min_d_end = float("inf")
             
-            for node in G.nodes:
-                d_start = haversine_distance(node, start_coord)
+            for node in nodes_to_search:
+                d_start = haversine_distance((node[0], node[1]), start_coord)
                 if d_start < min_d_start:
                     min_d_start = d_start
                     closest_start = node
                     
-                d_end = haversine_distance(node, end_coord)
+                d_end = haversine_distance((node[0], node[1]), end_coord)
                 if d_end < min_d_end:
                     min_d_end = d_end
                     closest_end = node
 
             if not closest_start or not closest_end:
-                return {"error": "Could not identify start or end node projections on the graph."}
+                return {"error": "Could not identify start or end node projections on the largest connected network component."}
 
-            # Execute shortest path
-            path = nx.shortest_path(G, source=closest_start, target=closest_end, weight="length")
-            path_length = nx.shortest_path_length(G, source=closest_start, target=closest_end, weight="length")
+
+            # Execute shortest path respecting turn restrictions, weights, and one-ways
+            path, path_length = _find_shortest_path_with_restrictions(G, closest_start, closest_end)
+
+
 
             # Build LineString geometry
             coords = [[n[0], n[1]] for n in path]
@@ -461,7 +697,7 @@ class NetworkServer:
         geojson_path = args.get("geojson_path", "").strip()
         geojson = args.get("geojson")
         waypoints = args.get("waypoints", [])
-        workspace = args.get("workspace", "").strip()
+        workspace = _resolve_workspace(args.get("workspace", ""))
         title = args.get("title", "Multi-Stop Route").strip()
         ws = args.get("_ws")
 
@@ -489,12 +725,18 @@ class NetworkServer:
             if not G.nodes:
                 return {"error": "GeoJSON contains no valid LineString coordinates."}
 
-            nodes_list = list(G.nodes)
+            components = list(nx.weakly_connected_components(G))
+            if components:
+                largest_cc = max(components, key=len)
+                nodes_list = list(largest_cc)
+            else:
+                nodes_list = list(G.nodes)
 
             def closest_node(lat: float, lng: float) -> tuple:
                 coord = (lng, lat)
-                best = min(nodes_list, key=lambda n: haversine_distance(n, coord))
+                best = min(nodes_list, key=lambda n: haversine_distance((n[0], n[1]), coord))
                 return best
+
 
             all_coords = []
             legs = []
@@ -508,9 +750,10 @@ class NetworkServer:
                 node_b = closest_node(float(wp_b["lat"]), float(wp_b["lng"]))
 
                 try:
-                    path = nx.shortest_path(G, source=node_a, target=node_b, weight="length")
-                    leg_len = nx.shortest_path_length(G, source=node_a, target=node_b, weight="length")
+                    path, leg_len = _find_shortest_path_with_restrictions(G, node_a, node_b)
+
                 except nx.NetworkXNoPath:
+
                     return {"error": f"No path found between waypoint {i+1} and {i+2}."}
 
                 leg_coords = [[n[0], n[1]] for n in path]
@@ -588,7 +831,7 @@ class NetworkServer:
             return {"error": f"Multi-stop routing failed: {str(e)}"}
 
     async def _fetch_street_network(self, args: dict) -> dict:
-        workspace = args.get("workspace", "").strip()
+        workspace = _resolve_workspace(args.get("workspace", ""))
         use_current_bounds = args.get("use_current_bounds", False)
         title = args.get("title", "").strip() or "Street Network"
         ws = args.get("_ws")
@@ -598,9 +841,114 @@ class NetworkServer:
             return {"error": "workspace is required"}
 
         # Determine bounding box or center+radius
-        bounds = map_context.get("bounds") if map_context else None
+        boundary_layer_name = args.get("boundary_layer_name", "").strip()
+        shapely_shape = None
+
+        print(f"DEBUG: fetch_street_network boundary_layer_name={boundary_layer_name!r}")
+        if isinstance(map_context, dict):
+            print(f"DEBUG: map_context layers={[l.get('name') for l in map_context.get('layers', []) if isinstance(l, dict)]}")
+
+        if boundary_layer_name and isinstance(map_context, dict):
+
+            layers = map_context.get("layers", [])
+            match = None
+            for l in layers:
+                if isinstance(l, dict) and l.get("name", "").lower() == boundary_layer_name.lower():
+                    match = l
+                    break
+            
+            if match and isinstance(match, dict):
+                from shapely.geometry import shape
+                from shapely.ops import unary_union
+                
+                polygons = []
+                features_list = []
+                
+                # 1. Read directly from the local file path if present (handles any size layer!)
+                file_path = match.get("filePath")
+                if file_path and os.path.exists(file_path):
+                    try:
+                        with open(file_path, "r") as f:
+                            file_data = json.load(f)
+                            if isinstance(file_data, dict):
+                                features_list = file_data.get("features", [])
+                    except Exception as e:
+                        print(f"DEBUG: Failed to read local file path {file_path}: {e}")
+                
+                # 2. Fall back to raw feature list if present in match["data"]
+                if not features_list and match.get("data"):
+                    data = match["data"]
+                    features_list = data.get("features", []) if isinstance(data, dict) else []
+                
+                # Parse geometries from features list with automatic validation & repair
+                for f in features_list:
+                    if isinstance(f, dict):
+                        geom = f.get("geometry")
+                        if geom and isinstance(geom, dict) and geom.get("type") in ("Polygon", "MultiPolygon"):
+                            try:
+                                s = shape(geom)
+                                if not s.is_valid:
+                                    from shapely.validation import make_valid
+                                    try:
+                                        s = make_valid(s)
+                                    except Exception:
+                                        try:
+                                            s = s.buffer(0)
+                                        except Exception:
+                                            pass
+                                if s and s.is_valid:
+                                    polygons.append(s)
+                            except Exception:
+                                pass
+                                
+                # 3. Fall back to geometry_data in case it was sent inline
+                if not polygons and isinstance(match.get("geometry_data"), list):
+                    for g in match["geometry_data"]:
+                        if isinstance(g, dict) and g.get("type") in ("Polygon", "MultiPolygon"):
+                            try:
+                                s = shape(g)
+                                if not s.is_valid:
+                                    from shapely.validation import make_valid
+                                    try:
+                                        s = make_valid(s)
+                                    except Exception:
+                                        try:
+                                            s = s.buffer(0)
+                                        except Exception:
+                                            pass
+                                if s and s.is_valid:
+                                    polygons.append(s)
+                            except Exception:
+                                pass
+                
+                if polygons:
+                    from shapely.validation import make_valid
+                    shapely_shape = unary_union(polygons)
+                    if not shapely_shape.is_valid:
+                        try:
+                            shapely_shape = make_valid(shapely_shape)
+                        except Exception:
+                            try:
+                                shapely_shape = shapely_shape.buffer(0)
+                            except Exception:
+                                pass
+                    print(f"DEBUG: Successfully resolved and repaired shapely_shape for '{boundary_layer_name}' with {len(polygons)} parts.")
+                else:
+                    print(f"WARNING: Could not extract any valid shapes for '{boundary_layer_name}'!")
+
+
+        bounds = map_context.get("bounds") if isinstance(map_context, dict) else None
+
         
-        if use_current_bounds and bounds and all(bounds.get(k) is not None for k in ["south", "west", "north", "east"]):
+        if shapely_shape:
+            minx, miny, maxx, maxy = shapely_shape.bounds
+            diag = haversine_distance((minx, miny), (maxx, maxy))
+            if diag > 15000:
+                return {
+                    "error": f"The boundary polygon '{boundary_layer_name}' is too large (diagonal {round(diag/1000, 1)}km > 15km)."
+                }
+            bbox_filter = f"({miny},{minx},{maxy},{maxx})"
+        elif use_current_bounds and bounds and all(bounds.get(k) is not None for k in ["south", "west", "north", "east"]):
             s = bounds["south"]
             w = bounds["west"]
             n = bounds["north"]
@@ -616,15 +964,24 @@ class NetworkServer:
             lat = args.get("lat")
             lng = args.get("lng")
             if lat is None or lng is None:
-                center = map_context.get("center") if map_context else None
-                if center and center.get("lat") is not None and center.get("lng") is not None:
-                    lat = center["lat"]
-                    lng = center["lng"]
-                else:
+                center = map_context.get("center") if isinstance(map_context, dict) else None
+                if center:
+                    if isinstance(center, dict):
+                        lat = center.get("lat") or center.get("latitude")
+                        lng = center.get("lng") or center.get("longitude")
+                    elif isinstance(center, (list, tuple)) and len(center) >= 2:
+                        lng = center[0]
+                        lat = center[1]
+                
+                if lat is None or lng is None:
                     return {"error": "Missing coordinates (lat/lng) or active map context to determine location."}
+
             
-            radius = min(int(args.get("radius_meters", 1500)), 10000)
+            # Capped at 7.5km (15km diameter search area) to prevent Overpass timeouts
+            radius = min(int(args.get("radius_meters", 1500)), 7500)
             bbox_filter = f"(around:{radius},{lat},{lng})"
+
+
 
         # Construct highway tag filter
         highway_types = args.get("highway_types")
@@ -647,6 +1004,7 @@ class NetworkServer:
 [out:json][timeout:30];
 (
   way{tag_filter}{bbox_filter};
+  relation["type"="restriction"]{bbox_filter};
 );
 out body;
 >;
@@ -658,38 +1016,118 @@ out skel qt;
             
             nodes: dict[int, tuple[float, float]] = {}
             ways: list[dict] = []
+            restrictions: list[dict] = []
             
             for el in data.get("elements", []):
                 if el["type"] == "node":
                     nodes[el["id"]] = (el.get("lon"), el.get("lat"))
                 elif el["type"] == "way":
                     ways.append(el)
+                elif el["type"] == "relation" and el.get("tags", {}).get("type") == "restriction":
+                    restrictions.append(el)
                     
+            parsed_restrictions = []
+            for r in restrictions:
+                tags = r.get("tags", {})
+                rest_type = tags.get("restriction", "")
+                from_way = None
+                to_way = None
+                via_node = None
+                for m in r.get("members", []):
+                    m_role = m.get("role")
+                    m_type = m.get("type")
+                    m_ref = m.get("ref")
+                    if m_role == "from" and m_type == "way":
+                        from_way = m_ref
+                    elif m_role == "to" and m_type == "way":
+                        to_way = m_ref
+                    elif m_role == "via" and m_type == "node":
+                        via_node = m_ref
+                if from_way and to_way and via_node:
+                    via_coord = nodes.get(via_node)
+                    if via_coord:
+                        parsed_restrictions.append({
+                            "type": rest_type,
+                            "from_way": from_way,
+                            "to_way": to_way,
+                            "via_lng": via_coord[0],
+                            "via_lat": via_coord[1]
+                        })
+
+                    
+            def extract_linestrings(geom):
+                if geom.is_empty:
+                    return []
+                if geom.geom_type == "LineString":
+                    return [geom]
+                if geom.geom_type == "MultiLineString":
+                    return list(geom.geoms)
+                if geom.geom_type == "GeometryCollection":
+                    lines = []
+                    for g in geom.geoms:
+                        lines.extend(extract_linestrings(g))
+                    return lines
+                return []
+
             features = []
             for el in ways:
                 tags = el.get("tags", {})
                 coords = [nodes[nid] for nid in el.get("nodes", []) if nid in nodes]
                 if len(coords) >= 2:
-                    # Filter keys to limit property size for context window efficiency, but keep basic attributes
-                    # Keys rule: "For spatial data layer transfers... size-gated context properties: key-value for <= 100 features"
-                    # We just copy all tags, but clean it up
-                    features.append({
-                        "type": "Feature",
-                        "geometry": {
-                            "type": "LineString",
-                            "coordinates": coords
-                        },
-                        "properties": {
-                            "osm_id": el["id"],
-                            "highway": tags.get("highway", ""),
-                            "name": tags.get("name", "unnamed"),
-                            **{k: v for k, v in tags.items() if k not in ["name", "highway"]}
-                        }
-                    })
-            
+                    if shapely_shape:
+                        from shapely.geometry import LineString as ShapelyLineString
+                        try:
+                            line = ShapelyLineString(coords)
+                            if not line.is_valid:
+                                from shapely.validation import make_valid
+                                line = make_valid(line)
+                                
+                            if not line.intersects(shapely_shape):
+                                continue
+                            clipped = line.intersection(shapely_shape)
+                            for part in extract_linestrings(clipped):
+                                part_coords = list(part.coords)
+                                if len(part_coords) >= 2:
+                                    features.append({
+                                        "type": "Feature",
+                                        "geometry": {
+                                            "type": "LineString",
+                                            "coordinates": part_coords
+                                        },
+                                        "properties": {
+                                            "osm_id": el["id"],
+                                            "highway": tags.get("highway", ""),
+                                            "name": tags.get("name", "unnamed"),
+                                            **{k: v for k, v in tags.items() if k not in ["name", "highway"]}
+                                        }
+                                    })
+                        except Exception as exc:
+                            print(f"WARNING: Clipping failed for way {el.get('id')}: {exc}")
+
+                    else:
+                        features.append({
+                            "type": "Feature",
+                            "geometry": {
+                                "type": "LineString",
+                                "coordinates": coords
+                            },
+                            "properties": {
+                                "osm_id": el["id"],
+                                "highway": tags.get("highway", ""),
+                                "name": tags.get("name", "unnamed"),
+                                **{k: v for k, v in tags.items() if k not in ["name", "highway"]}
+                            }
+                        })
+
+            if not features:
+                return {
+                    "error": "No street network features were found in the selected area. Please try a different location or zoom bounds."
+                }
+
             out_geojson = {
                 "type": "FeatureCollection",
-                "features": features
+                "features": features,
+                "restrictions": parsed_restrictions
             }
             
             # Slugify title for filename
@@ -718,8 +1156,11 @@ out skel qt;
             }
             
         except OverpassError as e:
-            return {"error": f"Overpass API error: {str(e)}"}
+            return {
+                "error": f"The Overpass API server is currently busy or rate-limiting requests. Please wait a few seconds or try a smaller search area. (Details: {str(e)})"
+            }
         except Exception as e:
             return {"error": f"Failed to fetch street network: {str(e)}"}
+
 
 

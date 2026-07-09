@@ -87,6 +87,38 @@ export default function LayerPanel({
     )
   }
 
+  const getSwatchStyle = (l: GeoJSONLayer) => {
+    if (l.geeSpec?.vis_params?.palette) {
+      const palette = l.geeSpec.vis_params.palette
+      if (Array.isArray(palette)) {
+        const cssColors = palette.map((c: string) => c.startsWith('#') ? c : `#${c}`)
+        return { background: `linear-gradient(135deg, ${cssColors.join(', ')})` }
+      }
+    }
+    if (l.geeSpec || l.wmsSpec) {
+      return { background: 'linear-gradient(135deg, #3b82f6, #10b981, #ef4444)' }
+    }
+    // Vector layers styling fallback
+    if (l.styleSpec?.mode === 'categorized' && l.styleSpec.categories) {
+      const colors = l.styleSpec.categories.map((c) => c.color).filter(Boolean)
+      if (colors.length > 0) {
+        const displayColors = colors.slice(0, 4)
+        if (displayColors.length === 1) return { background: displayColors[0] }
+        return { background: `linear-gradient(135deg, ${displayColors.join(', ')})` }
+      }
+    }
+    if (l.styleSpec?.mode === 'graduated' && l.styleSpec.rampColors) {
+      const colors = l.styleSpec.rampColors.filter(Boolean)
+      if (colors.length > 0) {
+        const displayColors = colors.slice(0, 4)
+        if (displayColors.length === 1) return { background: displayColors[0] }
+        return { background: `linear-gradient(135deg, ${displayColors.join(', ')})` }
+      }
+    }
+    return { background: l.fillColor || l.lineColor || l.color }
+  }
+
+
   const renderLayer = (layer: GeoJSONLayer, grouped = false) => (
     <div
       key={layer.id}
@@ -104,11 +136,12 @@ export default function LayerPanel({
         {layer.visible ? '👁' : '⊘'}
       </button>
       <span
-        className={`layer-color ${onStyle ? 'clickable' : ''} ${activeStyleId === layer.id ? 'active' : ''}`}
-        style={{ background: layer.color }}
-        onClick={() => onStyle?.(layer.id)}
-        title="Symbology & labels"
+        className={`layer-color ${onStyle && !layer.wmsSpec && !layer.geeSpec ? 'clickable' : ''} ${activeStyleId === layer.id ? 'active' : ''}`}
+        style={getSwatchStyle(layer)}
+        onClick={() => { if (!layer.wmsSpec && !layer.geeSpec) onStyle?.(layer.id) }}
+        title={layer.wmsSpec || layer.geeSpec ? 'Raster layer — no symbology' : 'Symbology & labels'}
       />
+
       {onRename ? (
         <input
           type="text"
@@ -122,8 +155,10 @@ export default function LayerPanel({
           {layer.name}
         </span>
       )}
-      <span className="layer-count">{layer.data?.features?.length || 0}</span>
-      {onAttributes && (layer.data?.features?.length || 0) > 0 && (
+      {!layer.wmsSpec && !layer.geeSpec && (
+        <span className="layer-count">{layer.data?.features?.length ?? 0}</span>
+      )}
+      {onAttributes && !layer.wmsSpec && !layer.geeSpec && (layer.data?.features?.length || 0) > 0 && (
         <button
           className={`layer-style ${activeAttrId === layer.id ? 'active' : ''}`}
           onClick={() => onAttributes(layer.id)}
@@ -132,13 +167,16 @@ export default function LayerPanel({
           ✎
         </button>
       )}
-      <button
-        className="layer-zoom"
-        onClick={() => onZoomTo(layer.id)}
-        title="Zoom to layer"
-      >
-        ⌖
-      </button>
+      {!layer.wmsSpec && !layer.geeSpec && (layer.data?.features?.length || 0) > 0 && (
+        <button
+          className="layer-zoom"
+          onClick={() => onZoomTo(layer.id)}
+          title="Zoom to layer"
+        >
+          ⌖
+        </button>
+      )}
+
       <button
         className="layer-remove"
         onClick={() => onRemove(layer.id)}

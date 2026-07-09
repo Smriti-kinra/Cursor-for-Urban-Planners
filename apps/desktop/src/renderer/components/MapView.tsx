@@ -213,6 +213,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const drawModeRef = useRef<DrawMode>(null)
   const drawVerticesRef = useRef<number[][]>([])
   const ownLayerIds = useRef(new Set<string>())
+  const layersRef = useRef(layers)
+  layersRef.current = layers
   const renderLayerIds = useCallback((): string[] => {
     const map = mapRef.current
     if (!map) return []
@@ -989,6 +991,93 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       })
     }
 
+    // ── WMS GetFeatureInfo helper ──
+    // All requests go through the backend proxy at /api/wms/featureinfo to
+    // avoid CORS restrictions imposed by external WMS servers.
+    const fireWmsGetFeatureInfo = async (e: maplibregl.MapMouseEvent) => {
+      const wmsLayers = layersRef.current.filter((l) => l.wmsSpec && l.visible)
+      if (!wmsLayers.length) return false
+
+      const size = map.getContainer().getBoundingClientRect()
+      const w = Math.round(size.width)
+      const h = Math.round(size.height)
+      const { x, y } = e.point
+      const bounds = map.getBounds()
+      // WMS 1.1.1 bbox order: west,south,east,north (EPSG:4326)
+      const bbox = [
+        bounds.getWest(), bounds.getSouth(),
+        bounds.getEast(), bounds.getNorth(),
+      ].join(',')
+
+      // Show loading cursor while waiting for the server
+      map.getCanvas().style.cursor = 'wait'
+
+      const results: Array<{ name: string; html: string }> = []
+
+      await Promise.all(
+        wmsLayers.map(async (layer) => {
+          const { url, layer_name } = layer.wmsSpec!
+
+          // Detect WMS version: some servers embed their version in the URL
+          // (e.g. ?VERSION=1.3.0). Default to 1.1.1 which is universally supported.
+          const detectedVersion =
+            /VERSION=1\.3\.0/i.test(url) ? '1.3.0' : '1.1.1'
+
+          const proxyUrl =
+            `http://localhost:8765/api/wms/featureinfo` +
+            `?url=${encodeURIComponent(url)}` +
+            `&layer_name=${encodeURIComponent(layer_name)}` +
+            `&bbox=${encodeURIComponent(bbox)}` +
+            `&width=${w}&height=${h}` +
+            `&x=${Math.round(x)}&y=${Math.round(y)}` +
+            `&version=${detectedVersion}` +
+            `&feature_count=5`
+
+          try {
+            const res = await fetch(proxyUrl)
+            if (!res.ok) return
+            const json = await res.json()
+            const feats: any[] = json?.features ?? []
+            if (!feats.length) return
+
+            const html = feats
+              .slice(0, 3)
+              .map((f) => popupHtmlForProps(f.properties ?? {}))
+              .filter(Boolean)
+              .join('<hr class="mv-popup-divider">')
+
+            if (html) results.push({ name: layer.name, html })
+          } catch {
+            /* backend unreachable or layer has no data at this point */
+          }
+        }),
+      )
+
+      // Restore cursor regardless of result
+      map.getCanvas().style.cursor = ''
+
+      if (!results.length) return false
+
+      const combined = results
+        .map((r) =>
+          `<div class="mv-popup-title">${escapeHtml(r.name)}</div>${r.html}`,
+        )
+        .join('<hr class="mv-popup-divider">')
+
+      new maplibregl.Popup({
+        closeButton: true,
+        closeOnClick: false,
+        offset: 12,
+        className: 'mv-hover-popup mv-wms-popup',
+        maxWidth: '320px',
+      })
+        .setLngLat(e.lngLat)
+        .setHTML(combined)
+        .addTo(map)
+
+      return true
+    }
+
     const onClick = (e: maplibregl.MapMouseEvent) => {
       const mode = drawModeRef.current
       if (!mode) {
@@ -1051,6 +1140,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             })
           }
         } else {
+          // Fire WMS GetFeatureInfo first; if it returns data, skip the rest.
+          fireWmsGetFeatureInfo(e)
+
           const ids = renderLayerIds()
           const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
           const pointCoords = feats.length ? featurePointCoordinates(feats[0]) : null
@@ -1108,11 +1200,24 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const onMouseMove = (e: maplibregl.MapMouseEvent) => {
       // Drawing takes over the cursor and clicks; don't fight it.
       if (drawModeRef.current) return hidePopup()
+
+      // If any visible WMS layer is present show crosshair to hint GetFeatureInfo
+      const hasVisibleWms = layersRef.current.some((l) => l.wmsSpec && l.visible)
+      if (hasVisibleWms && !hoverPopupRef.current) {
+        map.getCanvas().style.cursor = 'crosshair'
+      }
+
       const ids = renderLayerIds()
-      if (!ids.length) return hidePopup()
+      if (!ids.length) {
+        if (!hasVisibleWms) hidePopup()
+        return
+      }
       const feats = map.queryRenderedFeatures(e.point, { layers: ids })
       const html = feats.length ? popupHtmlForProps(feats[0].properties) : ''
-      if (!html) return hidePopup()
+      if (!html) {
+        if (!hasVisibleWms) hidePopup()
+        return
+      }
 
       map.getCanvas().style.cursor = 'pointer'
       if (!hoverPopupRef.current) {
@@ -1134,6 +1239,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       hidePopup()
     }
   }, [mapReady])
+
 
   // Keyboard: Enter finishes, Escape cancels, Backspace removes last vertex.
   useEffect(() => {

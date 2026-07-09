@@ -236,8 +236,13 @@ SYSTEM_PROMPT = (
     "coordinates — never use your training-data knowledge for coordinates directly, as they "
     "can be outdated or wrong. Use the FIRST result returned by geocode for fly_to. "
     "Choose zoom based on place type: country=5, state=8, district=10, city/town=12, "
-    "neighbourhood/sector=14, specific POI=16. Never use zoom>16 unless the user zooms in."
+    "neighbourhood/sector=14, specific POI=16. Never use zoom>16 unless the user zooms in.\n"
+    "15. LAYER EXISTENCE: Always check the 'Current map state' layers list to verify if a layer is actually loaded on the map. "
+    "Do not assume a layer exists just because it was mentioned or loaded in a previous turn in the chat history. "
+    "If a layer is missing from the 'Current map state' layers list, it has been deleted by the user, and you must call the "
+    "appropriate tool to fetch/create it again if the user asks for it."
 )
+
 
 # ── Deep research helpers ──────────────────────────────────────────────────────
 
@@ -921,7 +926,15 @@ async def _execute_tool(
         if name in srv.tool_names:
             if _is_cancelled():
                 return json.dumps({"status": "cancelled"})
-            result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws})
+            print(f"DEBUG: execute_tool name={name!r} args={args}")
+            try:
+                result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws})
+
+            except Exception as exc:
+                import traceback
+                traceback.print_exc()
+                result = {"status": "error", "error": f"Tool '{name}' failed with internal error: {str(exc)}"}
+
 
             # Side-effect: refresh artifacts panel after a successful create_artifact or extract_attribute_table
             if name in ("create_artifact", "extract_attribute_table"):
