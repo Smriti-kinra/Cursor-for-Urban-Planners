@@ -1,0 +1,16 @@
+{
+  "hooks": {
+    "PostToolUse": [
+      {
+        "matcher": "Edit|Write",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "'/Users/smriti/Documents/GitHub/Cursor-for-Urban-Planners/.codex/hooks/typecheck.sh'",
+            "timeout": 30
+          }
+        ]
+      }
+    ]
+  }
+}

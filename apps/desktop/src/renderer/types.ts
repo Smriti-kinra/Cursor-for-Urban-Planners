@@ -284,6 +284,11 @@ export type LayerGeometryData =
   | Array<{ type?: Geometry['type']; coordinates?: unknown }>
 
 export interface MapContext {
+  workspace?: string
+  activeScenario?: {
+    name: string
+    description: string
+  }
   center: [number, number]
   zoom: number
   bounds?: { west: number; south: number; east: number; north: number }

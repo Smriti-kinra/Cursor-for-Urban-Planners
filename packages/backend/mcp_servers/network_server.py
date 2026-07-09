@@ -287,7 +287,13 @@ def _find_shortest_path_with_restrictions(G: nx.MultiDiGraph, source: tuple, tar
 
 class NetworkServer:
     description = "Street Network Analysis & Shortest Path Routing"
-    tool_names = {"analyze_street_network", "find_shortest_path", "route_multi_stop", "fetch_street_network"}
+    tool_names = {
+        "analyze_street_network",
+        "find_shortest_path",
+        "route_multi_stop",
+        "fetch_street_network",
+        "assign_traffic_flows"
+    }
 
     def get_declarations(self) -> list[ToolDeclaration]:
         return [
@@ -442,6 +448,36 @@ class NetworkServer:
                     },
                     "required": ["workspace"]
                 }
+            ),
+            ToolDeclaration(
+                name="assign_traffic_flows",
+                description=(
+                    "Run an Origin-Destination (OD) traffic assignment analysis. Routes trip flows from the OD matrix "
+                    "onto the actual road network graph, accumulating traffic volumes on each road segment. "
+                    "Saves the results as a styled LineString GeoJSON layer showing traffic load and displays it on the map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "workspace": {
+                            "type": "string",
+                            "description": "Absolute path to the active workspace folder."
+                        },
+                        "geojson_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to a saved road network GeoJSON file in the workspace. If not specified, looks for 'street_network.geojson' in the workspace."
+                        },
+                        "od_matrix_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to 'od_matrix.json' in the workspace. If not specified, looks for 'od_matrix.json' in the workspace."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Optional: Title for the map layer (e.g. 'Assigned Traffic Flows')."
+                        }
+                    },
+                    "required": ["workspace"]
+                }
             )
         ]
 
@@ -454,6 +490,8 @@ class NetworkServer:
             return await self._route_multi_stop(args)
         if tool_name == "fetch_street_network":
             return await self._fetch_street_network(args)
+        if tool_name == "assign_traffic_flows":
+            return await self._assign_traffic_flows(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _analyze_street_network(self, args: dict) -> dict:
@@ -1161,6 +1199,195 @@ out skel qt;
             }
         except Exception as e:
             return {"error": f"Failed to fetch street network: {str(e)}"}
+
+    async def _assign_traffic_flows(self, args: dict) -> dict:
+        from collections import defaultdict
+        workspace = _resolve_workspace(args.get("workspace", ""))
+        geojson_path = args.get("geojson_path", "").strip()
+        od_matrix_path = args.get("od_matrix_path", "").strip()
+        title = args.get("title", "Assigned Traffic Flows").strip()
+        ws = args.get("_ws")
+
+        if not workspace:
+            return {"error": "workspace is required"}
+
+        ws_path = Path(workspace)
+        if not geojson_path:
+            geojson_path = str(ws_path / "street_network.geojson")
+        if not od_matrix_path:
+            od_matrix_path = str(ws_path / "od_matrix.json")
+
+        # 1. Load files
+        if not Path(geojson_path).exists():
+            return {"error": f"Street network file not found at: {geojson_path}. Please fetch street network first."}
+        if not Path(od_matrix_path).exists():
+            return {"error": f"OD matrix file not found at: {od_matrix_path}. Please import OD matrix first."}
+
+        try:
+            with open(geojson_path) as f:
+                geojson = json.load(f)
+            with open(od_matrix_path) as f:
+                od_records = json.load(f)
+        except Exception as e:
+            return {"error": f"Failed to load datasets: {str(e)}"}
+
+        try:
+            import networkx as nx
+        except ImportError:
+            return {"error": "networkx library is not installed on the system."}
+
+        try:
+            G = _build_networkx_graph(geojson)
+            if not G.nodes:
+                return {"error": "GeoJSON contains no valid road nodes."}
+
+            # 2. Get list of nodes in largest weakly connected component
+            components = list(nx.weakly_connected_components(G))
+            if components:
+                largest_cc = max(components, key=len)
+                nodes_list = list(largest_cc)
+            else:
+                nodes_list = list(G.nodes)
+
+            # Helper to project coordinates onto network component nodes
+            def project_node(coord: tuple[float, float]) -> tuple:
+                return min(nodes_list, key=lambda n: haversine_distance((n[0], n[1]), coord))
+
+            # 3. Initialize edge flow dictionary
+            # Key format: (u, v, key)
+            edge_volumes = defaultdict(float)
+
+            # 4. Route each OD flow
+            assigned_trips = 0
+            routed_count = 0
+            no_path_count = 0
+
+            for record in od_records:
+                origin = record.get("origin")
+                dest = record.get("dest")
+                trips = float(record.get("trips", 1))
+
+                if not origin or not dest:
+                    continue
+
+                # Project
+                node_a = project_node((origin[0], origin[1]))
+                node_b = project_node((dest[0], dest[1]))
+
+                if node_a == node_b:
+                    continue
+
+                try:
+                    # Find shortest path using turn restrictions and weights
+                    path, path_length = _find_shortest_path_with_restrictions(G, node_a, node_b)
+                    
+                    # Accumulate trips along path edges
+                    for i in range(len(path) - 1):
+                        u, v = path[i], path[i+1]
+                        # Find the correct edge key in G matching this transition
+                        best_key = None
+                        min_w = float("inf")
+                        if G.has_edge(u, v):
+                            for key, data in G[u][v].items():
+                                w = data.get("weight", data.get("length", 1.0))
+                                if w < min_w:
+                                    min_w = w
+                                    best_key = key
+                        if best_key is not None:
+                            edge_volumes[(u, v, best_key)] += trips
+                    
+                    assigned_trips += trips
+                    routed_count += 1
+                except nx.NetworkXNoPath:
+                    no_path_count += 1
+                except Exception:
+                    no_path_count += 1
+
+            if not edge_volumes:
+                return {"error": f"No flows could be successfully routed. Project mapped {len(od_records)} rows; {no_path_count} failed pathfinding."}
+
+            # 5. Build GeoJSON representing the assigned flow lines
+            max_volume = max(edge_volumes.values())
+            min_volume = min(edge_volumes.values())
+
+            def get_stroke_width(vol: float) -> float:
+                if max_volume == min_volume:
+                    return 3.0
+                return 1.5 + 6.5 * (vol - min_volume) / (max_volume - min_volume)
+
+            # Map the aggregated volumes back onto the original GeoJSON features
+            out_features = []
+            for u, v, key, data in G.edges(keys=True, data=True):
+                vol = edge_volumes.get((u, v, key), 0.0)
+                if vol <= 0.0:
+                    continue
+
+                # Reconstruct geometry
+                coords = list(data.get("geometry", {}).get("coordinates", [u[:2], v[:2]]))
+                props = {**data}
+                if "geometry" in props:
+                    del props["geometry"]
+                props["assigned_volume"] = round(vol, 1)
+                props["stroke_width"] = round(get_stroke_width(vol), 1)
+
+                out_features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coords
+                    },
+                    "properties": props
+                })
+
+            out_geojson = {
+                "type": "FeatureCollection",
+                "features": out_features
+            }
+
+            out_path = ws_path / "assigned_traffic_flows.geojson"
+            with open(out_path, "w") as f:
+                json.dump(out_geojson, f, indent=2)
+
+            # 6. Find top bottleneck streets (group by name)
+            street_volumes = defaultdict(float)
+            for (u, v, key), vol in edge_volumes.items():
+                name = G[u][v][key].get("name", "Unnamed Street")
+                street_volumes[name] = max(street_volumes[name], vol)
+
+            sorted_streets = sorted(street_volumes.items(), key=lambda x: x[1], reverse=True)
+            top_bottlenecks = [
+                {"street_name": name, "peak_volume": round(vol, 1)}
+                for name, vol in sorted_streets[:5]
+            ]
+
+            # 7. Dispatch action
+            if ws:
+                await ws.send_text(json.dumps({
+                    "type": "action",
+                    "action": "add_geojson_file",
+                    "payload": {
+                        "path": str(out_path),
+                        "name": title
+                    }
+                }))
+
+            return {
+                "status": "success",
+                "trips_assigned": assigned_trips,
+                "flows_routed": routed_count,
+                "flows_failed": no_path_count,
+                "flow_stats": {
+                    "min_edge_volume": round(min_volume, 1),
+                    "max_edge_volume": round(max_volume, 1),
+                    "average_edge_volume": round(sum(edge_volumes.values()) / len(edge_volumes), 1)
+                },
+                "top_bottlenecks": top_bottlenecks,
+                "output_layer": str(out_path)
+            }
+
+        except Exception as e:
+            return {"error": f"Traffic assignment failed: {str(e)}"}
+
 
 
 

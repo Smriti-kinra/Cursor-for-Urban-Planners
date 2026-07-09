@@ -20,8 +20,8 @@ _OVERPASS_URL = "https://overpass-api.de/api/interpreter"
 
 
 class DemographicsServer:
-    description = "Population around coordinates (WorldPop 100m grid, OSM fallback)"
-    tool_names = {"get_demographics"}
+    description = "Population around coordinates (WorldPop 100m grid, OSM fallback) and population forecasting growth models"
+    tool_names = {"get_demographics", "project_population"}
 
     def get_declarations(self) -> list[ToolDeclaration]:
         return [
@@ -47,11 +47,61 @@ class DemographicsServer:
                     "required": ["lat", "lng"],
                 },
             ),
+            ToolDeclaration(
+                name="project_population",
+                description=(
+                    "Forecast future population growth for a study area. Can automatically retrieve the current baseline "
+                    "population at a coordinate, or accept an explicit baseline population value. Supports linear, "
+                    "exponential, and logistic models with annual growth rate, target years, and carrying capacity constraints."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "base_population": {
+                            "type": "integer",
+                            "description": "Baseline population. If not specified, lat and lng must be provided to fetch current gridded population."
+                        },
+                        "growth_rate": {
+                            "type": "number",
+                            "description": "Annual population growth rate as a decimal (e.g. 0.025 for 2.5% growth). Default: 0.02"
+                        },
+                        "target_years": {
+                            "type": "array",
+                            "items": {"type": "integer"},
+                            "description": "List of future years to calculate projections for (e.g. [2030, 2040, 2050]). Default: [2030, 2035, 2040, 2045, 2050]"
+                        },
+                        "model_type": {
+                            "type": "string",
+                            "enum": ["exponential", "linear", "logistic"],
+                            "description": "Growth model formulation. Default: exponential"
+                        },
+                        "carrying_capacity": {
+                            "type": "integer",
+                            "description": "Upper population ceiling constraint for the logistic model. Required if model_type is 'logistic'."
+                        },
+                        "lat": {
+                            "type": "number",
+                            "description": "Latitude to fetch base population (optional if base_population is provided)."
+                        },
+                        "lng": {
+                            "type": "number",
+                            "description": "Longitude to fetch base population (optional if base_population is provided)."
+                        },
+                        "radius_meters": {
+                            "type": "number",
+                            "description": "Demographic search radius in meters (default 5000)."
+                        }
+                    },
+                    "required": []
+                }
+            )
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
         if tool_name == "get_demographics":
             return await self._get_demographics(args)
+        if tool_name == "project_population":
+            return await self._project_population(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _get_demographics(self, args: dict) -> dict:
@@ -180,6 +230,130 @@ class DemographicsServer:
                 "lon": plon,
             })
         return out
+
+    async def _project_population(self, args: dict) -> dict:
+        import math
+        base_pop_arg = args.get("base_population")
+        growth_rate = float(args.get("growth_rate", 0.02))
+        target_years = args.get("target_years") or [2030, 2035, 2040, 2045, 2050]
+        model_type = args.get("model_type", "exponential").strip().lower()
+        carrying_capacity = args.get("carrying_capacity")
+        lat_arg = args.get("lat")
+        lng_arg = args.get("lng")
+        radius = int(args.get("radius_meters", 5000))
+
+        # 1. Resolve base population
+        base_population = None
+        source_summary = ""
+
+        if base_pop_arg is not None:
+            try:
+                base_population = int(base_pop_arg)
+                source_summary = "User-supplied explicit baseline value"
+            except (ValueError, TypeError):
+                return {"error": "Invalid base_population value. Must be an integer."}
+
+        elif lat_arg is not None and lng_arg is not None:
+            # Query WorldPop/OSM demographics at these coordinates
+            demog_args = {"lat": float(lat_arg), "lng": float(lng_arg), "radius_meters": radius}
+            demog_res = await self._get_demographics(demog_args)
+            if demog_res.get("population") is not None:
+                base_population = demog_res["population"]
+                source_summary = f"Geolocated baseline around coordinates ({lat_arg}, {lng_arg}) using {demog_res['population_source']} source."
+            else:
+                return {"error": f"Could not determine baseline population at coordinates ({lat_arg}, {lng_arg}). Please specify base_population explicitly."}
+        else:
+            return {"error": "Either base_population or geocoding lat/lng coordinates must be provided."}
+
+        if base_population <= 0:
+            return {"error": f"Base population must be greater than zero. Received: {base_population}"}
+
+        if model_type == "logistic":
+            if carrying_capacity is None:
+                return {"error": "carrying_capacity limit is required when model_type is set to 'logistic'."}
+            try:
+                carrying_capacity = int(carrying_capacity)
+            except (ValueError, TypeError):
+                return {"error": "Invalid carrying_capacity value. Must be an integer."}
+            if carrying_capacity <= base_population:
+                return {"error": f"Carrying capacity ceiling ({carrying_capacity}) must be greater than the base population ({base_population})."}
+
+        # 2. Run projection
+        base_year = 2026  # default planning baseline year
+        results = []
+
+        # Sort years to be chronological
+        sorted_years = sorted(list(set([int(y) for y in target_years if int(y) > base_year])))
+        if not sorted_years:
+            return {"error": f"All target years must be greater than the current baseline year {base_year}."}
+
+        for yr in sorted_years:
+            dt = yr - base_year
+            if model_type == "linear":
+                proj = base_population * (1.0 + growth_rate * dt)
+            elif model_type == "logistic":
+                try:
+                    exp_factor = math.exp(growth_rate * dt)
+                    numerator = carrying_capacity * base_population * exp_factor
+                    denominator = carrying_capacity + base_population * (exp_factor - 1.0)
+                    proj = numerator / denominator
+                except OverflowError:
+                    proj = carrying_capacity
+            else:  # exponential (default)
+                try:
+                    proj = base_population * math.exp(growth_rate * dt)
+                except OverflowError:
+                    proj = float("inf")
+
+            results.append({
+                "year": yr,
+                "projected_population": round(proj),
+                "growth_increment": round(proj - base_population)
+            })
+
+        # 3. Create a Markdown report comparison table
+        md = []
+        md.append(f"# Population Projection Report")
+        md.append(f"**Baseline Year:** {base_year}")
+        md.append(f"**Baseline Population:** {base_population:,}")
+        md.append(f"**Annual Growth Rate:** {growth_rate * 100:.2f}%")
+        md.append(f"**Projection Model Type:** {model_type.upper()}")
+        md.append(f"**Source Context:** {source_summary}")
+        if model_type == "logistic":
+            md.append(f"**Carrying Capacity Limit:** {carrying_capacity:,}")
+        md.append("")
+        md.append("| Target Year | Elapsed Years | Projected Population | Total Growth |")
+        md.append("| :--- | :--- | :--- | :--- |")
+        for r in results:
+            dt = r["year"] - base_year
+            md.append(f"| {r['year']} | +{dt} | {r['projected_population']:,} | +{r['growth_increment']:,} |")
+        md.append("")
+
+        # Calculate land density requirements (150 people per hectare)
+        final_proj = results[-1]["projected_population"]
+        total_increment = final_proj - base_population
+        required_ha = round(total_increment / 150.0, 1)
+
+        md.append("## Planning Implications & Space Demands")
+        md.append(f"Based on a standard density benchmark of 150 persons/hectare, supporting the projected increase of **{total_increment:,}** additional residents by the year **{results[-1]['year']}** will require approximately:")
+        md.append(f"* **{required_ha:,} hectares** of newly zoned residential land, OR")
+        md.append(f"* A proportional increase in Floor Area Ratio (FAR) within existing built-up sectors to accommodate the influx without expanding the municipal boundary.")
+
+        markdown_report = "\n".join(md)
+
+        return {
+            "status": "success",
+            "baseline": {
+                "year": base_year,
+                "population": base_population,
+                "source": source_summary
+            },
+            "growth_rate": growth_rate,
+            "model_type": model_type,
+            "projections": results,
+            "land_demand_hectares": required_ha,
+            "report": markdown_report
+        }
 
 
 def _to_int(value) -> int | None:

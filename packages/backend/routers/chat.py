@@ -448,8 +448,14 @@ Be specific and professional. Reference the actual map data, drawn geometries, a
 """
 '''
 
-def _build_research_prompt(messages: list[dict], map_context: dict | None) -> str:
-    """Build the deep research prompt from conversation history and map context."""
+def _build_research_prompt(
+    messages: list[dict],
+    map_context: dict | None,
+    outline: str | None = None,
+    artifacts: list[str] | None = None,
+    workspace: str | None = None
+) -> str:
+    """Build the deep research prompt from conversation history, map context, outline, and workspace artifacts."""
     parts = [_RESEARCH_REPORT_TEMPLATE]
 
     # -------------------------------------------------------
@@ -483,6 +489,34 @@ def _build_research_prompt(messages: list[dict], map_context: dict | None) -> st
             break
 
     parts.append(f"# Requested Report Type\n\n{report_type}")
+
+    if outline:
+        parts.append(f"## Custom Report Outline / Guidelines\n{outline}")
+
+    if workspace:
+        # Include an index of available files in the workspace for discovery
+        try:
+            ws_dir = Path(workspace)
+            if ws_dir.exists() and ws_dir.is_dir():
+                files = [f.name for f in ws_dir.iterdir() if f.is_file() and not f.name.startswith(".")]
+                if files:
+                    parts.append("## Available Workspace Files\n" + ", ".join(files))
+        except Exception:
+            pass
+
+    if artifacts and workspace:
+        parts.append("## Imported Workspace Artifacts\n")
+        for art in artifacts:
+            try:
+                art_path = Path(workspace) / art
+                if art_path.exists() and art_path.is_file():
+                    content = art_path.read_text(encoding="utf-8")
+                    # Safe truncation for token optimization
+                    if len(content) > 10000:
+                        content = content[:10000] + "\n... [TRUNCATED] ..."
+                    parts.append(f"### File: {art}\n```\n{content}\n```")
+            except Exception as e:
+                parts.append(f"### File: {art}\nError reading file: {e}")
 
     if map_context:
         center = map_context.get("center", [])
@@ -543,7 +577,15 @@ def _build_research_prompt(messages: list[dict], map_context: dict | None) -> st
     return "\n\n".join(parts)
 
 
-async def _run_deep_research(messages: list[dict], map_context: dict | None, ws: WebSocket, client: AsyncOpenAI | None = None) -> str:
+async def _run_deep_research(
+    messages: list[dict],
+    map_context: dict | None,
+    ws: WebSocket,
+    outline: str | None = None,
+    artifacts: list[str] | None = None,
+    workspace: str | None = None,
+    client: AsyncOpenAI | None = None
+) -> str:
     """Run o4-mini-deep-research and stream progress back over the WebSocket.
 
     Sends these WS message types:
@@ -558,7 +600,7 @@ async def _run_deep_research(messages: list[dict], map_context: dict | None, ws:
     """
     await ws.send_text(json.dumps({"type": "research_start"}))
 
-    prompt = _build_research_prompt(messages, map_context)
+    prompt = _build_research_prompt(messages, map_context, outline=outline, artifacts=artifacts, workspace=workspace)
 
     def _extract_query(obj) -> str:
         """Pull the search query off a web_search_call item or its action.
@@ -891,7 +933,25 @@ def _build_tools() -> list[dict]:
             "or produce a deep research analysis. The report uses web search to enrich the analysis "
             "with current public data. This takes several minutes."
         ),
-        {"type": "object", "properties": {}, "required": []},
+        {
+            "type": "object",
+            "properties": {
+                "workspace": {
+                    "type": "string",
+                    "description": "Absolute path to the active workspace folder."
+                },
+                "outline": {
+                    "type": "string",
+                    "description": "Specific structured outline or guidelines to follow for the report (parsed from the user's instructions)."
+                },
+                "artifacts": {
+                    "type": "array",
+                    "items": {"type": "string"},
+                    "description": "List of workspace filenames/paths (e.g. ['zoning.geojson', 'mobility_plan.md']) representing existing files to load and incorporate."
+                }
+            },
+            "required": ["workspace"]
+        },
     ))
 
     return tools
@@ -913,7 +973,15 @@ async def _execute_tool(
         return json.dumps({"status": "cancelled"})
 
     if name == "generate_report":
-        return await _run_deep_research(messages or [], map_context, ws, client=client)
+        return await _run_deep_research(
+            messages=messages or [],
+            map_context=map_context,
+            ws=ws,
+            outline=args.get("outline"),
+            artifacts=args.get("artifacts"),
+            workspace=args.get("workspace"),
+            client=client
+        )
 
     # Map action tools → send directly to frontend
     if name in _ACTION_TOOLS:

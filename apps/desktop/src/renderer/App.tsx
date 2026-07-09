@@ -409,11 +409,58 @@ function App() {
   }, [])
 
   const toggleLayer = useCallback((id: string) => {
-    setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l)))
+    setLayers((prev) => {
+      const next = prev.map((l) => (l.id === id ? { ...l, visible: !l.visible } : l))
+      const targetLayer = prev.find((l) => l.id === id)
+      if (targetLayer) {
+        const nextVisible = !targetLayer.visible
+        setActiveScenarioId((activeId) => {
+          if (activeId) {
+            setScenarios((prevScenarios) =>
+              prevScenarios.map((s) =>
+                s.id === activeId
+                  ? {
+                      ...s,
+                      layerVisibility: {
+                        ...s.layerVisibility,
+                        [id]: nextVisible,
+                      },
+                    }
+                  : s
+              )
+            )
+          }
+          return activeId
+        })
+      }
+      return next
+    })
   }, [])
 
   const toggleLayerGroup = useCallback((groupId: string, visible: boolean) => {
-    setLayers((prev) => prev.map((l) => (l.groupId === groupId ? { ...l, visible } : l)))
+    setLayers((prev) => {
+      const next = prev.map((l) => (l.groupId === groupId ? { ...l, visible } : l))
+      setActiveScenarioId((activeId) => {
+        if (activeId) {
+          setScenarios((prevScenarios) =>
+            prevScenarios.map((s) => {
+              if (s.id === activeId) {
+                const updatedVis = { ...s.layerVisibility }
+                prev.forEach((l) => {
+                  if (l.groupId === groupId) {
+                    updatedVis[l.id] = visible
+                  }
+                })
+                return { ...s, layerVisibility: updatedVis }
+              }
+              return s
+            })
+          )
+        }
+        return activeId
+      })
+      return next
+    })
   }, [])
 
   const renameLayer = useCallback((id: string, name: string) => {
@@ -1639,6 +1686,13 @@ function App() {
 
   const mapContext: MapContext = useMemo(
     () => ({
+      workspace: workspacePath || undefined,
+      activeScenario: activeScenarioId
+        ? {
+            name: scenarios.find((s) => s.id === activeScenarioId)?.name || '',
+            description: scenarios.find((s) => s.id === activeScenarioId)?.description || '',
+          }
+        : undefined,
       center: mapViewState.center,
       zoom: mapViewState.zoom,
       bounds: mapBounds
@@ -1729,7 +1783,7 @@ function App() {
       }),
       basemap,
     }),
-    [mapViewState, mapBounds, bookmarks, layers, basemap],
+    [workspacePath, mapViewState, mapBounds, bookmarks, layers, basemap, activeScenarioId, scenarios],
   )
 
   // ── Conversation helpers ──

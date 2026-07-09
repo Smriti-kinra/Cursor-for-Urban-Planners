@@ -377,6 +377,23 @@ ipcMain.handle('import-spatial-files', async (_e, workspacePath: string) => {
       try {
         fs.copyFileSync(fp, targetPath)
         importedPaths.push(targetPath)
+
+        // Automatically discover and copy Shapefile sidecars if importing a .shp
+        if (filename.toLowerCase().endsWith('.shp')) {
+          const baseName = path.basename(filename, path.extname(filename))
+          const srcDir = path.dirname(fp)
+          const sidecarExts = ['.shx', '.dbf', '.prj', '.cpg', '.qpj', '.sbn', '.sbx']
+          for (const ext of sidecarExts) {
+            for (const actualExt of [ext, ext.toUpperCase()]) {
+              const sidecarSrc = path.join(srcDir, baseName + actualExt)
+              if (fs.existsSync(sidecarSrc)) {
+                const sidecarTarget = path.join(workspacePath, baseName + actualExt)
+                fs.copyFileSync(sidecarSrc, sidecarTarget)
+                break
+              }
+            }
+          }
+        }
       } catch (err) {
         console.error('Failed to copy file:', fp, err)
       }
@@ -404,6 +421,9 @@ ipcMain.handle('save-pdf', async (_e, htmlContent: string, defaultName: string) 
 
     // Load local file to support internal relative hash anchor links
     await win.loadFile(tempFilePath)
+
+    // Wait a brief moment for dynamic scripts (like KaTeX math rendering) to execute
+    await new Promise((resolve) => setTimeout(resolve, 500))
 
     const pdfBuffer = await win.webContents.printToPDF({
       printBackground: true,
