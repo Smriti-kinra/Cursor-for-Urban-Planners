@@ -62,29 +62,65 @@
   font-size: 13px;
 }
 
+.sv-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sv-layout-toggle-btn {
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-secondary);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sv-layout-toggle-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
 .sv-icon-btn {
   width: 28px;
   height: 28px;
   border-radius: 6px;
   border: 1px solid var(--border);
-  background: var(--bg-hover);
+  background: var(--bg-secondary);
   color: var(--text-secondary);
   cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
+.sv-icon-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+
 .sv-section {
-  padding: 12px;
-  border-bottom: 1px solid var(--border);
+  flex: 1;
+  min-height: 0;
+  display: flex;
+  flex-direction: column;
+  padding: 0;
 }
 
 .sv-viewer-shell {
   position: relative;
+  flex: 1;
+  min-height: 0;
   width: 100%;
-  aspect-ratio: 4 / 3;
-  min-height: 240px;
+  height: 100%;
   background: var(--bg-surface);
-  border: 1px solid var(--border);
-  border-radius: 8px;
   overflow: hidden;
 }
 
@@ -282,3 +318,163 @@
   padding: 6px;
   font: inherit;
 }
+
+/* Overlays inside the Street View shell */
+.sv-viewer-shell {
+  position: relative;
+}
+
+.sv-overlay-top-left {
+  position: absolute;
+  top: 12px;
+  left: 54px; /* Shunted to the right to avoid overlapping default zoom controls */
+  z-index: 1010;
+}
+
+.sv-overlay-close-btn {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+  border: 1px solid var(--border);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+  transition: all 0.15s ease;
+}
+
+.sv-overlay-close-btn:hover {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.sv-overlay-top-right {
+  position: absolute;
+  top: 12px;
+  right: 12px;
+  z-index: 1010;
+  display: flex;
+  flex-direction: column;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.sv-overlay-button-group {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 2px;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.3);
+}
+
+.sv-overlay-btn {
+  background: none;
+  border: none;
+  color: var(--text-secondary);
+  width: 26px;
+  height: 26px;
+  border-radius: 4px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  font-size: 13px;
+  transition: all 0.15s ease;
+}
+
+.sv-overlay-btn:hover,
+.sv-overlay-btn.active {
+  color: var(--text-primary);
+  background: var(--bg-hover);
+}
+
+/* Info and Actions popup cards */
+.sv-info-overlay-card,
+.sv-actions-overlay-card {
+  width: 260px;
+  background: var(--bg-surface);
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  padding: 12px;
+  box-shadow: 0 6px 18px rgba(0, 0, 0, 0.4);
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  animation: svFadeIn 0.15s ease-out;
+}
+
+@keyframes svFadeIn {
+  from { opacity: 0; transform: translateY(-4px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+.sv-info-row {
+  display: flex;
+  flex-direction: column;
+  gap: 2px;
+  border-bottom: 1px solid rgba(255, 255, 255, 0.08);
+  padding-bottom: 6px;
+}
+
+.sv-info-row:last-child {
+  border-bottom: none;
+  padding-bottom: 0;
+}
+
+.sv-info-label {
+  font-size: 10px;
+  text-transform: uppercase;
+  color: var(--text-muted);
+  font-weight: 700;
+  letter-spacing: 0.03em;
+  text-align: left;
+}
+
+.sv-info-val {
+  font-size: 12px;
+  color: var(--text-primary);
+  word-break: break-word;
+  line-height: 1.4;
+  text-align: left;
+}
+
+.sv-action-card-btn {
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 500;
+  text-align: left;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  transition: all 0.15s ease;
+}
+
+.sv-action-card-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--border);
+}
+
+.sv-action-card-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+.sv-action-card-note {
+  font-size: 11px;
+  color: var(--accent);
+  margin-top: 4px;
+  text-align: center;
+}
+

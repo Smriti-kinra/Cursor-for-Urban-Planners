@@ -153,6 +153,13 @@ interface MapViewProps {
    *  the array holds a single pair, for 'line'/'polygon' the full vertex list
    *  (polygon ring is not yet closed). */
   onDrawComplete?: (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => void
+  streetViewDetail: boolean
+  onStreetViewDetailChange: (active: boolean) => void
+  streetViewActive: boolean
+  streetViewLocation: { lat: number; lng: number } | null
+  streetViewBearing: number
+  isMiniMap: boolean
+  onStreetViewLayoutChange?: (layout: 'split' | 'full') => void
 }
 
 type DrawMode = 'point' | 'line' | 'polygon' | null
@@ -174,10 +181,18 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onAskChat,
     onContextualQuery,
     onDrawComplete,
+    streetViewDetail,
+    onStreetViewDetailChange,
+    streetViewActive,
+    streetViewLocation,
+    streetViewBearing,
+    isMiniMap,
+    onStreetViewLayoutChange,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
+  const [zoomTooLow, setZoomTooLow] = useState(false)
   const mapRef = useRef<maplibregl.Map | null>(null)
   const onBoundsChangeRef = useRef(onBoundsChange)
   onBoundsChangeRef.current = onBoundsChange
@@ -195,8 +210,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onContextualQueryRef.current = onContextualQuery
   const onDrawCompleteRef = useRef(onDrawComplete)
   onDrawCompleteRef.current = onDrawComplete
-  // Drawing state lives in refs so the map event handlers (bound once) always
-  // read the current values. drawMode is mirrored to React state for the UI.
   const drawModeRef = useRef<DrawMode>(null)
   const drawVerticesRef = useRef<number[][]>([])
   const ownLayerIds = useRef(new Set<string>())
@@ -230,7 +243,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   } | null>(null)
   const [drawMode, setDrawMode] = useState<DrawMode>(null)
   const [drawCount, setDrawCount] = useState(0) // vertices placed in the current draft
-  const [streetViewPickMode, setStreetViewPickMode] = useState(false)
+
 
   // ── Initialize map ──
 
@@ -301,6 +314,25 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     mapRef.current = map
 
     map.on('load', () => {
+      // Initialize drawing source and layers
+      map.addSource('streetview-coverage', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] }
+      })
+      map.addLayer({
+        id: 'streetview-coverage-layer',
+        type: 'line',
+        source: 'streetview-coverage',
+        layout: {
+          'line-join': 'round',
+          'line-cap': 'round'
+        },
+        paint: {
+          'line-color': '#00b4d8', // Cyan coverage
+          'line-width': 4.5,
+          'line-opacity': 0.75
+        }
+      })
       setMapReady(true)
     })
 
@@ -577,9 +609,105 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     ref,
     () => ({
       getCanvas: () => mapRef.current?.getCanvas() ?? null,
+      resize: () => mapRef.current?.resize(),
     }),
     [mapReady],
   )
+
+  // ── Sync Pegman marker ──
+  const pegmanMarkerRef = useRef<maplibregl.Marker | null>(null)
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    if (streetViewActive && streetViewLocation) {
+      if (!pegmanMarkerRef.current) {
+        const el = document.createElement('div')
+        el.className = 'pegman-marker'
+        el.innerHTML = `
+          <div class="pegman-cone"></div>
+          <div class="pegman-icon"></div>
+        `
+        pegmanMarkerRef.current = new maplibregl.Marker({ element: el })
+          .setLngLat([streetViewLocation.lng, streetViewLocation.lat])
+          .addTo(map)
+      } else {
+        pegmanMarkerRef.current.setLngLat([streetViewLocation.lng, streetViewLocation.lat])
+      }
+
+      const coneEl = pegmanMarkerRef.current.getElement().querySelector('.pegman-cone') as HTMLElement | null
+      if (coneEl) {
+        coneEl.style.transform = `rotate(${streetViewBearing}deg)`
+      }
+    } else {
+      if (pegmanMarkerRef.current) {
+        pegmanMarkerRef.current.remove()
+        pegmanMarkerRef.current = null
+      }
+    }
+  }, [streetViewActive, streetViewLocation, streetViewBearing, mapReady])
+
+  useEffect(() => {
+    return () => {
+      if (pegmanMarkerRef.current) {
+        pegmanMarkerRef.current.remove()
+        pegmanMarkerRef.current = null
+      }
+    }
+  }, [])
+
+  // ── Fetch dynamic OSM coverage lines ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    const fetchCoverage = async () => {
+      if (!streetViewDetail) {
+        const src = map.getSource('streetview-coverage') as maplibregl.GeoJSONSource | undefined
+        if (src) src.setData({ type: 'FeatureCollection', features: [] })
+        setZoomTooLow(false)
+        return
+      }
+
+      const zoom = map.getZoom()
+      if (zoom < 13) {
+        setZoomTooLow(true)
+        const src = map.getSource('streetview-coverage') as maplibregl.GeoJSONSource | undefined
+        if (src) src.setData({ type: 'FeatureCollection', features: [] })
+        return
+      }
+      setZoomTooLow(false)
+
+      const bounds = map.getBounds()
+      const s = bounds.getSouth()
+      const w = bounds.getWest()
+      const n = bounds.getNorth()
+      const e = bounds.getEast()
+
+      try {
+        const res = await fetch(`http://localhost:8765/api/streetview/coverage?s=${s}&w=${w}&n=${n}&e=${e}`)
+        const geojson = await res.json()
+        const src = map.getSource('streetview-coverage') as maplibregl.GeoJSONSource | undefined
+        if (src) src.setData(geojson)
+      } catch (err) {
+        console.error('Failed to fetch Street View coverage:', err)
+      }
+    }
+
+    if (streetViewDetail) {
+      fetchCoverage()
+      map.on('moveend', fetchCoverage)
+    } else {
+      const src = map.getSource('streetview-coverage') as maplibregl.GeoJSONSource | undefined
+      if (src) src.setData({ type: 'FeatureCollection', features: [] })
+      setZoomTooLow(false)
+    }
+
+    return () => {
+      map.off('moveend', fetchCoverage)
+    }
+  }, [streetViewDetail, mapReady])
 
   // ── Map actions (all AI-driven actions) ──
 
@@ -864,10 +992,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     const onClick = (e: maplibregl.MapMouseEvent) => {
       const mode = drawModeRef.current
       if (!mode) {
-        if (streetViewPickMode) {
-          onOpenStreetViewRef.current?.(e.lngLat.lng, e.lngLat.lat)
-          setStreetViewPickMode(false)
-          return
+        if (streetViewDetail) {
+          const bbox: [maplibregl.PointLike, maplibregl.PointLike] = [
+            [e.point.x - 8, e.point.y - 8],
+            [e.point.x + 8, e.point.y + 8]
+          ]
+          const features = map.queryRenderedFeatures(bbox, { layers: ['streetview-coverage-layer'] })
+          if (features.length > 0) {
+            onOpenStreetViewRef.current?.(e.lngLat.lng, e.lngLat.lat)
+            return
+          }
         }
         // Contextual query handling
         if (e.originalEvent?.ctrlKey || e.originalEvent?.metaKey) {
@@ -955,7 +1089,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.off('click', onClick)
       map.off('dblclick', onDblClick)
     }
-  }, [mapReady, finishDraw, redrawDraft, streetViewPickMode])
+  }, [mapReady, finishDraw, redrawDraft, streetViewDetail])
 
   // ── Hover popups ──
   // Any feature in one of our layers (AI markers, AI-drawn shapes, user-drawn
@@ -1060,7 +1194,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }
 
   return (
-    <div className="map-view">
+    <div className={`map-view ${isMiniMap ? 'is-mini-map' : ''}`}>
       <div ref={containerRef} className="map-container" />
 
       {/* ── Toolbar ── */}
@@ -1074,17 +1208,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Search"
         >
           🔍
-        </button>
-        <button
-          className={`toolbar-btn ${streetViewPickMode ? 'active' : ''}`}
-          onClick={() => {
-            setStreetViewPickMode((v) => !v)
-            setShowSearch(false)
-            setShowBasemaps(false)
-          }}
-          title="Open Street View by clicking the map"
-        >
-          🛣
         </button>
 
         <div className="toolbar-divider" />
@@ -1186,20 +1309,81 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {/* ── Basemap switcher ── */}
       {showBasemaps && (
-        <div className="basemap-panel">
-          {Object.entries(BASEMAPS).map(([key, info]) => (
-            <button
-              key={key}
-              className={`basemap-option ${basemap === key ? 'active' : ''}`}
-              onClick={() => {
-                onBasemapChange(key)
-                setShowBasemaps(false)
-              }}
-            >
-              {info.name}
-            </button>
-          ))}
+        <div className="basemap-panel-redesigned">
+          <div className="basemap-header">
+            <h3>Map display</h3>
+            <button className="basemap-close" onClick={() => setShowBasemaps(false)}>✕</button>
+          </div>
+          
+          <div className="basemap-section">
+            <div className="section-title">Map type</div>
+            <div className="map-type-grid">
+              <button
+                className={`map-type-card ${basemap === 'street' ? 'active' : ''}`}
+                onClick={() => onBasemapChange('street')}
+              >
+                <div className="map-type-thumb default-thumb"></div>
+                <span>Default</span>
+              </button>
+              <button
+                className={`map-type-card ${basemap === 'satellite' ? 'active' : ''}`}
+                onClick={() => onBasemapChange('satellite')}
+              >
+                <div className="map-type-thumb satellite-thumb"></div>
+                <span>Satellite</span>
+              </button>
+              <button
+                className={`map-type-card ${basemap === 'terrain' ? 'active' : ''}`}
+                onClick={() => onBasemapChange('terrain')}
+              >
+                <div className="map-type-thumb terrain-thumb"></div>
+                <span>Terrain</span>
+              </button>
+            </div>
+            
+            <div className="other-types-row">
+              {Object.entries(BASEMAPS)
+                .filter(([key]) => !['street', 'satellite', 'terrain'].includes(key))
+                .map(([key, info]) => (
+                  <button
+                    key={key}
+                    className={`other-type-btn ${basemap === key ? 'active' : ''}`}
+                    onClick={() => onBasemapChange(key)}
+                  >
+                    {info.name}
+                  </button>
+                ))
+              }
+            </div>
+          </div>
+
+          <div className="basemap-section">
+            <div className="section-title">Map details</div>
+            <div className="map-details-grid">
+              <button
+                className={`detail-toggle-btn ${streetViewDetail ? 'active' : ''}`}
+                onClick={() => onStreetViewDetailChange(!streetViewDetail)}
+              >
+                <div className="detail-toggle-icon streetview-icon-bg">
+                  <div className="pegman-mini-icon"></div>
+                </div>
+                <span>Street View</span>
+              </button>
+            </div>
+          </div>
         </div>
+      )}
+
+      {isMiniMap && (
+        <button
+          className="minimap-split-toggle"
+          onClick={() => onStreetViewLayoutChange?.('split')}
+          title="Split screen"
+        >
+          <svg viewBox="0 0 24 24" width="16" height="16" fill="currentColor">
+            <path d="M4 4h8V2H4a2 2 0 00-2 2v8h2V4zm16 16h-8v2h8a2 2 0 002-2v-8h-2v8z"/>
+          </svg>
+        </button>
       )}
 
       {/* ── Right-click context menu ── */}
@@ -1215,13 +1399,15 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           >
             📍 Add marker here
           </button>
-          <button
-            className="ctx-item"
-            onClick={() => { onOpenStreetViewRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
-          >
-            🛣 Street View
-          </button>
-          {isRoadFeature(ctxMenu.feature) && (
+          {streetViewDetail && (
+            <button
+              className="ctx-item"
+              onClick={() => { onOpenStreetViewRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
+            >
+              🛣 Street View
+            </button>
+          )}
+          {streetViewDetail && isRoadFeature(ctxMenu.feature) && (
             <button
               className="ctx-item"
               onClick={() => { onInspectRoadRef.current?.(ctxMenu.feature!); setCtxMenu(null) }}
@@ -1235,6 +1421,21 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           >
             💬 Ask chat about this place
           </button>
+        </div>
+      )}
+
+      {/* ── Street View Legend Card ── */}
+      {streetViewDetail && (
+        <div className="streetview-legend-card">
+          <div className="legend-items">
+            <div className="legend-item">
+              <span className="legend-line" />
+              <span className="legend-text">Street View Coverage</span>
+            </div>
+            <div className="legend-hint">
+              {zoomTooLow ? 'Zoom in to view coverage lines' : 'Click highlighted areas to view 360° imagery'}
+            </div>
+          </div>
         </div>
       )}
 

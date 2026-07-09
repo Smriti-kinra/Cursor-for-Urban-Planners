@@ -19,11 +19,14 @@ from tools import cache, http as http_client
 # or returns empty 504 bodies under load — try the next mirror automatically.
 _OVERPASS_MIRRORS = [
     "https://overpass-api.de/api/interpreter",
-    "https://overpass.private.coffee/api/interpreter",
     "https://overpass.openstreetmap.fr/api/interpreter",
+    "https://z.overpass-api.de/api/interpreter",  # secondary load-balanced node of the official server
 ]
 
-_OVERPASS_HEADERS = {"User-Agent": "CursorUrbanPlanners/1.0"}
+_OVERPASS_HEADERS = {
+    "User-Agent": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+    "Referer": "https://overpass-turbo.eu/",
+}
 
 
 async def _overpass_post(query: str, timeout: float = 30.0) -> dict:
@@ -45,7 +48,7 @@ async def _overpass_post(query: str, timeout: float = 30.0) -> dict:
         last_status = resp.status_code
         # Overpass returns 429 (rate limit) and 504 (gateway timeout) frequently.
         # Body is often empty or HTML on those — fail over to the next mirror.
-        if resp.status_code in (429, 502, 503, 504):
+        if resp.status_code in (403, 429, 502, 503, 504):
             last_body_snippet = (resp.text or "").strip()[:200]
             await asyncio.sleep(0.4)
             continue

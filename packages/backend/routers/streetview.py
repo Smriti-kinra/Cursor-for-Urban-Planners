@@ -122,3 +122,72 @@ async def streetview_report(req: StreetViewReportRequest):
             status_code=422,
             content={"error": f"Could not create Street View report: {e}"},
         )
+
+
+@router.get("/coverage")
+async def streetview_coverage(
+    s: float = Query(...),
+    w: float = Query(...),
+    n: float = Query(...),
+    e: float = Query(...),
+):
+    import math
+    from tools import cache
+
+    # Quantize coordinates to 3 decimal places (approx. 100 meters) to maximize cache hits
+    s_q = math.floor(s * 1000) / 1000.0
+    w_q = math.floor(w * 1000) / 1000.0
+    n_q = math.ceil(n * 1000) / 1000.0
+    e_q = math.ceil(e * 1000) / 1000.0
+
+    query = f"""
+    [out:json][timeout:15];
+    (
+      way["highway"~"^(motorway|primary|secondary|tertiary|unclassified|residential|living_street|service)$"]({s_q},{w_q},{n_q},{e_q});
+    );
+    out body;
+    >;
+    out skel qt;
+    """
+    try:
+        from mcp_servers.osm_server import _overpass_post
+        
+        async def fetch_osm():
+            return await _overpass_post(query, timeout=20.0)
+
+        data = await cache.get_or_fetch(
+            namespace="streetview_coverage",
+            key={"s": s_q, "w": w_q, "n": n_q, "e": e_q},
+            ttl_seconds=86400 * 7,
+            fetch_fn=fetch_osm
+        )
+        
+        nodes = {}
+        ways = []
+        for el in data.get("elements", []):
+            if el["type"] == "node":
+                nodes[el["id"]] = (el.get("lon"), el.get("lat"))
+            elif el["type"] == "way":
+                ways.append(el)
+                
+        features = []
+        for el in ways:
+            tags = el.get("tags", {})
+            coords = [nodes[nid] for nid in el.get("nodes", []) if nid in nodes]
+            if len(coords) >= 2:
+                features.append({
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coords
+                    },
+                    "properties": {
+                        "osm_id": el["id"],
+                        "highway": tags.get("highway", ""),
+                        "name": tags.get("name", "unnamed")
+                    }
+                })
+        return {"type": "FeatureCollection", "features": features}
+    except Exception as err:
+        print(f"Error in streetview_coverage Overpass fetch: {err}")
+        return {"type": "FeatureCollection", "features": []}

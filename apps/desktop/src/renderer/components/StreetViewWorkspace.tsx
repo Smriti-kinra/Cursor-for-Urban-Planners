@@ -71,6 +71,10 @@ interface StreetViewWorkspaceProps {
   roadTarget: RoadInspectionTarget | null
   onArtifactsChanged?: () => void
   onClose?: () => void
+  layout?: 'split' | 'full'
+  onLayoutChange?: (layout: 'split' | 'full') => void
+  onYawChange?: (bearing: number) => void
+  onLocationChange?: (loc: { lat: number; lng: number }) => void
 }
 
 const API = 'http://localhost:8765/api/streetview'
@@ -102,6 +106,10 @@ export default function StreetViewWorkspace({
   roadTarget,
   onArtifactsChanged,
   onClose,
+  layout,
+  onLayoutChange,
+  onYawChange,
+  onLocationChange,
 }: StreetViewWorkspaceProps) {
   const [meta, setMeta] = useState<StreetViewMeta | null>(null)
   const [loading, setLoading] = useState(false)
@@ -114,14 +122,27 @@ export default function StreetViewWorkspace({
   const [gallery, setGallery] = useState<GalleryItem[]>([])
   const [galleryBusy, setGalleryBusy] = useState(false)
   const [galleryError, setGalleryError] = useState<string | null>(null)
+  const [showInfo, setShowInfo] = useState(false)
+  const [showActions, setShowActions] = useState(false)
   const viewerHostRef = useRef<HTMLDivElement>(null)
   const viewerRef = useRef<{ destroy: () => void } | null>(null)
+
+  useEffect(() => {
+    setShowInfo(false)
+    setShowActions(false)
+  }, [target, roadTarget])
 
   useEffect(() => {
     window.electronAPI.getGoogleMapsKey().then((key) => {
       setGoogleKey(key || '')
     }).catch(() => setGoogleKey(''))
   }, [])
+
+  useEffect(() => {
+    if (meta?.found && meta.lat !== null && meta.lon !== null) {
+      onLocationChange?.({ lat: meta.lat, lng: meta.lon })
+    }
+  }, [meta, onLocationChange])
 
   useEffect(() => {
     if (!target || googleKey === null) {
@@ -153,20 +174,38 @@ export default function StreetViewWorkspace({
     }
     const host = viewerHostRef.current
     const keyQuery = googleKey ? `&google_maps_api_key=${encodeURIComponent(googleKey)}` : ''
+    let cancelled = false
+
     const viewer = window.pannellum.viewer(host, {
       type: 'equirectangular',
       panorama: `${API}/pano?lat=${target.lat}&lng=${target.lng}&zoom=3${keyQuery}`,
       autoLoad: true,
       showControls: true,
       compass: true,
+      showFullscreenCtrl: false,
       crossOrigin: 'anonymous',
     })
     viewerRef.current = viewer
+
+    const onViewerChange = () => {
+      if (cancelled || !viewerRef.current) return
+      const yaw = (viewer as any).getYaw()
+      const bearing = (((meta?.heading || 0) + yaw) % 360 + 360) % 360
+      onYawChange?.(bearing)
+    }
+
+    viewer.on('change', onViewerChange)
+    
+    // Initial sync
+    const timer = setTimeout(onViewerChange, 500)
+
     return () => {
+      cancelled = true
+      clearTimeout(timer)
       try { viewer.destroy() } catch { /* ignore pannellum teardown noise */ }
       viewerRef.current = null
     }
-  }, [meta, target, googleKey])
+  }, [meta, target, googleKey, onYawChange])
 
   const headers = useMemo(() => {
     const h: Record<string, string> = { 'Content-Type': 'application/json' }
@@ -341,10 +380,60 @@ export default function StreetViewWorkspace({
     }
   }, [gallery, onArtifactsChanged])
 
+  const runRoadItem = useCallback(async (item: GalleryItem) => {
+    setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'loading' } : g))
+    try {
+      // 1. Get metadata
+      const resMeta = await fetch(`${API}/meta?lat=${item.point.lat}&lng=${item.point.lng}`, { headers })
+      const mData: StreetViewMeta = await resMeta.json()
+      if (!mData.found) {
+        setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'missing' } : g))
+        return
+      }
+
+      // 2. Save image artifact
+      const resArt = await fetch(`${API}/image`, {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          lat: mData.lat,
+          lng: mData.lon,
+          zoom: 3,
+          title: `Road Inspection Point ${Math.round(item.point.distance_m)}m`,
+          notes: captionFromMeta(mData),
+        }),
+      })
+      const aData: StreetViewArtifactResult = await resArt.json()
+      if (aData.found && aData.artifact_id && aData.download_url) {
+        setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? {
+          ...g,
+          status: 'done',
+          artifactId: aData.artifact_id,
+          imageUrl: `http://localhost:8765${aData.download_url}`,
+          address: mData.address,
+          captureDate: mData.date,
+        } : g))
+        onArtifactsChanged?.()
+      } else {
+        setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'error', error: aData.error || 'Failed to save.' } : g))
+      }
+    } catch (e) {
+      setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'error', error: String(e) } : g))
+    }
+  }, [headers, onArtifactsChanged])
+
+  // Sequentially process gallery items to avoid rate limits
+  useEffect(() => {
+    const next = gallery.find((g) => g.status === 'pending')
+    if (!next || galleryBusy) return
+    setGalleryBusy(true)
+    runRoadItem(next).finally(() => setGalleryBusy(false))
+  }, [gallery, galleryBusy, runRoadItem])
+
   const addSelectedGalleryToReport = useCallback(async () => {
-    const done = gallery.filter((item) => item.selected && item.status === 'done' && item.artifactId)
+    const selected = gallery.filter((item) => item.status === 'done' && item.selected && item.artifactId)
     await addImagesToReport(
-      done.map((item, index) => ({
+      selected.map((item, index) => ({
         artifact_id: item.artifactId,
         lat: item.point.lat,
         lng: item.point.lng,
@@ -353,7 +442,7 @@ export default function StreetViewWorkspace({
         planner_notes: item.notes,
         caption: `Figure ${index + 1}. ${item.address || roadTarget?.name || 'Road inspection point'} at ${Math.round(item.point.distance_m)} m.`,
       })),
-      `${roadTarget?.name || 'Road'} Street View Inspection`,
+      `${roadTarget?.name || 'Road'} Selected Street View Inspection Points`,
     )
   }, [addImagesToReport, gallery, roadTarget])
 
@@ -399,7 +488,26 @@ export default function StreetViewWorkspace({
             {meta?.address || target?.label || (target ? coordinateLabel(target.lat, target.lng) : roadTarget?.name || 'Road inspection')}
           </div>
         </div>
-        {onClose && <button className="sv-icon-btn" onClick={onClose} title="Close Street View">x</button>}
+        <div className="sv-header-actions">
+          {onLayoutChange && (
+            <button
+              className="sv-layout-toggle-btn"
+              onClick={() => onLayoutChange(layout === 'full' ? 'split' : 'full')}
+              title={layout === 'full' ? 'Split screen' : 'Full screen'}
+            >
+              {layout === 'full' ? (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <path d="M4 4h8V2H4a2 2 0 00-2 2v8h2V4zm16 16h-8v2h8a2 2 0 002-2v-8h-2v8z"/>
+                </svg>
+              ) : (
+                <svg viewBox="0 0 24 24" width="14" height="14" fill="currentColor">
+                  <path d="M4 4h16v16H4V4zm2 2v12h12V6H6z"/>
+                </svg>
+              )}
+            </button>
+          )}
+          {onClose && <button className="sv-icon-btn" onClick={onClose} title="Close Street View">✕</button>}
+        </div>
       </div>
 
       {target && (
@@ -410,28 +518,73 @@ export default function StreetViewWorkspace({
             {!loading && meta && !meta.found && (
               <div className="sv-status">No Street View imagery is available near this location.</div>
             )}
-            {!loading && meta?.found && <div ref={viewerHostRef} className="sv-viewer" />}
-          </div>
+            {!loading && meta?.found && (
+              <>
+                <div ref={viewerHostRef} className="sv-viewer" />
 
-          <div className="sv-meta-grid">
-            <div><span>Address</span><strong>{meta?.address || 'Nearest panorama'}</strong></div>
-            <div><span>Coordinates</span><strong>{coordinateLabel(meta?.lat ?? target.lat, meta?.lon ?? target.lng)}</strong></div>
-            <div><span>Capture Date</span><strong>{meta?.date || 'Not available'}</strong></div>
-          </div>
+                <div className="sv-overlay-top-right">
+                  <div className="sv-overlay-button-group">
+                    <button 
+                      className={`sv-overlay-btn ${showInfo ? 'active' : ''}`}
+                      onClick={() => {
+                        setShowInfo(!showInfo)
+                        setShowActions(false)
+                      }}
+                      title="Location Details"
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="10" />
+                        <line x1="12" y1="16" x2="12" y2="12" />
+                        <line x1="12" y1="8" x2="12.01" y2="8" />
+                      </svg>
+                    </button>
+                    <button 
+                      className={`sv-overlay-btn ${showActions ? 'active' : ''}`}
+                      onClick={() => {
+                        setShowActions(!showActions)
+                        setShowInfo(false)
+                      }}
+                      title="Actions"
+                    >
+                      <svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                        <circle cx="12" cy="12" r="3" />
+                        <path d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z" />
+                      </svg>
+                    </button>
+                  </div>
 
-          <div className="sv-actions">
-            <button onClick={downloadCurrentImage} disabled={!meta?.found || saving}>
-              Download Image
-            </button>
-            <button onClick={saveCurrentImage} disabled={!meta?.found || saving}>
-              Save to Artifacts
-            </button>
-            <button onClick={addCurrentToReport} disabled={!meta?.found || saving}>
-              Add to Report
-            </button>
+                  {showInfo && (
+                    <div className="sv-info-overlay-card">
+                      <div className="sv-info-row">
+                        <span className="sv-info-label">Coordinates</span>
+                        <strong className="sv-info-val">{coordinateLabel(meta?.lat ?? target.lat, meta?.lon ?? target.lng)}</strong>
+                      </div>
+                      <div className="sv-info-row">
+                        <span className="sv-info-label">Capture Date</span>
+                        <strong className="sv-info-val">{meta?.date || 'Not available'}</strong>
+                      </div>
+                    </div>
+                  )}
+
+                  {showActions && (
+                    <div className="sv-actions-overlay-card">
+                      <button className="sv-action-card-btn" onClick={downloadCurrentImage} disabled={saving}>
+                        📥 Download Image
+                      </button>
+                      <button className="sv-action-card-btn" onClick={saveCurrentImage} disabled={saving}>
+                        💾 Save to Artifacts
+                      </button>
+                      <button className="sv-action-card-btn" onClick={addCurrentToReport} disabled={saving}>
+                        📝 Add to Report
+                      </button>
+                      {lastArtifactId && <div className="sv-action-card-note">Saved as artifact #{lastArtifactId}.</div>}
+                      {reportStatus && <div className="sv-action-card-note">{reportStatus}</div>}
+                    </div>
+                  )}
+                </div>
+              </>
+            )}
           </div>
-          {lastArtifactId && <div className="sv-note">Saved as artifact #{lastArtifactId}.</div>}
-          {reportStatus && <div className="sv-note">{reportStatus}</div>}
         </section>
       )}
 

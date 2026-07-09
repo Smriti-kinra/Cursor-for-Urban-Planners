@@ -291,6 +291,7 @@ export default function ChatPanel({
   const [showApiKeyInput, setShowApiKeyInput] = useState(false)
   const [isSavingKey, setIsSavingKey] = useState(false)
   const [keyError, setKeyError] = useState<string | null>(null)
+  const [keySuccess, setKeySuccess] = useState(false)
   const [isKeyLoaded, setIsKeyLoaded] = useState(false)
 
   // Conversation renaming state
@@ -767,9 +768,34 @@ export default function ChatPanel({
     reportMdRef.current = ''
   }, [activeConversation?.id])
 
+  /** Convert raw API error strings/objects into a short, friendly sentence. */
+  const friendlyKeyError = (raw: string): string => {
+    // OpenAI returns something like: "Error code: 401 - {'error': {'message': '...', 'code': 'invalid_api_key'}}"
+    // Try to extract just the inner message.
+    try {
+      const jsonMatch = raw.match(/\{.*\}/s)
+      if (jsonMatch) {
+        // Replace single quotes with double quotes for JSON.parse
+        const obj = JSON.parse(jsonMatch[0].replace(/'/g, '"'))
+        const msg: string =
+          obj?.error?.message ||
+          obj?.message ||
+          raw
+        if (msg.includes('Incorrect API key')) return '❌ Incorrect API key — double-check your key at platform.openai.com/account/api-keys'
+        if (msg.includes('exceeded') || msg.includes('quota')) return '⚠️ Quota exceeded — check your billing at platform.openai.com/account/billing'
+        if (msg.includes('deactivated') || msg.includes('disabled')) return '🚫 This key has been deactivated by OpenAI'
+        return `❌ ${msg.split('.')[0]}.`
+      }
+    } catch { /* fall through */ }
+    if (raw.toLowerCase().includes('invalid')) return '❌ Invalid API key — please verify and try again'
+    if (raw.toLowerCase().includes('quota') || raw.toLowerCase().includes('exceeded')) return '⚠️ Quota exceeded — check your billing'
+    return raw
+  }
+
   const validateAndSaveKey = async (keyToSave: string): Promise<boolean> => {
     setIsSavingKey(true)
     setKeyError(null)
+    setKeySuccess(false)
     try {
       const res = await fetch('http://localhost:8765/api/chat/validate-key', {
         method: 'POST',
@@ -781,15 +807,19 @@ export default function ChatPanel({
         const ok = await window.electronAPI.setAPIKey(keyToSave)
         if (ok) {
           setApiKey(keyToSave)
-          setShowApiKeyInput(false)
           setChatError(null)
           setIsSavingKey(false)
+          setKeySuccess(true)
+          setTimeout(() => {
+            setKeySuccess(false)
+            setShowApiKeyInput(false)
+          }, 1800)
           return true
         } else {
           setKeyError('Failed to save key securely to system keychain.')
         }
       } else {
-        setKeyError(data.error || 'Invalid API Key. Please verify and try again.')
+        setKeyError(friendlyKeyError(data.error || 'Invalid API Key. Please verify and try again.'))
       }
     } catch (err) {
       setKeyError('Could not reach verification server. Make sure the backend is running.')
@@ -1077,14 +1107,14 @@ export default function ChatPanel({
                     }}
                   />
                   <button
-                    className="api-key-save-btn"
+                    className={`api-key-save-btn ${keySuccess ? 'success' : ''}`}
                     onClick={() => {
                       const el = document.getElementById('api-key-input-element') as HTMLInputElement
                       if (el) validateAndSaveKey(el.value)
                     }}
                     disabled={isSavingKey}
                   >
-                    {isSavingKey ? 'Saving...' : 'Save'}
+                    {isSavingKey ? 'Saving...' : keySuccess ? 'Saved! ✓' : 'Save'}
                   </button>
                   {apiKey && (
                     <button
@@ -1096,7 +1126,12 @@ export default function ChatPanel({
                     </button>
                   )}
                 </div>
-                {keyError && <div className="api-key-error-msg">{keyError}</div>}
+                {keyError && (
+                  <div className="api-key-error-msg">
+                    <span className="api-key-error-icon">⚠</span>
+                    <span>{keyError}</span>
+                  </div>
+                )}
               </div>
 
               {/* Google Maps Key Section */}
@@ -1138,7 +1173,12 @@ export default function ChatPanel({
                     </button>
                   )}
                 </div>
-                {googleKeyError && <div className="api-key-error-msg">{googleKeyError}</div>}
+                {googleKeyError && (
+                  <div className="api-key-error-msg">
+                    <span className="api-key-error-icon">⚠</span>
+                    <span>{googleKeyError}</span>
+                  </div>
+                )}
               </div>
             </div>
           )}

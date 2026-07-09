@@ -44,7 +44,7 @@ import { composeFigure } from './lib/compose-figure'
 import { buildLegendEntries } from './lib/legend-data'
 
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning' | 'scenarios'
-type RightTab = 'chat' | 'artifacts' | 'streetview'
+type RightTab = 'chat' | 'artifacts'
 
 function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -146,6 +146,7 @@ async function fetchOsrmRoute(start: number[], end: number[]) {
 
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('map')
+  const [isFullscreen, setIsFullscreen] = useState(false)
   const [documentImage, setDocumentImage] = useState<DocumentImage | null>(null)
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
@@ -170,6 +171,13 @@ function App() {
   const [mapActions, setMapActions] = useState<MapAction[]>([])
   const [streetViewTarget, setStreetViewTarget] = useState<StreetViewTarget | null>(null)
   const [roadInspectionTarget, setRoadInspectionTarget] = useState<RoadInspectionTarget | null>(null)
+  const [streetViewDetail, setStreetViewDetail] = useState(false)
+  const [streetViewActive, setStreetViewActive] = useState(false)
+  const [streetViewLocation, setStreetViewLocation] = useState<{ lat: number; lng: number } | null>(null)
+  const [streetViewBearing, setStreetViewBearing] = useState(0)
+  const [streetViewLayout, setStreetViewLayout] = useState<'split' | 'full'>('split')
+  const [splitHeight, setSplitHeight] = useState(400)
+  const isDraggingSplitRef = useRef(false)
   const [injectedMessage, setInjectedMessage] = useState<{ text: string; nonce: number } | null>(null)
   const [bookmarks, setBookmarks] = useState<MapBookmark[]>([])
   const [mapBounds, setMapBounds] = useState<{
@@ -268,9 +276,58 @@ function App() {
     setArtifactsRevision(0)
   }, [])
 
+  // ── Split screen row dragging handle ──
+  const handleSplitDragStart = useCallback((e: React.MouseEvent) => {
+    e.preventDefault()
+    isDraggingSplitRef.current = true
+    document.body.style.cursor = 'row-resize'
+    document.body.style.userSelect = 'none'
+  }, [])
+
+  useEffect(() => {
+    const handleMouseMove = (e: MouseEvent) => {
+      if (!isDraggingSplitRef.current) return
+      const mapStackEl = document.querySelector('.map-stack')
+      if (mapStackEl) {
+        const rect = mapStackEl.getBoundingClientRect()
+        const relativeY = e.clientY - rect.top
+        const newHeight = Math.max(150, Math.min(rect.height - 150, relativeY))
+        setSplitHeight(newHeight)
+        mapViewRef.current?.resize()
+      }
+    }
+
+    const handleMouseUp = () => {
+      if (isDraggingSplitRef.current) {
+        isDraggingSplitRef.current = false
+        document.body.style.cursor = ''
+        document.body.style.userSelect = ''
+        mapViewRef.current?.resize()
+      }
+    }
+
+    window.addEventListener('mousemove', handleMouseMove)
+    window.addEventListener('mouseup', handleMouseUp)
+    return () => {
+      window.removeEventListener('mousemove', handleMouseMove)
+      window.removeEventListener('mouseup', handleMouseUp)
+    }
+  }, [])
+
   const handleSelectWorkspace = async (): Promise<void> => {
     const selected = await window.electronAPI.selectWorkspace()
     if (selected) {
+      // Force-save the current workspace BEFORE switching so that any
+      // recent chat messages are persisted. The effect-cleanup clears the
+      // 800ms debounce timer when workspacePath changes, so without this
+      // explicit save the last conversation delta would be lost.
+      if (workspacePath) {
+        if (saveTimeoutRef.current) {
+          clearTimeout(saveTimeoutRef.current)
+          saveTimeoutRef.current = null
+        }
+        try { await saveProjectRef.current(true) } catch { /* non-fatal */ }
+      }
       setWorkspacePath(selected)
       window.electronAPI.setLastWorkspace(selected).catch(() => {})
     }
@@ -1473,9 +1530,19 @@ function App() {
     [addAiMarkersToGroup],
   )
 
+  const handleStreetViewDetailChange = useCallback((val: boolean) => {
+    setStreetViewDetail(val)
+    if (!val) {
+      setStreetViewActive(false)
+      setStreetViewTarget(null)
+      setStreetViewLocation(null)
+      setRoadInspectionTarget(null)
+    }
+  }, [])
+
   const handleRightClickStreetView = useCallback((lng: number, lat: number) => {
     setStreetViewTarget({ lng, lat })
-    setActiveRightTab('streetview')
+    setStreetViewActive(true)
   }, [])
 
   const handleInspectRoad = useCallback((feature: Feature) => {
@@ -1489,7 +1556,7 @@ function App() {
       geometry,
       name: nameKey ? String(props[nameKey]).trim() : 'Selected road',
     })
-    setActiveRightTab('streetview')
+    setStreetViewActive(true)
   }, [])
 
   const handleRightClickAskChat = useCallback(
@@ -1505,7 +1572,6 @@ function App() {
 
   const handleContextualQuery = useCallback(
     (feature: Feature, lngLat: { lng: number; lat: number }) => {
-      setActiveRightTab('chat')
       const props = feature.properties || {}
       const titleKey = ['name', 'title', 'label', 'Name', 'Label'].find((k) => props[k] != null && String(props[k]).trim() !== '')
       const title = titleKey ? String(props[titleKey]).trim() : ''
@@ -1765,7 +1831,9 @@ function App() {
         setConversations([])
         setActiveConversationId(null)
         setBookmarks([])
-        isLoadingRef.current = false
+        // Use the same 500ms guard as the normal path so that the auto-save
+        // effect can't fire before React has flushed the empty-state updates.
+        setTimeout(() => { isLoadingRef.current = false }, 500)
         return
       }
       const data: ProjectData = JSON.parse(content)
@@ -1929,6 +1997,12 @@ function App() {
     })
   }, [])
 
+  // Track macOS fullscreen state so the traffic-light drag spacer can
+  // collapse when there are no buttons to clear.
+  useEffect(() => {
+    window.electronAPI.onFullscreenChange((fs) => setIsFullscreen(fs))
+  }, [])
+
   const workspaceLabel = workspacePath ? workspacePath.split('/').pop() : 'Open Workspace'
   const workspaceName = workspacePath
     ? (workspacePath.includes('/') ? workspacePath.split('/').pop() : workspacePath.split('\\').pop())
@@ -1937,36 +2011,46 @@ function App() {
   return (
     <div className="app">
       <header className="titlebar">
-        <div className="titlebar-drag" />
-        <span className="titlebar-text">
-          Cursor for Urban Planners{workspaceName ? ` - ${workspaceName}` : ''}
-        </span>
-        <div className="mode-switcher">
-          <button
-            className={`mode-btn ${appMode === 'map' ? 'active' : ''}`}
-            onClick={() => setAppMode('map')}
-          >
-            Map
-          </button>
-          <button
-            className={`mode-btn ${appMode === 'document' ? 'active' : ''}`}
-            onClick={() => setAppMode('document')}
-          >
-            Document
-          </button>
-        </div>
-        {appMode === 'map' && (
-          <div style={{ display: 'flex', gap: 8 }}>
-            {workspacePath && (
-              <button className="workspace-btn" onClick={handleCloseWorkspace} title="Close workspace">
-                Close
-              </button>
-            )}
+        <div className="titlebar-left">
+          {/* Traffic-light drag spacer: collapses in fullscreen where buttons are hidden */}
+          <div className="titlebar-drag" style={{ width: isFullscreen ? 0 : undefined }} />
+          <span className="titlebar-text">
+            Cursor for Urban Planners
+          </span>
+          <div className="workspace-container">
             <button className="workspace-btn" onClick={handleSelectWorkspace}>
               {workspaceLabel}
             </button>
+            {workspacePath && (
+              <button
+                className="workspace-close-mini-btn"
+                onClick={handleCloseWorkspace}
+                title="Close workspace"
+              >
+                ✕
+              </button>
+            )}
           </div>
-        )}
+        </div>
+
+        <div className="titlebar-center">
+          <div className="mode-switcher">
+            <button
+              className={`mode-btn ${appMode === 'map' ? 'active' : ''}`}
+              onClick={() => setAppMode('map')}
+            >
+              Map
+            </button>
+            <button
+              className={`mode-btn ${appMode === 'document' ? 'active' : ''}`}
+              onClick={() => setAppMode('document')}
+            >
+              Document
+            </button>
+          </div>
+        </div>
+
+        <div className="titlebar-right" />
       </header>
 
       <div className="layout">
@@ -2151,33 +2235,94 @@ function App() {
 
         {/* Center */}
         <main className="center-panel">
-          <div className="map-stack" style={{ display: appMode === 'map' ? 'flex' : 'none' }}>
+          <div
+            className={`map-stack ${streetViewActive && streetViewLayout === 'full' ? 'is-full-sv' : ''}`}
+            style={{
+              display: appMode === 'map' ? 'flex' : 'none',
+              flexDirection: 'column',
+            }}
+          >
             {!workspacePath && (
               <div className="workspace-hint-banner">
                 Open a workspace folder (title bar) to save the map and export. Layers from chat still
                 appear, but they will not persist until a folder is open.
               </div>
             )}
-            <ErrorBoundary label="Map">
-              <MapView
-                ref={mapViewRef}
-                layers={layers}
-                basemap={basemap}
-                initialState={mapViewState}
-                mapActions={mapActions}
-                onMapMove={setMapViewState}
-                onBoundsChange={setMapBounds}
-                onBasemapChange={setBasemap}
-                onActionsProcessed={() => setMapActions([])}
-                onLayerStyleChange={handleLayerStyleChange}
-                onAddMarker={handleRightClickAddMarker}
-                onOpenStreetView={handleRightClickStreetView}
-                onInspectRoad={handleInspectRoad}
-                onAskChat={handleRightClickAskChat}
-                onContextualQuery={handleContextualQuery}
-                onDrawComplete={handleDrawComplete}
+            
+            {streetViewActive && (
+              <div
+                style={{
+                  height: streetViewLayout === 'split' ? `${splitHeight}px` : '100%',
+                  width: '100%',
+                  display: 'flex',
+                  minHeight: 0,
+                }}
+              >
+                <ErrorBoundary label="Street View Workspace">
+                  <StreetViewWorkspace
+                    target={streetViewTarget}
+                    roadTarget={roadInspectionTarget}
+                    onArtifactsChanged={() => setArtifactsRevision((n) => n + 1)}
+                    onClose={() => {
+                      setStreetViewTarget(null)
+                      setRoadInspectionTarget(null)
+                      setStreetViewActive(false)
+                      setStreetViewLocation(null)
+                    }}
+                    layout={streetViewLayout}
+                    onLayoutChange={setStreetViewLayout}
+                    onYawChange={setStreetViewBearing}
+                    onLocationChange={setStreetViewLocation}
+                  />
+                </ErrorBoundary>
+              </div>
+            )}
+
+            {streetViewActive && streetViewLayout === 'split' && (
+              <div
+                className="split-resize-handle-horiz"
+                onMouseDown={handleSplitDragStart}
               />
-            </ErrorBoundary>
+            )}
+
+            <div
+              style={{
+                flex: 1,
+                display: 'flex',
+                flexDirection: 'column',
+                minHeight: 0,
+                position: streetViewActive && streetViewLayout === 'full' ? 'absolute' : 'relative',
+              }}
+              className={streetViewActive && streetViewLayout === 'full' ? 'mini-map-floating' : ''}
+            >
+              <ErrorBoundary label="Map">
+                <MapView
+                  ref={mapViewRef}
+                  layers={layers}
+                  basemap={basemap}
+                  initialState={mapViewState}
+                  mapActions={mapActions}
+                  onMapMove={setMapViewState}
+                  onBoundsChange={setMapBounds}
+                  onBasemapChange={setBasemap}
+                  onActionsProcessed={() => setMapActions([])}
+                  onLayerStyleChange={handleLayerStyleChange}
+                  onAddMarker={handleRightClickAddMarker}
+                  onOpenStreetView={handleRightClickStreetView}
+                  onInspectRoad={handleInspectRoad}
+                  onAskChat={handleRightClickAskChat}
+                  onContextualQuery={handleContextualQuery}
+                  onDrawComplete={handleDrawComplete}
+                  streetViewDetail={streetViewDetail}
+                  onStreetViewDetailChange={handleStreetViewDetailChange}
+                  streetViewActive={streetViewActive}
+                  streetViewLocation={streetViewLocation}
+                  streetViewBearing={streetViewBearing}
+                  isMiniMap={streetViewActive && streetViewLayout === 'full'}
+                  onStreetViewLayoutChange={setStreetViewLayout}
+                />
+              </ErrorBoundary>
+            </div>
             <Legend layers={layers} />
           </div>
 
@@ -2206,14 +2351,6 @@ function App() {
             >
               Artifacts
             </button>
-            {appMode === 'map' && (
-              <button
-                className={`tab ${activeRightTab === 'streetview' ? 'active' : ''}`}
-                onClick={() => setActiveRightTab('streetview')}
-              >
-                Street View
-              </button>
-            )}
           </div>
           {activeRightTab === 'chat' ? (
             <ErrorBoundary label="Chat">
@@ -2244,19 +2381,7 @@ function App() {
                 }}
               />
             </ErrorBoundary>
-          ) : (
-            <ErrorBoundary label="Street View">
-              <StreetViewWorkspace
-                target={streetViewTarget}
-                roadTarget={roadInspectionTarget}
-                onArtifactsChanged={() => setArtifactsRevision((n) => n + 1)}
-                onClose={() => {
-                  setStreetViewTarget(null)
-                  setRoadInspectionTarget(null)
-                }}
-              />
-            </ErrorBoundary>
-          )}
+          ) : null}
         </aside>
       </div>
     </div>

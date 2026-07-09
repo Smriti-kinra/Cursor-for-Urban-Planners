@@ -33,6 +33,7 @@ declare global {
     getGoogleMapsKey: () => Promise<string>
     setGoogleMapsKey: (key: string) => Promise<boolean>
     savePDF: (htmlContent: string, defaultName: string) => Promise<boolean>
+    onFullscreenChange: (handler: (isFullscreen: boolean) => void) => void
   }
 
   interface Window {

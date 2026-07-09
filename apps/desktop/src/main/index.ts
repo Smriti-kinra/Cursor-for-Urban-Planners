@@ -281,6 +281,13 @@ function createWindow(): void {
     }, 4000)
     mainWindow.webContents.send('app-before-quit')
   })
+
+  mainWindow.on('enter-full-screen', () => {
+    mainWindow?.webContents.send('fullscreen-change', true)
+  })
+  mainWindow.on('leave-full-screen', () => {
+    mainWindow?.webContents.send('fullscreen-change', false)
+  })
 }
 
 ipcMain.on('app-quit-flush-done', () => {
