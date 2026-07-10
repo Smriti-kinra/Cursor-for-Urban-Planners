@@ -172,182 +172,7 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
     setSelectedId((prev) => (prev === id ? null : id))
   }
 
-  const handleExportPDF = async (artifact: Artifact): Promise<void> => {
-    const element = document.querySelector('.artifact-detail-markdown')
-    if (!element) return
 
-    const printStyles = `
-      <style>
-        body {
-          font-family: 'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
-          color: #334155;
-          line-height: 1.7;
-          padding: 40px;
-          max-width: 800px;
-          margin: 0 auto;
-        }
-        h1 {
-          font-family: 'Outfit', sans-serif;
-          font-size: 30px;
-          border-bottom: 2px solid #cbd5e1;
-          padding-bottom: 10px;
-          color: #0f172a;
-          margin-top: 0;
-          margin-bottom: 24px;
-        }
-        h2 {
-          font-family: 'Outfit', sans-serif;
-          font-size: 20px;
-          color: #1e293b;
-          margin-top: 36px;
-          margin-bottom: 12px;
-          border-bottom: 1.5px solid #e2e8f0;
-          padding-bottom: 6px;
-          page-break-before: always;
-          break-before: page;
-        }
-        /* Don't page break on first H2 or right after Title */
-        h1 + h2,
-        h2:first-of-type {
-          page-break-before: avoid !important;
-          break-before: avoid !important;
-        }
-        h3 {
-          font-family: 'Outfit', sans-serif;
-          font-size: 16px;
-          color: #334155;
-          margin-top: 24px;
-          margin-bottom: 8px;
-        }
-        p, li {
-          font-size: 14px;
-          color: #334155;
-        }
-        p {
-          margin-bottom: 16px;
-        }
-        /* Table of Contents Formatting and Page Breaking */
-        ul:has(li > a[href^="#"]) {
-          background: #f8fafc;
-          border: 1px solid #cbd5e1;
-          border-radius: 8px;
-          padding: 24px;
-          margin: 20px 0 40px;
-          list-style-type: none;
-          page-break-after: always;
-          break-after: page;
-        }
-        ul:has(li > a[href^="#"]) li {
-          margin-bottom: 8px;
-          font-size: 14px;
-        }
-        ul:has(li > a[href^="#"]) a {
-          color: #2563eb !important;
-          text-decoration: none !important;
-          font-weight: 500;
-        }
-        ul:has(li > a[href^="#"]) a:hover {
-          text-decoration: underline !important;
-        }
-        ul:not(:has(a[href^="#"])), ol {
-          padding-left: 20px;
-          margin-bottom: 16px;
-        }
-        li {
-          margin-bottom: 6px;
-        }
-        table {
-          width: 100%;
-          border-collapse: collapse;
-          margin: 24px 0;
-          font-size: 13px;
-        }
-        th, td {
-          border: 1px solid #cbd5e1;
-          padding: 8px 12px;
-          text-align: left;
-        }
-        th {
-          background-color: #f8fafc;
-          font-weight: 600;
-          color: #0f172a;
-          border-bottom: 2px solid #cbd5e1;
-        }
-        tr:nth-child(even) {
-          background-color: #f8fafc;
-        }
-        code {
-          font-family: 'Courier New', monospace;
-          background-color: #f1f5f9;
-          padding: 2px 4px;
-          border-radius: 4px;
-          font-size: 13px;
-        }
-        pre {
-          background-color: #f8fafc;
-          border: 1px solid #e2e8f0;
-          padding: 12px;
-          border-radius: 6px;
-          overflow-x: auto;
-          margin-bottom: 16px;
-        }
-        pre code {
-          background-color: transparent;
-          padding: 0;
-        }
-        blockquote {
-          border-left: 4px solid #cbd5e1;
-          background-color: #f8fafc;
-          padding: 12px 16px;
-          margin: 16px 0;
-          color: #64748b;
-          font-style: italic;
-          border-radius: 0 6px 6px 0;
-        }
-        a {
-          color: #2563eb !important;
-          text-decoration: underline !important;
-        }
-        @media print {
-          body {
-            padding: 0;
-          }
-          h1, h2, h3, h4, h5, h6 {
-            page-break-after: avoid;
-            break-after: avoid;
-          }
-          tr, img, figure, blockquote {
-            page-break-inside: avoid;
-            break-inside: avoid;
-          }
-          a[href]::after {
-            content: "" !important;
-          }
-        }
-      </style>
-    `
-    const titleSafe = (artifact.title || 'artifact').replace(/\s+/g, '_').replace(/[\/\\?%*:|"<>\.]/g, '-')
-    const htmlPayload = `
-      <!DOCTYPE html>
-      <html>
-        <head>
-          <meta charset="utf-8">
-          <title>${artifact.title}</title>
-          <link rel="preconnect" href="https://fonts.googleapis.com">
-          <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-          <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700&display=swap" rel="stylesheet">
-          <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.css">
-          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/katex.min.js"></script>
-          <script defer src="https://cdn.jsdelivr.net/npm/katex@0.16.8/dist/contrib/auto-render.min.js" onload="renderMathInElement(document.body);"></script>
-          ${printStyles}
-        </head>
-        <body>
-          ${element.innerHTML}
-        </body>
-      </html>
-    `
-    await window.electronAPI.savePDF(htmlPayload, `${titleSafe}_Report.pdf`)
-  }
 
   // ── Format-aware detail renderer ──
 
@@ -394,12 +219,13 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
                 >
                   📄 Word
                 </a>
-                <button
+                <a
                   className="download-btn pdf-btn"
-                  onClick={() => handleExportPDF(artifact)}
+                  href={`${API_BASE}/${id}/pdf`}
+                  download
                 >
                   🖨️ PDF
-                </button>
+                </a>
                 <a
                   className="download-btn latex-btn"
                   href={`${API_BASE}/${id}/latex`}
