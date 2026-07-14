@@ -1,6 +1,6 @@
 import json
 from pathlib import Path
-from fastapi import APIRouter, HTTPException, UploadFile, File, Form
+from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, Response
 from models import ArtifactCreate, ArtifactUpdate
 from tools.artifact_store import save_artifact, read_artifact, delete_artifact, ARTIFACTS_DIR
@@ -153,9 +153,10 @@ async def download_artifact_docx(artifact_id: int):
 
 
 @router.get("/{artifact_id}/latex")
-async def download_artifact_latex(artifact_id: int):
+async def download_artifact_latex(artifact_id: int, background_tasks: BackgroundTasks):
     import tempfile
-    from tools.latex_exporter import save_latex
+    import subprocess
+    import sys
 
     row = read_artifact(artifact_id)
     if not row:
@@ -165,18 +166,102 @@ async def download_artifact_latex(artifact_id: int):
     title = row.get("title") or "Urban Planning Report"
     title_safe = title.replace(" ", "_").replace("/", "-")[:50]
 
-    with tempfile.NamedTemporaryFile(suffix=".tex", delete=False, mode="w", encoding="utf-8") as tmp:
-        tmp_path = tmp.name
+    temp_dir = tempfile.mkdtemp()
+    md_path = Path(temp_dir) / "input.md"
+    tex_path = Path(temp_dir) / f"{title_safe}.tex"
 
     try:
-        save_latex(content, tmp_path, title=title)
+        md_path.write_text(content, encoding="utf-8")
+
+        script_path = Path(__file__).parent.parent / "tools" / "md_to_pdf.py"
+        if not script_path.exists():
+            raise HTTPException(status_code=500, detail="md_to_pdf.py script not found in tools directory.")
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            str(md_path),
+            "-o",
+            str(tex_path),
+            "--tex-only"
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            _cleanup_temp_dir(temp_dir)
+            raise HTTPException(status_code=500, detail=f"LaTeX generation failed:\n{result.stderr}")
+
+        background_tasks.add_task(_cleanup_temp_dir, temp_dir)
         return FileResponse(
-            tmp_path,
+            str(tex_path),
             media_type="application/x-tex",
             filename=f"{title_safe}.tex"
         )
     except Exception as e:
+        _cleanup_temp_dir(temp_dir)
+        if isinstance(e, HTTPException):
+            raise e
         raise HTTPException(status_code=500, detail=f"Failed to generate LaTeX document: {str(e)}")
+
+
+def _cleanup_temp_dir(temp_dir_path: str):
+    import shutil
+    try:
+        shutil.rmtree(temp_dir_path)
+    except Exception:
+        pass
+
+
+@router.get("/{artifact_id}/pdf")
+async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTasks):
+    import tempfile
+    import subprocess
+    import sys
+
+    row = read_artifact(artifact_id)
+    if not row:
+        raise HTTPException(status_code=404, detail="Artifact not found")
+
+    content = row.get("content", "")
+    title = row.get("title") or "Urban Planning Report"
+    title_safe = title.replace(" ", "_").replace("/", "-")[:50]
+
+    temp_dir = tempfile.mkdtemp()
+    md_path = Path(temp_dir) / "input.md"
+    pdf_path = Path(temp_dir) / f"{title_safe}.pdf"
+
+    try:
+        md_path.write_text(content, encoding="utf-8")
+
+        script_path = Path(__file__).parent.parent / "tools" / "md_to_pdf.py"
+        if not script_path.exists():
+            raise HTTPException(status_code=500, detail="md_to_pdf.py script not found in tools directory.")
+
+        cmd = [
+            sys.executable,
+            str(script_path),
+            str(md_path),
+            "-o",
+            str(pdf_path)
+        ]
+
+        result = subprocess.run(cmd, capture_output=True, text=True)
+        if result.returncode != 0:
+            # Cleanup temp files immediately on error
+            _cleanup_temp_dir(temp_dir)
+            raise HTTPException(status_code=500, detail=f"PDF generation failed:\n{result.stderr}")
+
+        background_tasks.add_task(_cleanup_temp_dir, temp_dir)
+        return FileResponse(
+            str(pdf_path),
+            media_type="application/pdf",
+            filename=f"{title_safe}.pdf"
+        )
+    except Exception as e:
+        _cleanup_temp_dir(temp_dir)
+        if isinstance(e, HTTPException):
+            raise e
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF document: {str(e)}")
 
 
 
