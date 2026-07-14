@@ -400,6 +400,22 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             layout: { visibility: layer.visible ? 'visible' : 'none' },
           })
           ownLayerIds.current.add(layer.id)
+        } else if (layer.rasterOverlaySpec) {
+          const { url, corners } = layer.rasterOverlaySpec
+          const fileUrl = url.startsWith('localfile://') ? url : `localfile://${url}`
+          map.addSource(layer.id, {
+            type: 'image',
+            url: fileUrl,
+            coordinates: corners,
+          })
+          map.addLayer({
+            id: `${layer.id}-raster`,
+            type: 'raster',
+            source: layer.id,
+            layout: { visibility: layer.visible ? 'visible' : 'none' },
+            paint: { 'raster-opacity': layer.opacity ?? 0.8 },
+          })
+          ownLayerIds.current.add(layer.id)
         } else {
           map.addSource(layer.id, { type: 'geojson', data: layer.data })
           ownLayerIds.current.add(layer.id)
@@ -519,6 +535,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           if (map.getLayer(`${layer.id}-raster`)) {
             map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
             map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 1.0)
+          }
+        } else if (layer.rasterOverlaySpec) {
+          const vis = layer.visible ? 'visible' : 'none'
+          if (map.getLayer(`${layer.id}-raster`)) {
+            map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
+            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 0.8)
+          }
+          const src = map.getSource(layer.id) as maplibregl.ImageSource
+          if (src && src.setCoordinates) {
+            src.setCoordinates(layer.rasterOverlaySpec.corners)
           }
         } else {
           const previous = layerRevisionRef.current.get(layer.id)
@@ -738,6 +764,20 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             { padding: 60, duration: 1500 },
           )
           break
+
+        case 'add_raster_overlay': {
+          const { corners } = payload
+          const lngs = corners.map((c) => c[0])
+          const lats = corners.map((c) => c[1])
+          map.fitBounds(
+            [
+              [Math.min(...lngs), Math.min(...lats)],
+              [Math.max(...lngs), Math.max(...lats)],
+            ],
+            { padding: 60, duration: 1500 },
+          )
+          break
+        }
 
         case 'set_view':
           map.jumpTo({

@@ -903,7 +903,12 @@ export default function ChatPanel({
         api_key: apiKey,
         google_maps_api_key: googleKey,
         image: documentImage
-          ? { base64: documentImage.base64, mime_type: documentImage.mimeType }
+          ? {
+              base64: documentImage.base64,
+              mime_type: documentImage.mimeType,
+              file_path: documentImage.filePath,
+              file_name: documentImage.fileName,
+            }
           : undefined,
       }
       if (!historySentRef.current && messages.length > 0) {

@@ -104,7 +104,7 @@ _ACTION_TOOLS = {
     "draw_line", "draw_polygon", "draw_circle", "add_geojson",
     "highlight_features", "set_layer_style", "style_layer", "toggle_layer", "remove_layer",
     "save_bookmark", "go_to_bookmark", "export_region_clip", "switch_basemap", "add_geojson_file",
-    "add_gee_layer",
+    "add_gee_layer", "add_raster_overlay",
 }
 
 # ── System prompt ─────────────────────────────────────────────────────────────
@@ -114,6 +114,11 @@ DOCUMENT_SYSTEM_PROMPT = (
     "Carefully analyze what you see: land use patterns, zoning areas, transportation networks, "
     "infrastructure, built vs. open spaces, density patterns, boundaries, and any labels or legends. "
     "Answer questions thoroughly with professional planning insights. "
+    "You can automatically align/georeference the active map image to the real-world coordinates on the map. "
+    "To do this, identify at least 3 visual landmarks on the image, search/geocode their real-world latitude/longitude (using geocode or osm_search), "
+    "and call georeference_active_document with the control points (x,y normalized from 0.0 to 1.0, where 0,0 is top-left and 1,1 is bottom-right). "
+    "Once georeferenced, you can trace or digitize visual features from the image: either query OSM/Overture in the georeferenced area "
+    "to fetch existing vectors, or visually calculate the feature coordinates using the georeferencing corners and use add_geojson to draw them. "
     "You may save detailed analyses using the create_artifact tool."
 )
 
@@ -127,7 +132,7 @@ SYSTEM_PROMPT = (
     "- Markers: add_marker, add_markers (multi-marker requests become a grouped set of separate marker layers; pass a 'description' to show info in a hover popup), clear_markers\n"
     "- Layers: add_geojson (multiple point features are displayed as separate layers inside one group), toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
-    "- Search: web_search, geocode\n"
+    "- Search: web_search, geocode, georeference_active_document (align dropped map image to real-world coordinates using 3+ landmark GCPs)\n"
     "- OSM: osm_search (amenities, buildings, roads), "
     "osm_boundary (city/district/state boundary polygons), "
     "osm_boundary_union (merge multiple boundaries into ONE polygon — server-side, no coordinate echoing), "
@@ -968,6 +973,7 @@ async def _execute_tool(
     messages: list[dict] | None = None,
     map_context: dict | None = None,
     client: AsyncOpenAI | None = None,
+    active_image: dict | None = None,
 ) -> str:
     if _is_cancelled():
         return json.dumps({"status": "cancelled"})
@@ -996,7 +1002,7 @@ async def _execute_tool(
                 return json.dumps({"status": "cancelled"})
             print(f"DEBUG: execute_tool name={name!r} args={args}")
             try:
-                result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws})
+                result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws, "_active_image": active_image})
 
             except Exception as exc:
                 import traceback
@@ -1225,6 +1231,7 @@ async def _run_agent(
     client: AsyncOpenAI,
     tools: list[dict] | None = None,
     map_context: dict | None = None,
+    active_image: dict | None = None,
 ) -> None:
     """Run the tool-calling loop until the model stops calling tools or errors."""
     if tools is None:
@@ -1323,7 +1330,7 @@ async def _run_agent(
                         "detail": args_error,
                     })
                 else:
-                    result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context, client=client)
+                    result_str = await _execute_tool(tool_name, args, ws, messages=messages, map_context=map_context, client=client, active_image=active_image)
                 messages.append({
                     "role": "tool",
                     "tool_call_id": tc["id"],
@@ -1522,7 +1529,7 @@ async def chat_websocket(websocket: WebSocket):
             stop_event = asyncio.Event()
             _set_stop_event(stop_event)
             current_full_messages = full_messages
-            active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context))
+            active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context, active_image=image_data))
 
     except WebSocketDisconnect:
         if active_task and not active_task.done():

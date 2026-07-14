@@ -136,10 +136,10 @@ export default function LayerPanel({
         {layer.visible ? '👁' : '⊘'}
       </button>
       <span
-        className={`layer-color ${onStyle && !layer.wmsSpec && !layer.geeSpec ? 'clickable' : ''} ${activeStyleId === layer.id ? 'active' : ''}`}
+        className={`layer-color ${onStyle && (!layer.wmsSpec && !layer.geeSpec || layer.rasterOverlaySpec) ? 'clickable' : ''} ${activeStyleId === layer.id ? 'active' : ''}`}
         style={getSwatchStyle(layer)}
-        onClick={() => { if (!layer.wmsSpec && !layer.geeSpec) onStyle?.(layer.id) }}
-        title={layer.wmsSpec || layer.geeSpec ? 'Raster layer — no symbology' : 'Symbology & labels'}
+        onClick={() => { if (!layer.wmsSpec && !layer.geeSpec || layer.rasterOverlaySpec) onStyle?.(layer.id) }}
+        title={layer.rasterOverlaySpec ? 'Raster overlay alignment & opacity' : (layer.wmsSpec || layer.geeSpec ? 'Raster layer — no symbology' : 'Symbology & labels')}
       />
 
       {onRename ? (

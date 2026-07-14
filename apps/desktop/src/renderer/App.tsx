@@ -1561,6 +1561,36 @@ function App() {
       setActiveLeftTab('scenarios')
       return
     }
+    if (action.type === 'add_raster_overlay') {
+      const { id, name, filePath, corners } = action.payload
+      setLayers((prev) => {
+        const existing = prev.find((l) => l.id === id)
+        if (existing) {
+          return prev.map((l) =>
+            l.id === id
+              ? { ...l, visible: true, rasterOverlaySpec: { url: filePath, corners } }
+              : l,
+          )
+        } else {
+          return [
+            ...prev,
+            {
+              id,
+              name,
+              filePath,
+              visible: true,
+              data: { type: 'FeatureCollection', features: [] },
+              color: '#10b981',
+              rasterOverlaySpec: { url: filePath, corners },
+              opacity: 0.8,
+            },
+          ]
+        }
+      })
+      setActiveLeftTab('layers')
+      setMapActions((prev) => [...prev, action])
+      return
+    }
     setMapActions((prev) => [...prev, action])
   }, [
     upsertLayer,
@@ -2224,13 +2254,10 @@ function App() {
             <>
               <LayerPanel
                 layers={layers}
-                onToggle={toggleLayer}
-                onRemove={removeLayer}
-                onZoomTo={zoomToLayer}
-                onStyle={(id) => {
-                  // Raster layers (WMS/GEE) have no vector symbology — block the panel.
+                        onStyle={(id) => {
+                  // Raster layers (WMS/GEE) have no vector symbology — block the panel unless it's a raster overlay.
                   const layer = layers.find((l) => l.id === id)
-                  if (layer?.wmsSpec || layer?.geeSpec) return
+                  if ((layer?.wmsSpec || layer?.geeSpec) && !layer?.rasterOverlaySpec) return
                   setStylingLayerId((cur) => (cur === id ? null : id))
                   setAttrLayerId(null)
                 }}
@@ -2248,6 +2275,9 @@ function App() {
                   layer={stylingLayer}
                   onChange={handleSymbologyChange}
                   onClose={() => setStylingLayerId(null)}
+                  onUpdateLayer={(layerId, updates) => {
+                    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, ...updates } : l)))
+                  }}
                 />
               )}
               {attrLayer && (

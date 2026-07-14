@@ -17,6 +17,7 @@ export interface GeoJSONLayer {
   styleSpec?: LayerStyleSpec
   wmsSpec?: { url: string; layer_name: string }
   geeSpec?: { url: string; dataset?: string; vis_params?: any }
+  rasterOverlaySpec?: { url: string; corners: [number, number][] }
 }
 
 // ── Data-driven symbology + labels ──
@@ -230,6 +231,15 @@ export type MapAction =
           layerIds?: string[]
           layerVisibility?: Record<string, boolean>
         }>
+      }
+    }
+  | {
+      type: 'add_raster_overlay'
+      payload: {
+        id: string
+        name: string
+        filePath: string
+        corners: [number, number][]
       }
     }
 

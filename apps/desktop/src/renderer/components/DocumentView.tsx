@@ -5,6 +5,7 @@ export interface DocumentImage {
   base64: string
   mimeType: string
   fileName: string
+  filePath: string
   /** For multi-page sources, the page number that was rasterized (1-indexed). */
   page?: number
   /** For multi-page sources, the total number of pages. */
@@ -116,7 +117,7 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
             png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
             webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
           }
-          newDoc.documentImage = { base64, mimeType: mimes[ext] || 'image/png', fileName: name }
+          newDoc.documentImage = { base64, mimeType: mimes[ext] || 'image/png', fileName: name, filePath: chosen }
         }
       } else if (pdf) {
         const out = await rasterizePdfPage(chosen, 1)
@@ -126,6 +127,7 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
             base64: out.base64,
             mimeType: 'image/png',
             fileName: name,
+            filePath: chosen,
             page: 1,
             totalPages: out.totalPages,
           }
@@ -166,6 +168,7 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
           base64: out.base64,
           mimeType: 'image/png',
           fileName: activeDoc.fileName,
+          filePath: activeDoc.filePath,
           page: next,
           totalPages: out.totalPages,
         }

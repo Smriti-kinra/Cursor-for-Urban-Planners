@@ -91,7 +91,7 @@ class UtilityServer:
     tool_names = {
         "web_search", "geocode", "measure_distance", "measure_area",
         "create_artifact", "list_artifacts", "get_artifact",
-        "extract_attribute_table",
+        "extract_attribute_table", "georeference_active_document",
     }
 
     def __init__(self, db_path: Path):
@@ -243,6 +243,37 @@ class UtilityServer:
                     "required": ["title"],
                 },
             ),
+            ToolDeclaration(
+                name="georeference_active_document",
+                description=(
+                    "Calculate the georeferencing coordinates for the dropped/active map document image. "
+                    "The model must provide at least 3 control points matching relative visual coordinates in the image "
+                    "(x, y from 0.0 to 1.0, where 0.0, 0.0 is top-left and 1.0, 1.0 is bottom-right) to "
+                    "known real-world longitude/latitude coordinates. "
+                    "Once solved, the image is automatically warped and added to the map as a raster overlay layer."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "control_points": {
+                            "type": "array",
+                            "description": "List of at least 3 non-collinear Ground Control Points mapping visual percentages to coordinates.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "x": {"type": "number", "description": "Normalized visual coordinate from 0.0 (left) to 1.0 (right)"},
+                                    "y": {"type": "number", "description": "Normalized visual coordinate from 0.0 (top) to 1.0 (bottom)"},
+                                    "lng": {"type": "number", "description": "Longitude of the landmark"},
+                                    "lat": {"type": "number", "description": "Latitude of the landmark"},
+                                    "name": {"type": "string", "description": "Optional name of the landmark"}
+                                },
+                                "required": ["x", "y", "lng", "lat"]
+                            }
+                        }
+                    },
+                    "required": ["control_points"]
+                }
+            ),
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
@@ -262,6 +293,8 @@ class UtilityServer:
             return self._get_artifact(args)
         if tool_name == "extract_attribute_table":
             return await self._extract_attribute_table(args)
+        if tool_name == "georeference_active_document":
+            return await self._georeference_active_document(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _web_search(self, query: str) -> dict:
@@ -543,3 +576,141 @@ class UtilityServer:
             return {"status": "created", "id": result["id"], "columns_count": len(columns), "rows_count": len(rows)}
         except Exception as e:
             return {"error": f"Failed to save artifact: {str(e)}"}
+
+    async def _georeference_active_document(self, args: dict) -> dict:
+        import base64
+        import uuid
+        import json
+        import os
+        from pathlib import Path
+        from tools.action_utils import send_action as _send_action
+
+        control_points = args.get("control_points", [])
+        if len(control_points) < 3:
+            return {"error": "At least 3 ground control points are required."}
+
+        active_image = args.get("_active_image")
+        ws = args.get("_ws")
+        map_context = args.get("_map_context", {})
+        workspace = map_context.get("workspace") if map_context else None
+
+        if not workspace:
+            return {"error": "No workspace folder is currently open. Please open a workspace first."}
+
+        if not active_image or not active_image.get("base64"):
+            return {"error": "No active document image found. Please drop or open a map image in Document View first."}
+
+        base64_data = active_image["base64"]
+        mime_type = active_image.get("mime_type", "image/png")
+        file_name = active_image.get("file_name", "georeferenced_map.png")
+
+        # Resolve extension
+        ext = "png"
+        if "jpeg" in mime_type or "jpg" in mime_type:
+            ext = "jpg"
+        elif "webp" in mime_type:
+            ext = "webp"
+        elif "gif" in mime_type:
+            ext = "gif"
+        
+        # Save target file inside workspace
+        layers_dir = Path(workspace) / ".cursor-urban" / "layers"
+        os.makedirs(layers_dir, exist_ok=True)
+        
+        # Determine name
+        layer_id = f"georef_{uuid.uuid4().hex[:8]}"
+        target_filename = f"{layer_id}.{ext}"
+        target_path = layers_dir / target_filename
+
+        # Write decoded base64 to target_path
+        try:
+            with open(target_path, "wb") as fh:
+                fh.write(base64.b64decode(base64_data))
+        except Exception as e:
+            return {"error": f"Failed to save image to workspace: {str(e)}"}
+
+        # Cramer's rule solver for least-squares affine transform:
+        # We solve:
+        # lng = a * x + b * y + c
+        # lat = d * x + e * y + f
+        #
+        # A = [
+        #   [sum(x^2), sum(x*y), sum(x)],
+        #   [sum(x*y), sum(y^2), sum(y)],
+        #   [sum(x),   sum(y),   n]
+        # ]
+        # B_lng = [sum(x*lng), sum(y*lng), sum(lng)]
+        # B_lat = [sum(x*lat), sum(y*lat), sum(lat)]
+
+        n = len(control_points)
+        sum_x2 = sum(cp["x"] ** 2 for cp in control_points)
+        sum_y2 = sum(cp["y"] ** 2 for cp in control_points)
+        sum_xy = sum(cp["x"] * cp["y"] for cp in control_points)
+        sum_x = sum(cp["x"] for cp in control_points)
+        sum_y = sum(cp["y"] for cp in control_points)
+
+        sum_xlng = sum(cp["x"] * cp["lng"] for cp in control_points)
+        sum_ylng = sum(cp["y"] * cp["lng"] for cp in control_points)
+        sum_lng = sum(cp["lng"] for cp in control_points)
+
+        sum_xlat = sum(cp["x"] * cp["lat"] for cp in control_points)
+        sum_ylat = sum(cp["y"] * cp["lat"] for cp in control_points)
+        sum_lat = sum(cp["lat"] for cp in control_points)
+
+        A = [
+            [sum_x2, sum_xy, sum_x],
+            [sum_xy, sum_y2, sum_y],
+            [sum_x,  sum_y,  n]
+        ]
+        B_lng = [sum_xlng, sum_ylng, sum_lng]
+        B_lat = [sum_xlat, sum_ylat, sum_lat]
+
+        def det3x3(m):
+            return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+        d = det3x3(A)
+        if abs(d) < 1e-11:
+            return {"error": "Control points are collinear or invalid. At least 3 points must form a non-degenerate 2D shape."}
+
+        def solve3x3(m, b):
+            m0 = [[b[0], m[0][1], m[0][2]], [b[1], m[1][1], m[1][2]], [b[2], m[2][1], m[2][2]]]
+            m1 = [[m[0][0], b[0], m[0][2]], [m[1][0], b[1], m[1][2]], [m[2][0], b[2], m[2][2]]]
+            m2 = [[m[0][0], m[0][1], b[0]], [m[1][0], m[1][1], b[1]], [m[2][0], m[2][1], b[2]]]
+            return [det3x3(m0) / d, det3x3(m1) / d, det3x3(m2) / d]
+
+        try:
+            a, b, c = solve3x3(A, B_lng)
+            d, e, f = solve3x3(A, B_lat)
+        except Exception as err:
+            return {"error": f"Failed to solve georeference matrix: {str(err)}"}
+
+        # Calculate the four corner coordinates in lng/lat
+        corners = [
+            [c, f], # Top-Left
+            [a + c, d + f], # Top-Right
+            [a + b + c, d + e + f], # Bottom-Right
+            [b + c, e + f] # Bottom-Left
+        ]
+
+        # Send map action to frontend
+        overlay_name = f"Aligned Map: {file_name}"
+        abs_saved_path = str(target_path)
+        
+        # Fire WS action
+        if ws:
+            await _send_action(ws, "add_raster_overlay", {
+                "id": layer_id,
+                "name": overlay_name,
+                "filePath": abs_saved_path,
+                "corners": corners
+            })
+
+        return {
+            "status": "success",
+            "layer_id": layer_id,
+            "layer_name": overlay_name,
+            "file_path": abs_saved_path,
+            "corners": corners
+        }
