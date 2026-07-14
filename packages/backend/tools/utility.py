@@ -92,6 +92,7 @@ class UtilityServer:
         "web_search", "geocode", "measure_distance", "measure_area",
         "create_artifact", "list_artifacts", "get_artifact",
         "extract_attribute_table", "georeference_active_document",
+        "digitize_image_features",
     }
 
     def __init__(self, db_path: Path):
@@ -274,6 +275,57 @@ class UtilityServer:
                     "required": ["control_points"]
                 }
             ),
+            ToolDeclaration(
+                name="digitize_image_features",
+                description=(
+                    "Convert a list of visual features traced on the active map image (using normalized x, y percentages from 0.0 to 1.0) "
+                    "into real-world geographic coordinates using the solved georeferencing matrix. "
+                    "Adds the digitized GeoJSON features directly to the map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "features": {
+                            "type": "array",
+                            "description": "List of visual shapes to digitize.",
+                            "items": {
+                                "type": "object",
+                                "properties": {
+                                    "geometry_type": {
+                                        "type": "string",
+                                        "enum": ["Polygon", "LineString", "Point"],
+                                        "description": "Type of spatial geometry"
+                                    },
+                                    "coords": {
+                                        "type": "array",
+                                        "description": "List of normalized [x, y] visual coordinate points where x and y are between 0.0 and 1.0.",
+                                        "items": {
+                                            "type": "array",
+                                            "items": {"type": "number"},
+                                            "minItems": 2,
+                                            "maxItems": 2
+                                        }
+                                    },
+                                    "properties": {
+                                        "type": "object",
+                                        "description": "Optional attributes or metadata for this feature"
+                                    }
+                                },
+                                "required": ["geometry_type", "coords"]
+                            }
+                        },
+                        "layer_name": {
+                            "type": "string",
+                            "description": "Name for the generated GeoJSON layer"
+                        },
+                        "color": {
+                            "type": "string",
+                            "description": "Optional hex color for the layer styling (e.g. '#ef4444')"
+                        }
+                    },
+                    "required": ["features", "layer_name"]
+                }
+            ),
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
@@ -295,6 +347,8 @@ class UtilityServer:
             return await self._extract_attribute_table(args)
         if tool_name == "georeference_active_document":
             return await self._georeference_active_document(args)
+        if tool_name == "digitize_image_features":
+            return await self._digitize_image_features(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _web_search(self, query: str) -> dict:
@@ -694,6 +748,19 @@ class UtilityServer:
             [b + c, e + f] # Bottom-Left
         ]
 
+        # Save solved parameters for subsequent digitization
+        try:
+            status_path = layers_dir / "georeference_status.json"
+            with open(status_path, "w") as sf:
+                json.dump({
+                    "a": a, "b": b, "c": c,
+                    "d": d, "e": e, "f": f,
+                    "corners": corners,
+                    "file_path": str(target_path)
+                }, sf, indent=2)
+        except Exception as e:
+            pass
+
         # Send map action to frontend
         overlay_name = f"Aligned Map: {file_name}"
         abs_saved_path = str(target_path)
@@ -713,4 +780,114 @@ class UtilityServer:
             "layer_name": overlay_name,
             "file_path": abs_saved_path,
             "corners": corners
+        }
+
+    async def _digitize_image_features(self, args: dict) -> dict:
+        import json
+        import os
+        from pathlib import Path
+        from tools.action_utils import send_action as _send_action
+
+        features_input = args.get("features", [])
+        layer_name = args.get("layer_name", "Digitized Features")
+        color = args.get("color", "#ef4444")
+        
+        map_context = args.get("_map_context", {})
+        workspace = map_context.get("workspace") if map_context else None
+        ws = args.get("_ws")
+
+        if not workspace:
+            return {"error": "No workspace folder is currently open."}
+
+        status_path = Path(workspace) / ".cursor-urban" / "layers" / "georeference_status.json"
+        if not os.path.exists(status_path):
+            return {"error": "No active georeferencing transform found. Please georeference the map image first."}
+
+        try:
+            with open(status_path, "r") as sf:
+                transform = json.load(sf)
+        except Exception as e:
+            return {"error": f"Failed to read georeferencing status: {str(e)}"}
+
+        a = transform.get("a", 0.0)
+        b = transform.get("b", 0.0)
+        c = transform.get("c", 0.0)
+        d = transform.get("d", 0.0)
+        e = transform.get("e", 0.0)
+        f = transform.get("f", 0.0)
+
+        geojson_features = []
+
+        for feat in features_input:
+            geom_type = feat.get("geometry_type", "Polygon")
+            coords_in = feat.get("coords", [])
+            properties = feat.get("properties", {})
+
+            if not coords_in:
+                continue
+
+            # Convert coords using affine transform
+            transformed_coords = []
+            for pt in coords_in:
+                # Support both dict format {"x": ..., "y": ...} and list format [x, y]
+                if isinstance(pt, dict):
+                    x = pt.get("x", 0.0)
+                    y = pt.get("y", 0.0)
+                elif isinstance(pt, (list, tuple)) and len(pt) >= 2:
+                    x = pt[0]
+                    y = pt[1]
+                else:
+                    continue
+                
+                lng = a * x + b * y + c
+                lat = d * x + e * y + f
+                transformed_coords.append([lng, lat])
+
+            if not transformed_coords:
+                continue
+
+            if geom_type == "Polygon":
+                # Ensure closed ring
+                if (transformed_coords[0][0] != transformed_coords[-1][0] or 
+                    transformed_coords[0][1] != transformed_coords[-1][1]):
+                    transformed_coords.append(transformed_coords[0])
+                
+                geometry = {
+                    "type": "Polygon",
+                    "coordinates": [transformed_coords]
+                }
+            elif geom_type == "LineString":
+                geometry = {
+                    "type": "LineString",
+                    "coordinates": transformed_coords
+                }
+            else: # Point
+                geometry = {
+                    "type": "Point",
+                    "coordinates": transformed_coords[0]
+                }
+
+            geojson_features.append({
+                "type": "Feature",
+                "geometry": geometry,
+                "properties": properties
+            })
+
+        fc = {
+            "type": "FeatureCollection",
+            "features": geojson_features
+        }
+
+        # Send map action to frontend
+        if ws:
+            await _send_action(ws, "add_geojson", {
+                "geojson": fc,
+                "name": layer_name,
+                "color": color
+            })
+
+        return {
+            "status": "success",
+            "layer_name": layer_name,
+            "geojson": fc
         }

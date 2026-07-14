@@ -117,8 +117,10 @@ DOCUMENT_SYSTEM_PROMPT = (
     "You can automatically align/georeference the active map image to the real-world coordinates on the map. "
     "To do this, identify at least 3 visual landmarks on the image, search/geocode their real-world latitude/longitude (using geocode or osm_search), "
     "and call georeference_active_document with the control points (x,y normalized from 0.0 to 1.0, where 0,0 is top-left and 1,1 is bottom-right). "
-    "Once georeferenced, you can trace or digitize visual features from the image: either query OSM/Overture in the georeferenced area "
-    "to fetch existing vectors, or visually calculate the feature coordinates using the georeferencing corners and use add_geojson to draw them. "
+    "Once georeferenced, you must digitize visual features (boundaries, areas, points of interest) from the image. "
+    "Do NOT estimate coordinates manually. Instead, trace features by identifying their visual coordinate vertices (x,y percentages from 0.0 to 1.0) "
+    "and call digitize_image_features to automatically translate them to real coordinates using the affine matrix. "
+    "You may also query OSM/Overture in the georeferenced area to fetch matching digital vectors. "
     "You may save detailed analyses using the create_artifact tool."
 )
 
@@ -132,7 +134,7 @@ SYSTEM_PROMPT = (
     "- Markers: add_marker, add_markers (multi-marker requests become a grouped set of separate marker layers; pass a 'description' to show info in a hover popup), clear_markers\n"
     "- Layers: add_geojson (multiple point features are displayed as separate layers inside one group), toggle_layer, remove_layer, set_layer_style, style_layer\n"
     "- Highlight: highlight_features\n"
-    "- Search: web_search, geocode, georeference_active_document (align dropped map image to real-world coordinates using 3+ landmark GCPs)\n"
+    "- Search: web_search, geocode, georeference_active_document (align dropped map image to real-world coordinates using 3+ landmark GCPs), digitize_image_features (convert list of normalized x,y image coordinates to real-world GeoJSON features using the solved matrix)\n"
     "- OSM: osm_search (amenities, buildings, roads), "
     "osm_boundary (city/district/state boundary polygons), "
     "osm_boundary_union (merge multiple boundaries into ONE polygon — server-side, no coordinate echoing), "
