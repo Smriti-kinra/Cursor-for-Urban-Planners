@@ -102,6 +102,7 @@ class UtilityServer:
         "create_artifact", "list_artifacts", "get_artifact",
         "extract_attribute_table", "georeference_active_document",
         "digitize_image_features", "ask_clarifying_question",
+        "autogeoreference_image",
     }
 
     def __init__(self, db_path: Path):
@@ -281,6 +282,18 @@ class UtilityServer:
                 }
             ),
             ToolDeclaration(
+                name="autogeoreference_image",
+                description=(
+                    "Automatically georeference the active or attached map image/document. "
+                    "This tool uses vision-based landmark detection and geocoding to solve "
+                    "the coordinate transformation and registers the image as an aligned raster overlay on the map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {},
+                }
+            ),
+            ToolDeclaration(
                 name="georeference_active_document",
                 description=(
                     "Calculate the georeferencing coordinates for the dropped/active map document image. "
@@ -387,6 +400,8 @@ class UtilityServer:
             return await self._georeference_active_document(args)
         if tool_name == "digitize_image_features":
             return await self._digitize_image_features(args)
+        if tool_name == "autogeoreference_image":
+            return await self._autogeoreference_image(args)
         return {"error": f"Unknown tool: {tool_name}"}
 
     async def _web_search(self, query: str) -> dict:
@@ -830,6 +845,18 @@ class UtilityServer:
             [b + c, e + f] # Bottom-Left
         ]
 
+        # Validate solved corner coordinates to prevent map crash
+        for pt in corners:
+            lng, lat = pt[0], pt[1]
+            if not (-180.0 <= lng <= 180.0) or not (-90.0 <= lat <= 90.0):
+                return {
+                    "error": (
+                        f"The solved coordinate transformation is invalid. Corners out of bounds: "
+                        f"longitude must be in [-180, 180] and latitude in [-90, 90]. Got corner: {pt}. "
+                        "This usually happens when control points are inconsistent or collinear."
+                    )
+                }
+
         # Save solved parameters for subsequent digitization
         try:
             status_path = layers_dir / "georeference_status.json"
@@ -849,10 +876,26 @@ class UtilityServer:
         
         # Fire WS actions: send success notification and add markers to pin landmarks
         if ws:
+            await _send_action(ws, "add_raster_overlay", {
+                "id": layer_id,
+                "name": overlay_name,
+                "filePath": abs_saved_path,
+                "corners": corners
+            })
             await _send_action(ws, "georeference_success", {
                 "id": layer_id,
                 "name": overlay_name,
                 "corners": corners
+            })
+            min_lng = min(pt[0] for pt in corners)
+            max_lng = max(pt[0] for pt in corners)
+            min_lat = min(pt[1] for pt in corners)
+            max_lat = max(pt[1] for pt in corners)
+            await _send_action(ws, "fit_bounds", {
+                "south": min_lat,
+                "west": min_lng,
+                "north": max_lat,
+                "east": max_lng
             })
             if control_points:
                 markers = []
@@ -872,6 +915,340 @@ class UtilityServer:
             "layer_name": overlay_name,
             "file_path": abs_saved_path,
             "corners": corners
+        }
+
+    async def _geocode_name(self, name: str) -> tuple[float, float] | None:
+        from tools import http as http_client
+        from tools.google import has_key as has_google_key, geocode_query as google_geocode_query, GoogleUnavailable
+        
+        # 1. Try Google Geocoding first (if key is set)
+        if has_google_key():
+            try:
+                results = await google_geocode_query(name, limit=3)
+                if results:
+                    return float(results[0]["lat"]), float(results[0]["lon"])
+            except GoogleUnavailable:
+                pass
+        
+        # 2. Try Photon (Komoot)
+        try:
+            params = {"q": name, "limit": 3}
+            photon = await http_client.fetch_json(
+                "https://photon.komoot.io/api/",
+                namespace="photon",
+                params=params,
+            )
+            features = (photon or {}).get("features", [])
+            if features:
+                coords = features[0].get("geometry", {}).get("coordinates", [])
+                if len(coords) >= 2:
+                    return float(coords[1]), float(coords[0]) # lat, lng
+        except Exception:
+            pass
+
+        # 3. Try Nominatim fallback
+        try:
+            params = {"q": name, "format": "json", "limit": 3}
+            data = await http_client.fetch_json(
+                "https://nominatim.openstreetmap.org/search",
+                namespace="nominatim",
+                params=params,
+            )
+            if data and isinstance(data, list) and len(data) > 0:
+                item = data[0]
+                if "lat" in item and "lon" in item:
+                    return float(item["lat"]), float(item["lon"])
+        except Exception:
+            pass
+            
+        return None
+
+    async def _autogeoreference_image(self, args: dict) -> dict:
+        import base64
+        import uuid
+        import json
+        import os
+        from pathlib import Path
+        from tools.action_utils import send_action as _send_action
+
+        active_image = args.get("_active_image")
+        ws = args.get("_ws")
+        map_context = args.get("_map_context", {})
+        workspace = map_context.get("workspace") if map_context else None
+        client = args.get("_client")
+
+        if not workspace:
+            return {"error": "No workspace folder is currently open. Please open a workspace first."}
+
+        if not active_image or not active_image.get("base64"):
+            return {"error": "No active document image found. Please drop or open a map image/PDF in the chat first."}
+
+        base64_data = active_image["base64"]
+        mime_type = active_image.get("mime_type", "image/png")
+        file_name = active_image.get("file_name", "georeferenced_map.png")
+
+        # Set up OpenAI client if missing
+        if not client:
+            env_key = os.environ.get("OPENAI_API_KEY", "")
+            if env_key:
+                from openai import AsyncOpenAI
+                client = AsyncOpenAI(api_key=env_key)
+        if not client:
+            return {"error": "OpenAI API key is missing. Please configure your API key in the settings panel."}
+
+        # 1. Ask vision LLM to extract landmarks and normalized coordinates
+        # Provide map viewport center context if available to help narrow search
+        center_hint = ""
+        center = map_context.get("center") # [lng, lat]
+        if center and len(center) >= 2:
+            center_hint = f"\nHint: The current map view is centered around longitude {center[0]}, latitude {center[1]}. The landmarks on the map are likely in this general region."
+
+        system_prompt = (
+            "You are an expert cartographic AI assistant.\n"
+            "Analyze the provided map image and identify exactly 4 to 6 prominent visual landmarks "
+            "with clear, searchable text labels (such as city names, neighborhood/suburb names, large parks, "
+            "prominent water bodies, or major street intersections).\n"
+            "For each identified landmark, you must determine:\n"
+            "1. The exact, queryable name of the landmark. You MUST append the city, state/region, and country name "
+            "to the landmark name to ensure accurate global geocoding (e.g. 'Dahisar Station, Mumbai, Maharashtra, India', "
+            "'Sukhna Lake, Chandigarh, India').\n"
+            "2. Its precise normalized pixel coordinate on the image (x, y as numbers between 0.0 and 1.0, where 0.0, 0.0 is the top-left corner and 1.0, 1.0 is the bottom-right corner).\n"
+            "Make sure the landmarks are well-spaced across the map and represent distinct visual coordinates.\n"
+            "Respond ONLY with a JSON object in this exact format:\n"
+            "{\n"
+            '  "landmarks": [\n'
+            '    {"name": "Sector 17, Chandigarh, India", "x": 0.35, "y": 0.42},\n'
+            '    {"name": "Sukhna Lake, Chandigarh, India", "x": 0.82, "y": 0.15},\n'
+            '    ...\n'
+            '  ]\n'
+            "}" + center_hint
+        )
+
+        try:
+            response = await client.chat.completions.create(
+                model="gpt-4o-mini",
+                messages=[
+                    {
+                        "role": "system",
+                        "content": system_prompt
+                    },
+                    {
+                        "role": "user",
+                        "content": [
+                            {"type": "text", "text": "Extract map landmarks with their image coordinates."},
+                            {
+                                "type": "image_url",
+                                "image_url": {
+                                    "url": f"data:{mime_type};base64,{base64_data}"
+                                }
+                            }
+                        ]
+                    }
+                ],
+                response_format={"type": "json_object"},
+                temperature=0.0
+            )
+            result_json = json.loads(response.choices[0].message.content)
+            extracted_landmarks = result_json.get("landmarks", [])
+        except Exception as e:
+            return {"error": f"Failed to analyze image using vision model: {str(e)}"}
+
+        if len(extracted_landmarks) < 3:
+            return {"error": f"Vision model only identified {len(extracted_landmarks)} landmarks. At least 3 are required."}
+
+        # 2. Geocode each landmark
+        control_points = []
+        failed_geocodes = []
+        for lm in extracted_landmarks:
+            name = lm.get("name")
+            x = lm.get("x")
+            y = lm.get("y")
+            if not name or x is None or y is None:
+                continue
+            
+            coords = await self._geocode_name(name)
+            if coords:
+                lat, lng = coords
+                control_points.append({
+                    "name": name,
+                    "x": float(x),
+                    "y": float(y),
+                    "lat": lat,
+                    "lng": lng
+                })
+            else:
+                failed_geocodes.append(name)
+
+        # Outlier filtering: remove any control points that are too far from the median coordinate
+        if len(control_points) >= 3:
+            import statistics
+            median_lat = statistics.median(cp["lat"] for cp in control_points)
+            median_lng = statistics.median(cp["lng"] for cp in control_points)
+            
+            filtered_points = []
+            for cp in control_points:
+                if abs(cp["lat"] - median_lat) <= 2.0 and abs(cp["lng"] - median_lng) <= 2.0:
+                    filtered_points.append(cp)
+                else:
+                    failed_geocodes.append(f"{cp['name']} (outlier coordinate: {cp['lat']}, {cp['lng']})")
+            control_points = filtered_points
+
+        if len(control_points) < 3:
+            return {
+                "error": f"Could only geocode {len(control_points)} landmarks. At least 3 are required to georeference.",
+                "extracted": extracted_landmarks,
+                "failed_geocoding": failed_geocodes
+            }
+
+        # 3. Solve affine transformation matrix (Cramer's rule least-squares)
+        n = len(control_points)
+        sum_x2 = sum(cp["x"] ** 2 for cp in control_points)
+        sum_y2 = sum(cp["y"] ** 2 for cp in control_points)
+        sum_xy = sum(cp["x"] * cp["y"] for cp in control_points)
+        sum_x = sum(cp["x"] for cp in control_points)
+        sum_y = sum(cp["y"] for cp in control_points)
+
+        sum_xlng = sum(cp["x"] * cp["lng"] for cp in control_points)
+        sum_ylng = sum(cp["y"] * cp["lng"] for cp in control_points)
+        sum_lng = sum(cp["lng"] for cp in control_points)
+
+        sum_xlat = sum(cp["x"] * cp["lat"] for cp in control_points)
+        sum_ylat = sum(cp["y"] * cp["lat"] for cp in control_points)
+        sum_lat = sum(cp["lat"] for cp in control_points)
+
+        A = [
+            [sum_x2, sum_xy, sum_x],
+            [sum_xy, sum_y2, sum_y],
+            [sum_x,  sum_y,  n]
+        ]
+        B_lng = [sum_xlng, sum_ylng, sum_lng]
+        B_lat = [sum_xlat, sum_ylat, sum_lat]
+
+        def det3x3(m):
+            return (m[0][0] * (m[1][1] * m[2][2] - m[1][2] * m[2][1]) -
+                    m[0][1] * (m[1][0] * m[2][2] - m[1][2] * m[2][0]) +
+                    m[0][2] * (m[1][0] * m[2][1] - m[1][1] * m[2][0]))
+
+        d = det3x3(A)
+        if abs(d) < 1e-11:
+            return {"error": "Control points are collinear or invalid. At least 3 points must form a non-degenerate 2D shape."}
+
+        def solve3x3(m, b):
+            m0 = [[b[0], m[0][1], m[0][2]], [b[1], m[1][1], m[1][2]], [b[2], m[2][1], m[2][2]]]
+            m1 = [[m[0][0], b[0], m[0][2]], [m[1][0], b[1], m[1][2]], [m[2][0], b[2], m[2][2]]]
+            m2 = [[m[0][0], m[0][1], b[0]], [m[1][0], m[1][1], b[1]], [m[2][0], m[2][1], b[2]]]
+            return [det3x3(m0) / d, det3x3(m1) / d, det3x3(m2) / d]
+
+        try:
+            a, b, c = solve3x3(A, B_lng)
+            d, e, f = solve3x3(A, B_lat)
+        except Exception as err:
+            return {"error": f"Failed to solve georeference matrix: {str(err)}"}
+
+        corners = [
+            [c, f], # Top-Left
+            [a + c, d + f], # Top-Right
+            [a + b + c, d + e + f], # Bottom-Right
+            [b + c, e + f] # Bottom-Left
+        ]
+
+        # Validate solved corner coordinates to prevent map crash
+        for pt in corners:
+            lng, lat = pt[0], pt[1]
+            if not (-180.0 <= lng <= 180.0) or not (-90.0 <= lat <= 90.0):
+                return {
+                    "error": (
+                        f"The solved coordinate transformation is invalid. Corners out of bounds: "
+                        f"longitude must be in [-180, 180] and latitude in [-90, 90]. Got corner: {pt}. "
+                        "This usually happens when extracted landmarks geocode to widely different regions on Earth. "
+                        "Please ensure the image contains landmarks belonging to a single local area."
+                    ),
+                    "failed_geocoding": failed_geocodes,
+                    "control_points": control_points
+                }
+
+        # 4. Save aligned image
+        ext = "png"
+        if "jpeg" in mime_type or "jpg" in mime_type:
+            ext = "jpg"
+        elif "webp" in mime_type:
+            ext = "webp"
+        elif "gif" in mime_type:
+            ext = "gif"
+        
+        layers_dir = Path(workspace) / ".cursor-urban" / "layers"
+        os.makedirs(layers_dir, exist_ok=True)
+        layer_id = f"georef_{uuid.uuid4().hex[:8]}"
+        target_filename = f"{layer_id}.{ext}"
+        target_path = layers_dir / target_filename
+
+        try:
+            with open(target_path, "wb") as fh:
+                fh.write(base64.b64decode(base64_data))
+        except Exception as e:
+            return {"error": f"Failed to save georeferenced image to workspace: {str(e)}"}
+
+        # 5. Save status parameters
+        try:
+            status_path = layers_dir / "georeference_status.json"
+            with open(status_path, "w") as sf:
+                json.dump({
+                    "a": a, "b": b, "c": c,
+                    "d": d, "e": e, "f": f,
+                    "corners": corners,
+                    "file_path": str(target_path)
+                }, sf, indent=2)
+        except Exception:
+            pass
+
+        # 6. Dispatch WebSocket actions
+        overlay_name = f"Aligned Map: {file_name}"
+        abs_saved_path = str(target_path)
+
+        if ws:
+            # Add layer to map
+            await _send_action(ws, "add_raster_overlay", {
+                "id": layer_id,
+                "name": overlay_name,
+                "filePath": abs_saved_path,
+                "corners": corners
+            })
+            # Notify frontend of success
+            await _send_action(ws, "georeference_success", {
+                "id": layer_id,
+                "name": overlay_name,
+                "corners": corners
+            })
+            # Zoom viewport to layer bounds
+            min_lng = min(pt[0] for pt in corners)
+            max_lng = max(pt[0] for pt in corners)
+            min_lat = min(pt[1] for pt in corners)
+            max_lat = max(pt[1] for pt in corners)
+            await _send_action(ws, "fit_bounds", {
+                "south": min_lat,
+                "west": min_lng,
+                "north": max_lat,
+                "east": max_lng
+            })
+            # Add markers for GCPs
+            markers = []
+            for idx, cp in enumerate(control_points):
+                markers.append({
+                    "lat": cp["lat"],
+                    "lng": cp["lng"],
+                    "label": f"GCP#{idx+1}",
+                    "color": "#e11d48",
+                    "description": f"Auto landmark: {cp['name']} (pixel X={round(cp['x']*100,1)}%, Y={round(cp['y']*100,1)}%)"
+                })
+            await _send_action(ws, "add_markers", {"markers": markers})
+
+        return {
+            "status": "success",
+            "layer_id": layer_id,
+            "layer_name": overlay_name,
+            "file_path": abs_saved_path,
+            "corners": corners,
+            "control_points": control_points
         }
 
     async def _ask_clarifying_question(self, args: dict) -> dict:

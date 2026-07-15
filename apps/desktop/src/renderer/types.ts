@@ -102,7 +102,7 @@ export interface ChatMessage {
     markdown: string
     citations: Array<{ url: string; title: string }>
   }
-  attachments?: Array<{ fileName: string; filePath: string }>
+  attachments?: Array<{ fileName: string; filePath: string; mimeType: string }>
 }
 
 export interface Conversation {

@@ -11,6 +11,8 @@ import {
   ChatErrorMessage,
 } from '../types'
 import type { DocumentImage } from './DocumentView'
+import appIcon from '../assets/icon.png'
+import { IMAGE_EXTS, MIME_MAP, rasterizePdfPage } from '../lib/pdf-raster'
 import './ChatPanel.css'
 
 const SUGGESTION_POOL: string[] = [
@@ -285,6 +287,16 @@ export default function ChatPanel({
   const [isSwitchingModel, setIsSwitchingModel] = useState(false)
   const [chatError, setChatError] = useState<ChatErrorMessage | null>(null)
   const [suggestions, setSuggestions] = useState<string[]>(() => pickSuggestions(3))
+
+  // Attachments State
+  const [attachments, setAttachments] = useState<Array<{
+    base64: string
+    mimeType: string
+    fileName: string
+    filePath?: string
+  }>>([])
+  const [attachmentLoading, setAttachmentLoading] = useState(false)
+  const [attachmentError, setAttachmentError] = useState<string | null>(null)
 
   // API Key State
   const [apiKey, setApiKey] = useState('')
@@ -907,10 +919,141 @@ export default function ChatPanel({
     }
   }
 
-  const sendMessageDirect = async (text: string): Promise<void> => {
-    if (!text.trim() || isStreaming || !activeConversation) return
+  const removeAttachment = (index: number) => {
+    setAttachments((prev) => prev.filter((_, i) => i !== index))
+  }
 
-    const userMessage: ChatMessage = { role: 'user', content: text.trim(), timestamp: Date.now() }
+  const handleAttachClick = async () => {
+    setAttachmentError(null)
+    setAttachmentLoading(true)
+    try {
+      const chosen = await window.electronAPI.openFile({
+        filters: [
+          { name: 'Images & PDFs', extensions: [...IMAGE_EXTS, 'pdf'] },
+          { name: 'Images', extensions: IMAGE_EXTS },
+          { name: 'PDF', extensions: ['pdf'] },
+        ],
+      })
+      if (!chosen) {
+        setAttachmentLoading(false)
+        return
+      }
+
+      const name = chosen.split(/[/\\]/).pop() || chosen
+      const ext = name.split('.').pop()?.toLowerCase() || ''
+
+      let newAttachment: { base64: string; mimeType: string; fileName: string; filePath: string } | null = null
+
+      if (IMAGE_EXTS.includes(ext)) {
+        const base64 = await window.electronAPI.readFileBase64(chosen)
+        if (base64) {
+          newAttachment = {
+            base64,
+            mimeType: MIME_MAP[ext] || 'image/png',
+            fileName: name,
+            filePath: chosen,
+          }
+        }
+      } else if (ext === 'pdf') {
+        const out = await rasterizePdfPage(chosen, 1)
+        if (out) {
+          newAttachment = {
+            base64: out.base64,
+            mimeType: 'image/png', // OpenAI vision needs an image
+            fileName: name,
+            filePath: chosen,
+          }
+        } else {
+          setAttachmentError('Could not render the PDF page.')
+        }
+      } else {
+        setAttachmentError('Unsupported file type.')
+      }
+
+      if (newAttachment) {
+        setAttachments((prev) => [...prev, newAttachment!])
+      }
+    } catch (e) {
+      setAttachmentError(`Failed to attach file: ${(e as Error).message}`)
+    } finally {
+      setAttachmentLoading(false)
+    }
+  }
+
+  const handleDragOver = (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+  }
+
+  const handleDrop = async (e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+
+    const files = e.dataTransfer.files
+    if (!files || files.length === 0) return
+
+    setAttachmentError(null)
+    setAttachmentLoading(true)
+
+    try {
+      for (let i = 0; i < files.length; i++) {
+        const file = files[i]
+        const path = (file as any).path || ''
+        if (!path) continue
+
+        const name = file.name
+        const ext = name.split('.').pop()?.toLowerCase() || ''
+
+        let newAttachment: { base64: string; mimeType: string; fileName: string; filePath: string } | null = null
+
+        if (IMAGE_EXTS.includes(ext)) {
+          const base64 = await window.electronAPI.readFileBase64(path)
+          if (base64) {
+            newAttachment = {
+              base64,
+              mimeType: MIME_MAP[ext] || 'image/png',
+              fileName: name,
+              filePath: path,
+            }
+          }
+        } else if (ext === 'pdf') {
+          const out = await rasterizePdfPage(path, 1)
+          if (out) {
+            newAttachment = {
+              base64: out.base64,
+              mimeType: 'image/png',
+              fileName: name,
+              filePath: path,
+            }
+          } else {
+            setAttachmentError('Could not render the PDF page.')
+          }
+        }
+
+        if (newAttachment) {
+          setAttachments((prev) => [...prev, newAttachment!])
+        }
+      }
+    } catch (e) {
+      setAttachmentError(`Failed to process dropped file: ${(e as Error).message}`)
+    } finally {
+      setAttachmentLoading(false)
+    }
+  }
+
+  const sendMessageDirect = async (text: string): Promise<void> => {
+    if ((!text.trim() && attachments.length === 0) || isStreaming || !activeConversation) return
+
+    const userMessage: ChatMessage = {
+      role: 'user',
+      content: text.trim() || (attachments.length > 0 ? `[Attached ${attachments[0].fileName}]` : ''),
+      timestamp: Date.now(),
+      attachments: attachments.map((att) => ({
+        fileName: att.fileName,
+        filePath: att.filePath || '',
+        mimeType: att.mimeType,
+      })),
+    }
     const updated: ChatMessage[] = [...messages, userMessage]
     const placeholderTs = Date.now() + 1
     onMessagesChange([
@@ -952,6 +1095,12 @@ export default function ChatPanel({
               file_name: documentImage.fileName,
             }
           : undefined,
+        chat_attachments: attachments.map((att) => ({
+          base64: att.base64,
+          mime_type: att.mimeType,
+          file_name: att.fileName,
+          file_path: att.filePath || '',
+        })),
       }
       if (!historySentRef.current && messages.length > 0) {
         payload.history = messages.map((m) => ({
@@ -961,6 +1110,7 @@ export default function ChatPanel({
       }
       historySentRef.current = true
 
+      setAttachments([]) // Clear attachments on send
       ws.send(JSON.stringify(payload))
     } catch {
       setChatError({
@@ -975,7 +1125,7 @@ export default function ChatPanel({
 
 
   const sendMessage = async (): Promise<void> => {
-    if (!input.trim() || isStreaming) return
+    if ((!input.trim() && attachments.length === 0) || isStreaming) return
 
     if (!apiKey.trim()) {
       setShowApiKeyInput(true)
@@ -987,7 +1137,7 @@ export default function ChatPanel({
     }
 
     if (!activeConversation) {
-      pendingInputRef.current = input.trim()
+      pendingInputRef.current = input.trim() || (attachments.length > 0 ? `[Attached ${attachments[0].fileName}]` : '')
       setInput('')
       onCreateConversation()
       return
@@ -1050,7 +1200,12 @@ export default function ChatPanel({
   }
 
   return (
-    <div ref={headerContainerRef} className="chat-panel">
+    <div
+      ref={headerContainerRef}
+      className="chat-panel"
+      onDragOver={handleDragOver}
+      onDrop={handleDrop}
+    >
       {/* ── Chat header ── */}
       <div className="chat-header">
         <span className="chat-header-title">
@@ -1430,6 +1585,18 @@ export default function ChatPanel({
                 ) : (
                   <p>{msg.content}</p>
                 )}
+                {msg.attachments && msg.attachments.length > 0 && (
+                  <div className="chat-msg-attachments">
+                    {msg.attachments.map((att, idx) => (
+                      <div key={idx} className="chat-msg-attachment-item" title={att.filePath}>
+                        <span className="attachment-icon">
+                          {att.mimeType?.startsWith('image/') ? '🖼️' : '📄'}
+                        </span>
+                        <span className="attachment-name">{att.fileName}</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
               </div>
             </div>
           )
@@ -1453,7 +1620,72 @@ export default function ChatPanel({
 
       {/* ── Input area ── */}
       <div className="chat-input-area">
+        {attachmentError && (
+          <div className="chat-attachment-error">
+            <span className="error-icon">⚠</span>
+            <span className="error-text">{attachmentError}</span>
+            <button
+              type="button"
+              className="chat-attachment-error-close"
+              onClick={() => setAttachmentError(null)}
+            >
+              &times;
+            </button>
+          </div>
+        )}
+
+        {attachmentLoading && (
+          <div className="chat-attachment-loading">
+            <span className="spinning-icon">⟳</span>
+            <span>Processing attachment...</span>
+          </div>
+        )}
+
+        {attachments.length > 0 && (
+          <div className="chat-attachments-container">
+            {attachments.map((att, idx) => (
+              <div key={idx} className="chat-attachment-chip" title={att.filePath}>
+                {att.mimeType.startsWith('image/') ? (
+                  <img
+                    src={`data:${att.mimeType};base64,${att.base64}`}
+                    className="chat-attachment-thumbnail"
+                    alt={att.fileName}
+                  />
+                ) : (
+                  <span className="chat-attachment-icon">📄</span>
+                )}
+                <span className="chat-attachment-name">{att.fileName}</span>
+                <button
+                  type="button"
+                  className="chat-attachment-remove"
+                  onClick={() => removeAttachment(idx)}
+                  title="Remove attachment"
+                >
+                  &times;
+                </button>
+              </div>
+            ))}
+          </div>
+        )}
+
         <div className="chat-input-row">
+          <button
+            type="button"
+            className="chat-attach-btn"
+            onClick={handleAttachClick}
+            disabled={!apiKey.trim()}
+            title="Attach image or PDF"
+          >
+            <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M4.5 7.5L8.5 3.5C9.88071 2.11929 12.1193 2.11929 13.5 3.5C14.8807 4.88071 14.8807 7.11929 13.5 8.5L8.5 13.5C6.84315 15.1569 4.15685 15.1569 2.5 13.5C0.843146 11.8431 0.843146 9.15685 2.5 7.5L7.5 2.5"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
           <textarea
             ref={textareaRef}
             className="chat-input"
@@ -1484,7 +1716,7 @@ export default function ChatPanel({
             <button
               className="chat-send-btn"
               onClick={sendMessage}
-              disabled={!input.trim()}
+              disabled={!input.trim() && attachments.length === 0}
               title="Send (Enter)"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

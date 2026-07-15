@@ -414,20 +414,37 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           ownLayerIds.current.add(layer.id)
         } else if (layer.rasterOverlaySpec) {
           const { url, corners } = layer.rasterOverlaySpec
-          const fileUrl = url.startsWith('localfile://') ? url : `localfile://${url}`
-          map.addSource(layer.id, {
-            type: 'image',
-            url: fileUrl,
-            coordinates: corners,
-          })
-          map.addLayer({
-            id: `${layer.id}-raster`,
-            type: 'raster',
-            source: layer.id,
-            layout: { visibility: layer.visible ? 'visible' : 'none' },
-            paint: { 'raster-opacity': layer.opacity ?? 0.8 },
-          })
-          ownLayerIds.current.add(layer.id)
+          const valid = corners && corners.every(
+            (c) =>
+              Array.isArray(c) &&
+              c.length >= 2 &&
+              typeof c[0] === 'number' &&
+              typeof c[1] === 'number' &&
+              isFinite(c[0]) &&
+              isFinite(c[1]) &&
+              c[0] >= -180 &&
+              c[0] <= 180 &&
+              c[1] >= -90 &&
+              c[1] <= 90
+          )
+          if (valid) {
+            const fileUrl = url.startsWith('localfile://') ? url : `localfile://${url}`
+            map.addSource(layer.id, {
+              type: 'image',
+              url: fileUrl,
+              coordinates: corners as [[number, number], [number, number], [number, number], [number, number]],
+            })
+            map.addLayer({
+              id: `${layer.id}-raster`,
+              type: 'raster',
+              source: layer.id,
+              layout: { visibility: layer.visible ? 'visible' : 'none' },
+              paint: { 'raster-opacity': layer.opacity ?? 0.8 },
+            })
+            ownLayerIds.current.add(layer.id)
+          } else {
+            console.error('Invalid corners for raster source:', corners)
+          }
         } else {
           map.addSource(layer.id, { type: 'geojson', data: layer.data })
           ownLayerIds.current.add(layer.id)
@@ -555,8 +572,25 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 0.8)
           }
           const src = map.getSource(layer.id) as maplibregl.ImageSource
-          if (src && src.setCoordinates) {
-            src.setCoordinates(layer.rasterOverlaySpec.corners)
+          if (src && src.setCoordinates && layer.rasterOverlaySpec.corners) {
+            const valid = layer.rasterOverlaySpec.corners.every(
+              (c) =>
+                Array.isArray(c) &&
+                c.length >= 2 &&
+                typeof c[0] === 'number' &&
+                typeof c[1] === 'number' &&
+                isFinite(c[0]) &&
+                isFinite(c[1]) &&
+                c[0] >= -180 &&
+                c[0] <= 180 &&
+                c[1] >= -90 &&
+                c[1] <= 90
+            )
+            if (valid) {
+              src.setCoordinates(layer.rasterOverlaySpec.corners as [[number, number], [number, number], [number, number], [number, number]])
+            } else {
+              console.error('Invalid corners for setCoordinates:', layer.rasterOverlaySpec.corners)
+            }
           }
         } else {
           const previous = layerRevisionRef.current.get(layer.id)
@@ -803,35 +837,92 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       const { type, payload } = action
 
       switch (type) {
-        case 'fly_to':
-          map.flyTo({
-            center: [payload.lng, payload.lat],
-            zoom: payload.zoom || 15,
-            duration: 2000,
-          })
+        case 'fly_to': {
+          const { lng, lat, zoom } = payload
+          if (
+            typeof lng === 'number' &&
+            typeof lat === 'number' &&
+            isFinite(lng) &&
+            isFinite(lat) &&
+            lng >= -180 &&
+            lng <= 180 &&
+            lat >= -90 &&
+            lat <= 90
+          ) {
+            map.flyTo({
+              center: [lng, lat],
+              zoom: zoom || 15,
+              duration: 2000,
+            })
+          } else {
+            console.error('Invalid coordinates for fly_to:', payload)
+          }
           break
+        }
 
-        case 'fit_bounds':
-          map.fitBounds(
-            [
-              [payload.west, payload.south],
-              [payload.east, payload.north],
-            ],
-            { padding: 60, duration: 1500 },
-          )
+        case 'fit_bounds': {
+          const { west, south, east, north } = payload
+          if (
+            typeof west === 'number' &&
+            typeof south === 'number' &&
+            typeof east === 'number' &&
+            typeof north === 'number' &&
+            isFinite(west) &&
+            isFinite(south) &&
+            isFinite(east) &&
+            isFinite(north) &&
+            west >= -180 &&
+            west <= 180 &&
+            east >= -180 &&
+            east <= 180 &&
+            south >= -90 &&
+            south <= 90 &&
+            north >= -90 &&
+            north <= 90
+          ) {
+            map.fitBounds(
+              [
+                [west, south],
+                [east, north],
+              ],
+              { padding: 60, duration: 1500 },
+            )
+          } else {
+            console.error('Invalid bounds for fit_bounds:', payload)
+          }
           break
+        }
 
         case 'add_raster_overlay': {
           const { corners } = payload
-          const lngs = corners.map((c) => c[0])
-          const lats = corners.map((c) => c[1])
-          map.fitBounds(
-            [
-              [Math.min(...lngs), Math.min(...lats)],
-              [Math.max(...lngs), Math.max(...lats)],
-            ],
-            { padding: 60, duration: 1500 },
-          )
+          if (Array.isArray(corners) && corners.length > 0) {
+            const valid = corners.every(
+              (c) =>
+                Array.isArray(c) &&
+                c.length >= 2 &&
+                typeof c[0] === 'number' &&
+                typeof c[1] === 'number' &&
+                isFinite(c[0]) &&
+                isFinite(c[1]) &&
+                c[0] >= -180 &&
+                c[0] <= 180 &&
+                c[1] >= -90 &&
+                c[1] <= 90
+            )
+            if (valid) {
+              const lngs = corners.map((c) => c[0])
+              const lats = corners.map((c) => c[1])
+              map.fitBounds(
+                [
+                  [Math.min(...lngs), Math.min(...lats)],
+                  [Math.max(...lngs), Math.max(...lats)],
+                ],
+                { padding: 60, duration: 1500 },
+              )
+            } else {
+              console.error('Invalid corners for add_raster_overlay:', corners)
+            }
+          }
           break
         }
 
