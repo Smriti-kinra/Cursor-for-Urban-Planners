@@ -27,17 +27,18 @@ A geospatial-first, AI-driven desktop IDE for urban planners. You chat with an L
 
 | Feature | What it does |
 |---|---|
-| **Layers** | Click a `.geojson` in the Files pane to load it as a styled vector layer. The Layers pane gives count, visibility toggle, zoom-to, remove, symbology editor, and attribute editor. AI-generated layers appear here automatically. |
+| **Layers** | Click a `.geojson` in the Files pane to load it as a styled vector layer. The Layers pane gives feature count, visibility toggling, zoom-to-layer, removing, and custom symbology/attribute editors. Includes **Multi-Select Layer Grouping** (Cmd/Ctrl/Shift + click, right-click to group multiple layers or ungroup) with smart default naming. |
 | **Vector import** | Click a `.shp`, `.gpkg`, `.kml`, `.kmz`, `.gpx`, or `.csv` in the Files pane and it's converted to WGS84 GeoJSON in your workspace and loaded as a layer. CRS is auto-detected and reprojected; CSVs are point-mapped from auto-detected lat/lng columns. |
+| **Raster Overlays & Georeferencing** | Support for georeferencing and displaying image-based raster overlays (dropped/loaded maps, plans). AI can georeference them via Ground Control Points (GCPs) using `georeference_active_document` and digitize/convert image coordinates to map features using `digitize_image_features`. |
 | **Symbology** | Style any layer by data: **categorized** (color by a string property like `zone_code`), **graduated** (choropleth by a numeric property like `population`, equal-interval or quantile), plus on-map **text labels** from any property. Edit in the Symbology panel or ask the assistant to `style_layer`. |
 | **Legend** | A live floating legend renders automatically whenever a visible layer has categorized or graduated styling. |
 | **Drawing** | Draw points, lines, and polygons directly on the map; each becomes a real layer and opens an attribute table so you can tag it (e.g. set `zone_code`) before styling. |
-| **Attribute table** | Spreadsheet-style editor for any layer's feature properties — add/rename/delete columns, edit cells, delete rows. |
+| **Attribute table** | Spreadsheet-style editor for any layer's feature properties — add/rename/delete columns, edit cells, delete rows. Click-outside handling automatically deselects and closes style/attribute panel editors. |
 | **Basemaps** | Seven free raster basemaps — Street (OSM), Satellite (Esri), Dark/Light (CartoDB), Terrain (OpenTopoMap), Topo (Esri), Humanitarian (OSM-HOT). No API key needed. |
 | **Bookmarks** | Save the current extent as a named bookmark; the assistant can save and fly to bookmarks too. |
 | **Export** | Publication-ready **PNG** and **PDF** figures (title, legend, scale bar, north arrow, attribution baked in), saved to disk or to Artifacts; per-layer **GeoJSON** download; **clip to extent**; and **save-by-region** (search an OSM boundary, preview it, and clip all layers to it). |
 | **Zoning** | Built-in legend (R1, R2, C1, I1, G, MX, INST). Load a GeoJSON with a `zone_code` property and ask the assistant to analyze per-zone area/density or detect overlapping zones. |
-| **Street View** | Right-click anywhere on the map to drop a pin, ask the assistant about the spot, or open an embedded 360° panorama (keyless — panoramas come from the `streetlevel` library, rendered with pannellum). |
+| **Street View & Coverage** | Right-click anywhere on the map to drop a pin, ask the assistant about the spot, or open an embedded 360° panorama (keyless — panoramas come from the `streetlevel` library, rendered with pannellum). Includes a toggleable **Street View coverage** blue-line layer with zoom-based visibility. |
 
 ### 📄 Document mode
 
@@ -56,6 +57,7 @@ The chat panel on the right is the main control surface:
 - **Natural-language commands** — navigate (*"fly to Chandigarh"*), fetch (*"show all schools in Sector 22"*), measure (*"area of this polygon"*), draw (*"mark a 2 km buffer around the airport"*), style (*"color the parcels by zone_code and label them"*), analyze (*"which flood-zone area falls inside ward 12?"*), or document (*"save these findings as an artifact"*).
 - **Visible tool calls** — every OSM query, GIS op, or map action shows inline as it executes.
 - **Streaming** — replies arrive token-by-token over a WebSocket.
+- **Stop Generation Button** — stop active AI response generation or long-running tool loops instantly.
 - **Deep research** — ask for a report and the assistant runs a multi-search deep-research pass (OpenAI `o4-mini-deep-research` + web search), streaming each search step and returning a cited Markdown report you can download as `.md` or PDF.
 - **Map-aware context** — the current viewport bounds, visible layers (with active styling summary), small-layer geometry, and saved bookmarks are appended to every prompt, so the assistant always knows what you're looking at.
 
@@ -71,12 +73,19 @@ The chat panel on the right is the main control surface:
 | **Overture Maps** | `overture_places_search`, `overture_buildings_search` |
 | **Google Places** *(needs key)* | `places_autocomplete`, `place_details`, `nearby_places`, `nearby_places_in_polygon`, `places_density` |
 | **Google environment** *(needs key)* | `get_elevation`, `get_air_quality_google`, `get_solar_building` |
-| **GIS analysis** | `gis_buffer`, `gis_centroid`, `gis_area`, `gis_convex_hull`, `gis_point_in_polygon`, `gis_bounding_box`, `gis_union` |
+| **GIS analysis & Georeferencing** | `gis_buffer`, `gis_centroid`, `gis_area`, `gis_convex_hull`, `gis_point_in_polygon`, `gis_bounding_box`, `gis_union`, `georeference_active_document`, `digitize_image_features` |
 | **GIS overlay & relational** | `gis_intersection`, `gis_difference`, `gis_clip`, `gis_dissolve`, `gis_nearest`, `gis_spatial_join` |
 | **Zoning** | `analyze_zones`, `detect_zone_overlaps` |
-| **Demographics** | `get_demographics` (WorldPop population around coordinates, OSM fallback) |
+| **Demographics** | `get_demographics` (WorldPop population around coordinates, OSM fallback), `project_population` |
+| **Street Network & Routing** | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `route_multi_stop`, `assign_traffic_flows` |
+| **Origin-Destination (OD) Flows** | `import_od_matrix`, `visualize_od_flows` |
+| **Google Earth Engine (GEE)** | `get_gee_layer`, `get_population_layer`, `get_dem_layer`, `get_land_cover`, `analyze_lulc_change`, `get_ndvi_layer` |
+| **DataMeet & Public Datasets** | `browse_datameet_catalog`, `import_datameet_boundary`, `import_public_dataset` |
+| **GTFS Transit** | `import_gtfs_feed`, `analyze_gtfs_service` |
+| **WMS Servers** | `add_wms_layer`, `list_wms_layers` |
 | **Weather** | `get_weather`, `get_air_quality` |
 | **Search & geocode** | `web_search`, `geocode`, `measure_distance`, `measure_area` |
+| **Scenario Planning** | `generate_planning_scenarios`, `compare_scenarios` |
 | **Artifacts** | `create_artifact`, `list_artifacts`, `get_artifact` |
 | **Reports** | `generate_report` (deep-research planning report) |
 

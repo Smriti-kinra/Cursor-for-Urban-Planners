@@ -185,8 +185,9 @@ Long-form notes and analyses the assistant generates (or you ask it to save) liv
 │   │   ├── artifacts.py           Artifact CRUD + upload + download
 │   │   ├── geocode.py             Forward + reverse geocode proxy
 │   │   └── streetview.py          Keyless Street View metadata + panorama
-│   ├── mcp_servers/               One class per domain (OSM, GIS, weather, zoning,
-│   │                              demographics, Overture, Google Places, Google env)
+│   ├── mcp_servers/               One class per domain (OSM, GIS, weather, zoning, demographics,
+│   │                              Overture, Google Places, Google env, GEE, OD flow, network routing,
+│   │                              public catalogs/DataMeet, GTFS transit, WMS, scenarios)
 │   └── tools/
 │       ├── geo.py                 Geodesic area/perimeter/buffer (pyproj WGS84)
 │       ├── vector_convert.py      Shapefile/GPKG/KML/KMZ/GPX/CSV → WGS84 GeoJSON
@@ -305,11 +306,18 @@ Servers live in `routers/chat.py:_servers` and their declarations are flattened 
 | `GISServer` | `gis_server.py` | `gis_buffer`, `gis_centroid`, `gis_area`, `gis_convex_hull`, `gis_point_in_polygon`, `gis_bounding_box`, `gis_union`, `gis_intersection`, `gis_difference`, `gis_clip`, `gis_dissolve`, `gis_nearest`, `gis_spatial_join` |
 | `WeatherServer` | `weather_server.py` | `get_weather`, `get_air_quality` |
 | `ZoningServer` | `zoning_server.py` | `analyze_zones`, `detect_zone_overlaps` |
-| `DemographicsServer` | `demographics_server.py` | `get_demographics` (WorldPop 100m grid, OSM fallback) |
+| `DemographicsServer` | `demographics_server.py` | `get_demographics` (WorldPop 100m grid, OSM fallback), `project_population` |
 | `OvertureServer` | `overture_server.py` | `overture_places_search`, `overture_buildings_search` (DuckDB over public S3 parquet) |
 | `GooglePlacesServer` | `google_places_server.py` | `places_autocomplete`, `place_details`, `nearby_places`, `nearby_places_in_polygon`, `places_density` |
 | `GoogleEnvironmentServer` | `google_environment_server.py` | `get_elevation`, `get_air_quality_google`, `get_solar_building` |
-| `UtilityServer` | `tools/utility.py` | `web_search`, `geocode`, `measure_distance`, `measure_area`, `create_artifact`, `list_artifacts`, `get_artifact` |
+| `NetworkServer` | `network_server.py` | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `route_multi_stop`, `assign_traffic_flows` |
+| `ODServer` | `od_server.py` | `import_od_matrix`, `visualize_od_flows` |
+| `GEEServer` | `gee_server.py` | `get_gee_layer`, `get_population_layer`, `get_dem_layer`, `get_land_cover`, `analyze_lulc_change`, `get_ndvi_layer`, `add_gee_layer` |
+| `DataMeetServer` | `datameet_server.py` | `browse_datameet_catalog`, `import_datameet_boundary`, `import_public_dataset` |
+| `GTFSServer` | `gtfs_server.py` | `import_gtfs_feed`, `analyze_gtfs_service` |
+| `WMSServer` | `wms_server.py` | `add_wms_layer`, `list_wms_layers` |
+| `ScenarioServer` | `scenario_server.py` | `generate_planning_scenarios`, `compare_scenarios` |
+| `UtilityServer` | `tools/utility.py` | `web_search`, `geocode`, `measure_distance`, `measure_area`, `create_artifact`, `list_artifacts`, `get_artifact`, `georeference_active_document`, `digitize_image_features` |
 
 `generate_report` (deep research) is registered directly in `_build_tools()`, not via a server.
 
