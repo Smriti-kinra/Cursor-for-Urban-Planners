@@ -432,7 +432,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             map.addSource(layer.id, {
               type: 'image',
               url: fileUrl,
-              coordinates: corners,
+              coordinates: corners as [[number, number], [number, number], [number, number], [number, number]],
             })
             map.addLayer({
               id: `${layer.id}-raster`,
@@ -587,7 +587,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 c[1] <= 90
             )
             if (valid) {
-              src.setCoordinates(layer.rasterOverlaySpec.corners)
+              src.setCoordinates(layer.rasterOverlaySpec.corners as [[number, number], [number, number], [number, number], [number, number]])
             } else {
               console.error('Invalid corners for setCoordinates:', layer.rasterOverlaySpec.corners)
             }
