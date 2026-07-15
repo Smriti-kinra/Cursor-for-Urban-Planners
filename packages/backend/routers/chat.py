@@ -251,7 +251,13 @@ SYSTEM_PROMPT = (
     "16. MEASURE_DISTANCE AUTO-DRAW: when you call measure_distance, the backend automatically draws both a "
     "'Direct Distance N' layer (dashed blue straight line) and, if OSRM resolves, a 'Route Distance N' "
     "layer (solid red driving route with duration) on the map. Do NOT separately call draw_line or add_geojson "
-    "to visualize the measurement — the layers appear automatically. Just narrate the result numbers to the user."
+    "to visualize the measurement — the layers appear automatically. Just narrate the result numbers to the user.\n"
+    "17. PROJECT_POPULATION AUTO-ARTIFACT: when you call project_population and it succeeds, the backend "
+    "automatically saves the full Markdown report as a named Artifact in the Artifacts panel (title: "
+    "'Population Projection – <place> <year range>'). Do NOT paste the full projection table or report into "
+    "the chat. Instead, narrate a brief 2-3 sentence summary of the key numbers "
+    "(baseline, projected population at final target year, growth increment, land demand in hectares) and "
+    "tell the user the report has been saved to Artifacts."
 )
 
 
@@ -1054,6 +1060,53 @@ async def _execute_tool(
                     summary["route_error"] = result["route_error"]
                 summary["map_layers_drawn"] = True
                 return json.dumps(summary)
+
+            # Auto-save population projection report as an Artifact
+            if name == "project_population" and result.get("status") == "success":
+                report_md = result.get("report", "")
+                artifact_title = "Population Projection"
+                if report_md:
+                    projections = result.get("projections", [])
+                    place_name = (result.get("place_name") or "").strip()
+                    year_range = ""
+                    if projections:
+                        y0 = projections[0]["year"]
+                        y1 = projections[-1]["year"]
+                        year_range = str(y0) if y0 == y1 else f"{y0}–{y1}"
+                    parts = ["Population Projection"]
+                    if place_name:
+                        parts.append(f"– {place_name}")
+                    if year_range:
+                        parts.append(year_range)
+                    artifact_title = " ".join(parts)
+
+                    try:
+                        from tools.artifact_store import save_artifact as _save_artifact
+                        _save_artifact(
+                            title=artifact_title,
+                            artifact_type="report",
+                            format="markdown",
+                            content=report_md,
+                        )
+                        if not await _send_action_if_allowed(ws, "refresh_artifacts", {}):
+                            return json.dumps({"status": "cancelled"})
+                    except Exception as _ae:
+                        # Non-fatal: artifact save failure should not block the LLM response
+                        print(f"[project_population] artifact save failed: {_ae}")
+
+                # Return a clean summary so the LLM narrates, not pastes the full report
+                clean: dict = {
+                    "status": "success",
+                    "artifact_saved": bool(report_md),
+                    "artifact_title": artifact_title,
+                    "baseline_year": result.get("baseline", {}).get("year"),
+                    "baseline_population": result.get("baseline", {}).get("population"),
+                    "model_type": result.get("model_type"),
+                    "growth_rate_pct": round(result.get("growth_rate", 0) * 100, 2),
+                    "projections": result.get("projections", []),
+                    "land_demand_hectares": result.get("land_demand_hectares"),
+                }
+                return json.dumps(clean)
 
             # Auto-display osm_search result on map
             if name == "osm_search" and "geojson" in result and result.get("count", 0) > 0:

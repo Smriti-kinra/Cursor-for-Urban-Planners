@@ -259,7 +259,23 @@ class DemographicsServer:
             demog_res = await self._get_demographics(demog_args)
             if demog_res.get("population") is not None:
                 base_population = demog_res["population"]
-                source_summary = f"Geolocated baseline around coordinates ({lat_arg}, {lng_arg}) using {demog_res['population_source']} source."
+                # Extract a human-readable place name from the reverse geocode summary
+                rev = demog_res.get("reverse_geocode_summary") or {}
+                addr = rev.get("address", {})
+                place_name_raw = (
+                    addr.get("city")
+                    or addr.get("town")
+                    or addr.get("district")
+                    or addr.get("county")
+                    or addr.get("state")
+                    or ""
+                )
+                source_summary = (
+                    f"Geolocated baseline near {place_name_raw} ({lat_arg}, {lng_arg}) "
+                    f"using {demog_res['population_source']} source."
+                    if place_name_raw
+                    else f"Geolocated baseline around coordinates ({lat_arg}, {lng_arg}) using {demog_res['population_source']} source."
+                )
             else:
                 return {"error": f"Could not determine baseline population at coordinates ({lat_arg}, {lng_arg}). Please specify base_population explicitly."}
         else:
@@ -341,6 +357,15 @@ class DemographicsServer:
 
         markdown_report = "\n".join(md)
 
+        # Extract place name for the calling side-effect (chat.py artifact title)
+        place_name_for_title = ""
+        if source_summary:
+            # Pattern: "Geolocated baseline near <CITY> ("
+            import re
+            m = re.search(r"near ([^(]+)\(", source_summary)
+            if m:
+                place_name_for_title = m.group(1).strip().rstrip(",")
+
         return {
             "status": "success",
             "baseline": {
@@ -352,6 +377,7 @@ class DemographicsServer:
             "model_type": model_type,
             "projections": results,
             "land_demand_hectares": required_ha,
+            "place_name": place_name_for_title,
             "report": markdown_report
         }
 
