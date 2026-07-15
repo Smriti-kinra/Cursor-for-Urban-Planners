@@ -1364,7 +1364,7 @@ export default function ChatPanel({
         {messages.length === 0 && (
           <div className="chat-empty">
             <div className="chat-empty-logo">
-              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none">
                 <path
                   d="M5 3L19 12L12.5 13.5L9 20L5 3Z"
                   fill="#4ecca3"
