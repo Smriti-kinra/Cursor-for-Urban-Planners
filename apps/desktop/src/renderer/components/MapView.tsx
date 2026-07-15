@@ -1427,7 +1427,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Search"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <circle cx="11" cy="11" r="8" />
             <line x1="21" y1="21" x2="16.65" y2="16.65" />
           </svg>
@@ -1441,7 +1441,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Draw point"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
             <circle cx="12" cy="10" r="3" />
           </svg>
@@ -1452,7 +1452,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Draw line"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <line x1="4" y1="20" x2="20" y2="4" />
           </svg>
         </button>
@@ -1476,7 +1476,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Undo (Ctrl+Z)"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M3 7v6h6" />
             <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
           </svg>
@@ -1488,7 +1488,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Redo (Ctrl+Y)"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <path d="M21 7v6h-6" />
             <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
           </svg>
@@ -1506,7 +1506,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           title="Basemaps"
           style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
             <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
             <line x1="9" y1="3" x2="9" y2="18" />
             <line x1="15" y1="6" x2="15" y2="21" />
@@ -1519,12 +1519,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         <div className="draw-bar">
           <span className="draw-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
             {drawMode === 'point' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
                 <circle cx="12" cy="10" r="3" />
               </svg>
             ) : drawMode === 'line' ? (
-              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
                 <line x1="4" y1="20" x2="20" y2="4" />
               </svg>
             ) : (
