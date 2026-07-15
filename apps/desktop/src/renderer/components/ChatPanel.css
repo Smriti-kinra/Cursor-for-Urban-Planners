@@ -62,7 +62,8 @@
   background: none;
   border: 1px solid transparent;
   color: var(--text-muted, #a0a6b2);
-  padding: 6px;
+  width: 32px;
+  height: 32px;
   border-radius: 6px;
   cursor: pointer;
   display: flex;
@@ -1220,9 +1221,9 @@
 }
 
 .api-settings-btn {
-  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  background: none;
   color: var(--text-muted);
-  border: 1px solid var(--border);
+  border: 1px solid transparent;
   border-radius: 6px;
   width: 32px;
   height: 32px;
@@ -1234,17 +1235,26 @@
   flex-shrink: 0;
 }
 
+.api-settings-btn svg {
+  transition: transform 0.35s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
 .api-settings-btn:hover {
-  background: var(--bg-surface);
-  border-color: var(--accent);
-  color: var(--accent);
+  background: var(--bg-hover, #2e3047);
+  color: var(--text-primary, #f4f4f7);
+}
+
+.api-settings-btn:hover svg {
+  transform: rotate(30deg);
 }
 
 .api-settings-btn.active {
-  background: var(--bg-surface);
-  border-color: var(--accent);
+  background: var(--bg-hover, #2e3047);
   color: var(--accent);
-  box-shadow: 0 0 8px rgba(45, 212, 191, 0.2);
+}
+
+.api-settings-btn.active svg {
+  transform: rotate(90deg);
 }
 
 .api-key-status.info {

@@ -314,6 +314,25 @@ export default function ChatPanel({
   const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
   const headerContainerRef = useRef<HTMLDivElement>(null)
+  const historyBtnRef = useRef<HTMLButtonElement>(null)
+  const historyListRef = useRef<HTMLDivElement>(null)
+
+  // Close history list when clicking outside
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        showHistory &&
+        historyListRef.current &&
+        !historyListRef.current.contains(e.target as Node) &&
+        historyBtnRef.current &&
+        !historyBtnRef.current.contains(e.target as Node)
+      ) {
+        setShowHistory(false)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showHistory])
 
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -1031,6 +1050,7 @@ export default function ChatPanel({
         </span>
         <div className="chat-header-actions">
           <button
+            ref={historyBtnRef}
             className={`chat-header-action-btn ${showHistory ? 'active' : ''}`}
             onClick={() => {
               setShowHistory(!showHistory);
@@ -1038,14 +1058,9 @@ export default function ChatPanel({
             }}
             title="View chat history"
           >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path
-                d="M8 3.5V8L11 10M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z"
-                stroke="currentColor"
-                strokeWidth="1.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-              />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <circle cx="12" cy="12" r="10" />
+              <polyline points="12 6 12 12 16 14" />
             </svg>
           </button>
           
@@ -1054,8 +1069,9 @@ export default function ChatPanel({
             onClick={handleNewChat}
             title="Start a new chat"
           >
-            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
-              <path d="M8 3V13M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round">
+              <line x1="12" y1="5" x2="12" y2="19" />
+              <line x1="5" y1="12" x2="19" y2="12" />
             </svg>
           </button>
         </div>
@@ -1101,7 +1117,7 @@ export default function ChatPanel({
                 }}
                 title="API Key Settings"
               >
-                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
                   {/* Gear outline (outer boundary only, inner circle removed) */}
                   <path
                     d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
@@ -1227,7 +1243,7 @@ export default function ChatPanel({
 
       {/* ── Conversation history dropdown ── */}
       {showHistory && (
-        <div className="chat-history-list">
+        <div ref={historyListRef} className="chat-history-list">
           {conversations.length === 0 ? (
             <div className="chat-history-empty">No conversations yet</div>
           ) : (
