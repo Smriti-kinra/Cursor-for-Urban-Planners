@@ -184,7 +184,7 @@
   cursor: pointer;
   background: none;
   padding: 0;
-  box-shadow: 0 0 0 1.5px var(--bg-surface), 0 0 0 2.5px var(--accent);
+  box-shadow: 0 0 0 1.5px var(--border);
   transition: transform 0.15s ease;
   flex-shrink: 0;
 }

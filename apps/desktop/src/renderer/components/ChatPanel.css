@@ -69,7 +69,7 @@
   display: flex;
   align-items: center;
   justify-content: center;
-  transition: background 0.15s, color 0.15s, border-color 0.15s;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
 .chat-header-action-btn:hover {
@@ -79,7 +79,8 @@
 
 .chat-header-action-btn.active {
   color: var(--accent, #3b82f6);
-  background: var(--bg-hover, #2e3047);
+  background: rgba(137, 180, 250, 0.12);
+  border-color: rgba(137, 180, 250, 0.2);
 }
 /* ── Conversation history ── */
 
@@ -237,13 +238,7 @@
 }
 
 .chat-empty-logo {
-  width: 48px;
-  height: 48px;
-  border-radius: 10px;
-  margin-bottom: 4px;
-  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.25);
-  background: var(--bg-secondary);
-  border: 1px solid var(--border);
+  margin-bottom: 12px;
   display: flex;
   align-items: center;
   justify-content: center;
@@ -1233,7 +1228,7 @@
   align-items: center;
   justify-content: center;
   cursor: pointer;
-  transition: all 0.15s ease;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
   flex-shrink: 0;
 }
 
@@ -1251,8 +1246,9 @@
 }
 
 .api-settings-btn.active {
-  background: var(--bg-hover, #2e3047);
+  background: rgba(137, 180, 250, 0.12);
   color: var(--accent);
+  border-color: rgba(137, 180, 250, 0.2);
 }
 
 .api-settings-btn.active svg {

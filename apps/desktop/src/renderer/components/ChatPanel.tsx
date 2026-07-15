@@ -402,16 +402,25 @@ export default function ChatPanel({
 
   useEffect(() => {
     const handleOutsideClick = (e: MouseEvent) => {
-      if (headerContainerRef.current && !headerContainerRef.current.contains(e.target as Node)) {
-        setShowHistory(false)
+      const target = e.target as HTMLElement
+      if (
+        showApiKeyInput &&
+        !target.closest('.api-settings-btn') &&
+        !target.closest('.api-key-config-bar')
+      ) {
         setShowApiKeyInput(false)
       }
+      if (
+        showHistory &&
+        !target.closest('.chat-header-action-btn') &&
+        !target.closest('.chat-history-list')
+      ) {
+        setShowHistory(false)
+      }
     }
-    window.addEventListener('click', handleOutsideClick, true)
-    return () => {
-      window.removeEventListener('click', handleOutsideClick, true)
-    }
-  }, [])
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [showApiKeyInput, showHistory])
 
   const lastInjectedNonceRef = useRef<number>(0)
 

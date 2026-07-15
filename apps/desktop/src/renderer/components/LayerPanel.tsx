@@ -69,6 +69,22 @@ export default function LayerPanel({
     return () => document.removeEventListener('mousedown', handleOutsideMouseDown)
   }, [])
 
+  // Clear style popup when clicking outside the swatch or the popup itself
+  useEffect(() => {
+    if (!activeStyleId) return
+    const handleOutsideClick = (e: MouseEvent) => {
+      const target = e.target as HTMLElement
+      if (
+        !target.closest('.layer-color.active') &&
+        !target.closest('.layer-popup-container')
+      ) {
+        onStyle?.(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [activeStyleId, onStyle])
+
   // drag-and-drop state
   const [draggedId, setDraggedId] = useState<string | null>(null)
   const [draggedType, setDraggedType] = useState<'layer' | 'group' | null>(null)
