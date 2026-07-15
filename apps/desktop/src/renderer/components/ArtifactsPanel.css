@@ -220,32 +220,6 @@
   opacity: 1;
 }
 
-.rename-btn {
-  background: none;
-  border: none;
-  color: var(--text-muted);
-  cursor: pointer;
-  padding: 0;
-  width: 22px;
-  height: 22px;
-  border-radius: 4px;
-  display: inline-flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
-  opacity: 0;
-  flex-shrink: 0;
-}
-
-.artifact-item:hover .rename-btn {
-  opacity: 1;
-}
-
-.rename-btn:hover {
-  background: var(--bg-hover);
-  color: var(--accent);
-  opacity: 1;
-}
 
 .artifact-detail {
   margin-top: 8px;
@@ -266,14 +240,24 @@
 /* ── Title inline edit ── */
 .artifact-title-input {
   flex: 1;
-  background: var(--bg-surface);
-  border: 1px solid var(--accent);
-  color: var(--text-primary);
-  padding: 2px 6px;
-  border-radius: 4px;
   font-size: 13px;
-  font-family: inherit;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
   outline: none;
+  width: 0;
+  min-width: 0;
+  transition: border-color 0.15s, background 0.15s;
+  font-family: inherit;
+  font-weight: 500;
+}
+
+.artifact-title-input:focus,
+.artifact-title-input:hover {
+  border-color: var(--border, #45475a);
+  background: var(--bg-hover, #1a1a26);
 }
 
 

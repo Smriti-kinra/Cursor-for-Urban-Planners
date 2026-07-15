@@ -131,8 +131,6 @@ export default function ArtifactsPanel({
   const [format, setFormat] = useState<'markdown' | 'table' | 'geojson'>('markdown')
 
   // Edit state
-  const [editingTitle, setEditingTitle] = useState<number | null>(null)
-  const [editTitleValue, setEditTitleValue] = useState('')
   const [editingContent, setEditingContent] = useState(false)
   const [editContentValue, setEditContentValue] = useState('')
 
@@ -227,7 +225,6 @@ export default function ArtifactsPanel({
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle }),
       })
-      setEditingTitle(null)
       fetchArtifacts()
       if (fullArtifact && fullArtifact.id === id) {
         setFullArtifact((prev) => (prev ? { ...prev, title: newTitle } : null))
@@ -589,36 +586,25 @@ export default function ArtifactsPanel({
               >
                 <div className="artifact-item-header">
                   <span className="artifact-type-badge">{a.format ?? a.artifact_type}</span>
-                  {editingTitle === a.id ? (
-                    <input
-                      className="artifact-title-input"
-                      value={editTitleValue}
-                      autoFocus
-                      onClick={(e) => e.stopPropagation()}
-                      onChange={(e) => setEditTitleValue(e.target.value)}
-                      onBlur={() => saveTitle(a.id, editTitleValue)}
-                      onKeyDown={(e) => {
-                        if (e.key === 'Enter') saveTitle(a.id, editTitleValue)
-                        if (e.key === 'Escape') setEditingTitle(null)
-                      }}
-                    />
-                  ) : (
-                    <span className="artifact-title">{a.title}</span>
-                  )}
-                  <button
-                    className="rename-btn"
-                    title="Rename"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      setEditingTitle(a.id)
-                      setEditTitleValue(a.title)
+                  <input
+                    type="text"
+                    className="artifact-title-input"
+                    value={a.title}
+                    onClick={(e) => e.stopPropagation()}
+                    onChange={(e) => {
+                      const val = e.target.value
+                      setArtifacts((prev) =>
+                        prev.map((art) => (art.id === a.id ? { ...art, title: val } : art)),
+                      )
                     }}
-                  >
-                    <svg width="11" height="11" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-                      <path d="M12 20h9"></path>
-                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
-                    </svg>
-                  </button>
+                    onBlur={() => saveTitle(a.id, a.title)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        (e.target as HTMLInputElement).blur()
+                      }
+                    }}
+                    title="Rename artifact"
+                  />
                   <button
                     className="delete-btn"
                     title="Delete"
