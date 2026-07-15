@@ -764,3 +764,29 @@ input:checked + .slider:before {
   display: none !important;
 }
 
+/* ── Context Menu Temporary Dot ── */
+.map-context-dot {
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  background: var(--accent, #4ecca3);
+  border: 2px solid #fff;
+  border-radius: 50%;
+  pointer-events: none;
+  transform: translate(-50%, -50%);
+  z-index: 10000;
+  box-shadow: 0 0 8px rgba(78, 204, 163, 0.8), 0 0 0 4px rgba(78, 204, 163, 0.2);
+  animation: pulse-dot 1.5s infinite alternate;
+}
+
+@keyframes pulse-dot {
+  0% {
+    transform: translate(-50%, -50%) scale(1);
+    box-shadow: 0 0 8px rgba(78, 204, 163, 0.8), 0 0 0 4px rgba(78, 204, 163, 0.2);
+  }
+  100% {
+    transform: translate(-50%, -50%) scale(1.2);
+    box-shadow: 0 0 12px rgba(78, 204, 163, 1), 0 0 0 8px rgba(78, 204, 163, 0);
+  }
+}
+

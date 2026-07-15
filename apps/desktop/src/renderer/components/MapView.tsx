@@ -1425,8 +1425,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             setShowBasemaps(false)
           }}
           title="Search"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          🔍
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="11" cy="11" r="8" />
+            <line x1="21" y1="21" x2="16.65" y2="16.65" />
+          </svg>
         </button>
 
         <div className="toolbar-divider" />
@@ -1435,22 +1439,32 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           className={`toolbar-btn ${drawMode === 'point' ? 'active' : ''}`}
           onClick={() => startDraw('point')}
           title="Draw point"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          📍
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+            <circle cx="12" cy="10" r="3" />
+          </svg>
         </button>
         <button
           className={`toolbar-btn ${drawMode === 'line' ? 'active' : ''}`}
           onClick={() => startDraw('line')}
           title="Draw line"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          ╱
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <line x1="4" y1="20" x2="20" y2="4" />
+          </svg>
         </button>
         <button
           className={`toolbar-btn ${drawMode === 'polygon' ? 'active' : ''}`}
           onClick={() => startDraw('polygon')}
           title="Draw polygon"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          ⬠
+          <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="12 2 22 8.5 18 19.5 6 19.5 2 8.5" />
+          </svg>
         </button>
 
         <div className="toolbar-spacer" />
@@ -1460,16 +1474,24 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           onClick={onUndo}
           disabled={!canUndo}
           title="Undo (Ctrl+Z)"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          ↶
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M3 7v6h6" />
+            <path d="M21 17a9 9 0 0 0-9-9 9 9 0 0 0-6 2.3L3 13" />
+          </svg>
         </button>
         <button
           className="toolbar-btn"
           onClick={onRedo}
           disabled={!canRedo}
           title="Redo (Ctrl+Y)"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          ↷
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M21 7v6h-6" />
+            <path d="M3 17a9 9 0 0 1 9-9 9 9 0 0 1 6 2.3l3 2.7" />
+          </svg>
         </button>
 
         <div className="toolbar-divider" />
@@ -1482,16 +1504,34 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             setShowSearch(false)
           }}
           title="Basemaps"
+          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
         >
-          🗺
+          <svg width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <polygon points="3 6 9 3 15 6 21 3 21 18 15 21 9 18 3 21" />
+            <line x1="9" y1="3" x2="9" y2="18" />
+            <line x1="15" y1="6" x2="15" y2="21" />
+          </svg>
         </button>
       </div>
 
       {/* ── Draw helper bar ── */}
       {drawMode && (
         <div className="draw-bar">
-          <span className="draw-icon" style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
-            {drawMode === 'point' ? '📍' : drawMode === 'line' ? '╱' : '⬠'}
+          <span className="draw-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
+            {drawMode === 'point' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M21 10c0 7-9 13-9 13s-9-6-9-13a9 9 0 0 1 18 0z" />
+                <circle cx="12" cy="10" r="3" />
+              </svg>
+            ) : drawMode === 'line' ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="4" y1="20" x2="20" y2="4" />
+              </svg>
+            ) : (
+              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <polygon points="12 2 22 8.5 18 19.5 6 19.5 2 8.5" />
+              </svg>
+            )}
           </span>
           <span className="draw-hint">
             {drawMode === 'point'
@@ -1627,11 +1667,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {/* ── Right-click context menu ── */}
       {ctxMenu && (
-        <div
-          className="map-context-menu"
-          style={{ left: ctxMenu.x, top: ctxMenu.y }}
-          onClick={(e) => e.stopPropagation()}
-        >
+        <>
+          <div
+            className="map-context-dot"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+          />
+          <div
+            className="map-context-menu"
+            style={{ left: ctxMenu.x, top: ctxMenu.y }}
+            onClick={(e) => e.stopPropagation()}
+          >
           <button
             className="ctx-item"
             onClick={() => { onAddMarkerRef.current?.(ctxMenu.lng, ctxMenu.lat); setCtxMenu(null) }}
@@ -1661,6 +1706,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             💬 Ask chat about this place
           </button>
         </div>
+        </>
       )}
 
       {/* ── Street View Legend Card ── */}
