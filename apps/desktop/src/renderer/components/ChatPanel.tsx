@@ -11,7 +11,6 @@ import {
   ChatErrorMessage,
 } from '../types'
 import type { DocumentImage } from './DocumentView'
-import appIcon from '../assets/icon.png'
 import './ChatPanel.css'
 
 const SUGGESTION_POOL: string[] = [
@@ -1364,7 +1363,17 @@ export default function ChatPanel({
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
-            <img src={appIcon} className="chat-empty-logo" alt="App Logo" />
+            <div className="chat-empty-logo">
+              <svg width="24" height="24" viewBox="0 0 24 24" fill="none">
+                <path
+                  d="M5 3L19 12L12.5 13.5L9 20L5 3Z"
+                  fill="#4ecca3"
+                  stroke="#1a9e7e"
+                  strokeWidth="1.5"
+                  strokeLinejoin="round"
+                />
+              </svg>
+            </div>
             <p className="chat-empty-title">Urban Planning Assistant</p>
             <p className="chat-empty-hint">
               Ask about zoning, land use, transportation, or spatial analysis. I can see your map
