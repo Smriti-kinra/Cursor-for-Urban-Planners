@@ -370,7 +370,7 @@ class UtilityServer:
         if tool_name == "geocode":
             return await self._geocode(args.get("query", ""))
         if tool_name == "measure_distance":
-            return self._measure_distance(args.get("points", []))
+            return await self._measure_distance(args.get("points", []))
         if tool_name == "measure_area":
             return self._measure_area(args)
         if tool_name == "create_artifact":
@@ -463,18 +463,62 @@ class UtilityServer:
             return {"error": str(e)}
         return {"results": results}
 
-    def _measure_distance(self, points: list) -> dict:
+    async def _measure_distance(self, points: list) -> dict:
+        """Compute straight-line + OSRM driving distance for a sequence of points.
+
+        For multi-point sequences OSRM uses all waypoints in order.
+        Falls back gracefully if OSRM is offline or no road found.
+        """
         if len(points) < 2:
             return {"error": "Need at least 2 points"}
-        total_km = sum(
+
+        # ── Straight-line (Haversine) ──────────────────────────────────
+        direct_km = sum(
             _haversine_km(points[i][0], points[i][1], points[i + 1][0], points[i + 1][1])
             for i in range(len(points) - 1)
         )
-        return {
-            "distance_km": round(total_km, 4),
-            "distance_miles": round(total_km * 0.621371, 4),
-            "distance_meters": round(total_km * 1000, 1),
+
+        result: dict = {
+            "direct": {
+                "distance_km": round(direct_km, 4),
+                "distance_miles": round(direct_km * 0.621371, 4),
+                "distance_meters": round(direct_km * 1000, 1),
+            },
+            # Legacy keys for any code that still reads flat structure
+            "distance_km": round(direct_km, 4),
+            "distance_miles": round(direct_km * 0.621371, 4),
+            "distance_meters": round(direct_km * 1000, 1),
+            "points": points,
         }
+
+        # ── OSRM driving route ────────────────────────────────────────
+        # Build coordinate string: lon,lat;lon,lat;...
+        coord_str = ";".join(f"{pt[0]},{pt[1]}" for pt in points)
+        osrm_url = (
+            f"https://router.project-osrm.org/route/v1/car/{coord_str}"
+            "?overview=full&geometries=geojson&steps=false"
+        )
+        try:
+            data = await http_client.fetch_json(osrm_url, namespace="osrm", retries=1)
+            route = (data.get("routes") or [None])[0]
+            if data.get("code") == "Ok" and route:
+                route_coords = route.get("geometry", {}).get("coordinates", [])
+                route_km = round(float(route.get("distance", 0)) / 1000, 4)
+                duration_min = round(float(route.get("duration", 0)) / 60, 1)
+                if len(route_coords) >= 2:
+                    result["route"] = {
+                        "distance_km": route_km,
+                        "distance_miles": round(route_km * 0.621371, 4),
+                        "distance_meters": round(route_km * 1000, 1),
+                        "duration_minutes": duration_min,
+                        "coordinates": route_coords,
+                    }
+            else:
+                result["route_error"] = data.get("message", "No route found")
+        except Exception as exc:
+            result["route_error"] = f"OSRM unavailable: {exc}"
+
+        return result
 
     def _measure_area(self, args: dict) -> dict:
         polygon = args.get("polygon")

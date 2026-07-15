@@ -1600,6 +1600,84 @@ function App() {
       )
       return
     }
+    if (action.type === 'draw_distance_measurement') {
+      const { points, direct_km, route_coordinates, route_km, duration_minutes } = action.payload
+      if (!Array.isArray(points) || points.length < 2) return
+
+      const labelStyle: LayerStyleSpec = {
+        mode: 'simple',
+        label: { enabled: true, property: 'label', size: 13, color: '#111827', haloColor: '#ffffff', minZoom: 0 },
+      }
+
+      userShapeCounterRef.current += 1
+      const measureNo = userShapeCounterRef.current
+      const directLabel = `Direct: ${formatDistance(direct_km)}`
+      const directName = `Direct Distance ${measureNo}`
+
+      const directFeatures: Feature[] = [
+        {
+          type: 'Feature',
+          geometry: { type: 'LineString', coordinates: points },
+          properties: {
+            name: directName, source: 'user_measure', kind: 'direct_distance',
+            distance_km: Number(direct_km.toFixed(4)), distance: directLabel,
+          },
+        },
+        // Endpoint markers
+        ...points.map((pt, i) => ({
+          type: 'Feature' as const,
+          geometry: { type: 'Point' as const, coordinates: pt },
+          properties: { name: i === 0 ? 'Start' : i === points.length - 1 ? 'End' : `WP ${i}`, source: 'user_measure', role: 'endpoint' },
+        })),
+        {
+          type: 'Feature',
+          geometry: { type: 'Point', coordinates: routeLabelCoordinate(points, direct_km) },
+          properties: { label: directLabel, source: 'user_measure', role: 'label' },
+        },
+      ]
+
+      const directLayer: GeoJSONLayer = {
+        id: `layer-${genId()}`, name: directName, filePath: '', visible: true,
+        color: '#2563eb', lineColor: '#2563eb', lineWidth: 2.5, lineDasharray: [2, 2],
+        data: { type: 'FeatureCollection', features: directFeatures }, styleSpec: labelStyle,
+      }
+
+      setLayers((prev) => [...prev, directLayer])
+      setActiveLeftTab('layers')
+
+      // Add route layer if OSRM data was returned
+      if (Array.isArray(route_coordinates) && route_coordinates.length >= 2 && route_km != null) {
+        const routeLabel = `Route: ${formatDistance(route_km)}${duration_minutes != null ? ` (~${duration_minutes.toFixed(0)} min)` : ''}`
+        const routeName = `Route Distance ${measureNo}`
+        const routeLayer: GeoJSONLayer = {
+          id: `layer-${genId()}`, name: routeName, filePath: '', visible: true,
+          color: '#dc2626', lineColor: '#dc2626', lineWidth: 4,
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates: route_coordinates },
+                properties: {
+                  name: routeName, source: 'user_measure', kind: 'route_distance',
+                  distance_km: Number(route_km.toFixed(4)),
+                  duration_minutes: duration_minutes != null ? Number(duration_minutes.toFixed(1)) : null,
+                  distance: routeLabel,
+                },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: routeLabelCoordinate(route_coordinates, route_km) },
+                properties: { label: routeLabel, source: 'user_measure', role: 'label' },
+              },
+            ],
+          },
+          styleSpec: labelStyle,
+        }
+        setLayers((prev) => [...prev, routeLayer])
+      }
+      return
+    }
     // Promote AI-drawn shapes to real layers so they appear in mapContext on
     // the next turn. Without this they live only in the MapView ref and the
     // assistant can't see them again.

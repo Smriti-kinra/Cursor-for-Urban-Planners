@@ -247,7 +247,11 @@ SYSTEM_PROMPT = (
     "15. LAYER EXISTENCE: Always check the 'Current map state' layers list to verify if a layer is actually loaded on the map. "
     "Do not assume a layer exists just because it was mentioned or loaded in a previous turn in the chat history. "
     "If a layer is missing from the 'Current map state' layers list, it has been deleted by the user, and you must call the "
-    "appropriate tool to fetch/create it again if the user asks for it."
+    "appropriate tool to fetch/create it again if the user asks for it.\n"
+    "16. MEASURE_DISTANCE AUTO-DRAW: when you call measure_distance, the backend automatically draws both a "
+    "'Direct Distance N' layer (dashed blue straight line) and, if OSRM resolves, a 'Route Distance N' "
+    "layer (solid red driving route with duration) on the map. Do NOT separately call draw_line or add_geojson "
+    "to visualize the measurement — the layers appear automatically. Just narrate the result numbers to the user."
 )
 
 
@@ -1022,6 +1026,34 @@ async def _execute_tool(
             if name == "generate_planning_scenarios" and result.get("status") == "success":
                 await _send_action(ws, "add_scenarios", {"scenarios": result.get("scenarios_data", [])})
                 return json.dumps(result)
+
+            # Auto-display measure_distance result as Direct + Route layers on map
+            if name == "measure_distance" and "direct" in result and "points" in result:
+                route = result.get("route", {})
+                payload: dict = {
+                    "points": result["points"],
+                    "direct_km": result["direct"]["distance_km"],
+                }
+                if route:
+                    payload["route_coordinates"] = route.get("coordinates", [])
+                    payload["route_km"] = route.get("distance_km")
+                    payload["duration_minutes"] = route.get("duration_minutes")
+                if result.get("route_error"):
+                    payload["route_error"] = result["route_error"]
+                await _send_action_if_allowed(ws, "draw_distance_measurement", payload)
+                # Return a clean textual summary (not the raw coordinates blob)
+                summary: dict = {
+                    "direct_distance_km": result["direct"]["distance_km"],
+                    "direct_distance_m": result["direct"]["distance_meters"],
+                }
+                if route:
+                    summary["route_distance_km"] = route.get("distance_km")
+                    summary["route_distance_m"] = route.get("distance_meters")
+                    summary["route_duration_minutes"] = route.get("duration_minutes")
+                if result.get("route_error"):
+                    summary["route_error"] = result["route_error"]
+                summary["map_layers_drawn"] = True
+                return json.dumps(summary)
 
             # Auto-display osm_search result on map
             if name == "osm_search" and "geojson" in result and result.get("count", 0) > 0:

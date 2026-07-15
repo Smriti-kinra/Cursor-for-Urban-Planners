@@ -251,7 +251,18 @@ export type MapAction =
         corners: [number, number][]
       }
     }
-
+  | {
+      type: 'draw_distance_measurement'
+      payload: {
+        /** Ordered waypoints as [lon, lat] pairs */
+        points: number[][]
+        direct_km: number
+        route_coordinates?: number[][]
+        route_km?: number
+        duration_minutes?: number
+        route_error?: string
+      }
+    }
 export interface ChatErrorMessage {
   code: string
   message: string
