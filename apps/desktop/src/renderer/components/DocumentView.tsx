@@ -234,11 +234,14 @@ export default function DocumentView({
           <div className="doc-sidebar-list">
             {openDocs.length === 0 ? (
               <div className="doc-sidebar-empty">
-                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.3 }}>
-                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
-                  <polyline points="14 2 14 8 20 8"></polyline>
-                </svg>
-                <p>No documents open</p>
+                <div className="empty-icon-container-sm">
+                  <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                  </svg>
+                </div>
+                <p className="title">No documents open</p>
+                <p className="hint">Open a map image or PDF to analyze.</p>
               </div>
             ) : (
               openDocs.map((doc) => (
@@ -300,7 +303,7 @@ export default function DocumentView({
         {activeDoc === null ? (
           <div className="doc-empty-detail">
             <div className="doc-empty-detail-icon">
-              <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" style={{ opacity: 0.35 }}>
+              <svg width="48" height="48" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2">
                 <path d="M9 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8l4 4v4" />
                 <path d="M9 20h9a2 2 0 0 0 2-2v-7" />
                 <rect x="9" y="14" width="8" height="6" rx="1" />
@@ -310,6 +313,9 @@ export default function DocumentView({
             <p className="doc-empty-detail-hint">
               Open a map image or PDF to analyse it with the AI assistant.
             </p>
+            <button className="doc-empty-open-btn" onClick={openFile}>
+              Open File
+            </button>
           </div>
         ) : (
           <>
