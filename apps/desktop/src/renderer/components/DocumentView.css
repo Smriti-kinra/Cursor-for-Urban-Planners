@@ -1,66 +1,220 @@
-.doc-empty {
+/* ── Two-pane shell ── */
+.doc-view {
+  flex: 1;
+  display: flex;
+  flex-direction: row;
+  overflow: hidden;
+  background: var(--bg-surface);
+}
+
+/* ── Left Sidebar (always visible) ── */
+.doc-sidebar {
+  flex: 0 0 auto;
+  min-width: 180px;
+  max-width: 500px;
+  display: flex;
+  flex-direction: column;
+  border-right: 1px solid var(--border);
+  background: var(--bg-secondary);
+  height: 100%;
+  overflow: hidden;
+}
+
+.doc-sidebar-toolbar {
+  padding: 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  gap: 8px;
+  background: rgba(0, 0, 0, 0.1);
+  flex-shrink: 0;
+}
+
+.doc-sidebar-add-btn {
+  flex: 1;
+  background: var(--accent);
+  border: none;
+  color: var(--bg-surface);
+  padding: 6px 12px;
+  border-radius: 6px;
+  cursor: pointer;
+  font-size: 12px;
+  font-weight: 600;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: opacity 0.15s;
+  height: 28px;
+  box-sizing: border-box;
+}
+
+.doc-sidebar-add-btn:hover {
+  opacity: 0.88;
+}
+
+.doc-sidebar-list {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+/* Empty sidebar state */
+.doc-sidebar-empty {
   flex: 1;
   display: flex;
   flex-direction: column;
   align-items: center;
   justify-content: center;
-  gap: 12px;
+  gap: 10px;
+  padding: 24px 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.doc-sidebar-empty p {
+  font-size: 12px;
+  margin: 0;
+  opacity: 0.7;
+}
+
+/* ── Sidebar item ── */
+.doc-sidebar-item {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 7px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  background: transparent;
+  border: 1px solid transparent;
+  transition: all 0.15s ease;
+  user-select: none;
+}
+
+.doc-sidebar-item:hover {
+  background: var(--bg-hover);
+}
+
+.doc-sidebar-item.active {
+  background: rgba(137, 180, 250, 0.13);
+  border-color: rgba(137, 180, 250, 0.28);
+}
+
+.doc-sidebar-item-icon {
+  flex-shrink: 0;
+  color: var(--text-muted);
+}
+
+.doc-sidebar-item.active .doc-sidebar-item-icon {
+  color: var(--accent);
+}
+
+.doc-sidebar-item-name {
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  flex: 1;
+}
+
+.doc-sidebar-item.active .doc-sidebar-item-name {
+  color: var(--accent);
+  font-weight: 600;
+}
+
+.doc-sidebar-item-close {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 4px;
+  border-radius: 4px;
+  flex-shrink: 0;
+  opacity: 0;
+  transition: all 0.15s;
+}
+
+.doc-sidebar-item:hover .doc-sidebar-item-close {
+  opacity: 1;
+}
+
+.doc-sidebar-item-close:hover {
+  color: var(--danger);
+  background: rgba(243, 139, 168, 0.15);
+}
+
+/* ── Detail Pane ── */
+.doc-detail-pane {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  overflow: hidden;
+  height: 100%;
+}
+
+/* Empty detail state (mirrors artifacts-empty-detail) */
+.doc-empty-detail {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 14px;
   padding: 40px 24px;
   text-align: center;
 }
 
-.doc-empty-icon {
-  font-size: 48px;
-  opacity: 0.4;
+.doc-empty-detail-icon {
+  display: flex;
+  align-items: center;
+  justify-content: center;
 }
 
-.doc-empty-title {
+.doc-empty-detail-title {
   font-size: 15px;
   font-weight: 600;
   color: var(--text-primary);
   margin: 0;
 }
 
-.doc-empty-hint {
+.doc-empty-detail-hint {
   font-size: 12px;
   color: var(--text-muted);
-  max-width: 320px;
-  line-height: 1.5;
+  max-width: 300px;
+  line-height: 1.6;
   margin: 0;
 }
 
-.doc-open-btn {
-  margin-top: 8px;
-  padding: 8px 20px;
+.doc-empty-open-btn {
+  margin-top: 4px;
+  padding: 8px 22px;
   background: var(--accent);
-  color: #fff;
+  color: var(--bg-surface);
   border: none;
   border-radius: 6px;
   font-size: 13px;
+  font-weight: 600;
   cursor: pointer;
   transition: opacity 0.15s;
 }
 
-.doc-open-btn:hover {
+.doc-empty-open-btn:hover {
   opacity: 0.85;
 }
 
-.doc-view {
-  flex: 1;
-  display: flex;
-  flex-direction: column;
-  overflow: hidden;
-  background: #0f0f14;
-}
-
+/* ── Document toolbar (when file is open) ── */
 .doc-toolbar {
   display: flex;
   align-items: center;
-  gap: 10px;
+  gap: 8px;
   padding: 6px 12px;
   border-bottom: 1px solid var(--border);
   flex-shrink: 0;
-  background: var(--bg-panel);
+  background: var(--bg-secondary);
 }
 
 .doc-filename {
@@ -76,27 +230,7 @@
   font-size: 11px;
   color: var(--text-muted);
   font-style: italic;
-}
-
-.doc-change-btn {
-  background: none;
-  border: 1px solid var(--border);
-  color: var(--text-muted);
-  border-radius: 4px;
-  font-size: 11px;
-  padding: 3px 8px;
-  cursor: pointer;
   flex-shrink: 0;
-  transition: color 0.15s, border-color 0.15s;
-}
-
-.doc-change-btn:hover {
-  color: var(--text-primary);
-  border-color: var(--text-muted);
-}
-
-.doc-toolbar {
-  gap: 8px;
 }
 
 .doc-loading-inline {
@@ -106,13 +240,14 @@
 }
 
 .doc-error {
-  color: #fca5a5;
+  color: var(--danger);
 }
 
 .doc-pdf-pager {
   display: inline-flex;
   align-items: center;
   gap: 4px;
+  flex-shrink: 0;
 }
 
 .doc-pdf-pager-btn {
@@ -125,6 +260,9 @@
   height: 22px;
   cursor: pointer;
   line-height: 1;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
 }
 
 .doc-pdf-pager-btn:hover:not(:disabled) {
@@ -144,6 +282,7 @@
   text-align: center;
 }
 
+/* ── Document content area ── */
 .doc-content {
   flex: 1;
   overflow: auto;
@@ -178,90 +317,28 @@
   border-radius: 4px;
 }
 
-/* ── Document Tabs Bar ── */
-.doc-tabs-bar {
-  display: flex;
-  align-items: center;
-  gap: 6px;
-  background: var(--bg-surface, #1e1e2e);
-  padding: 6px 12px 0;
-  border-bottom: 1px solid var(--border, #313244);
+/* Legacy rules kept for any residual references */
+.doc-change-btn {
+  background: none;
+  border: 1px solid var(--border);
+  color: var(--text-muted);
+  border-radius: 4px;
+  font-size: 11px;
+  padding: 3px 8px;
+  cursor: pointer;
   flex-shrink: 0;
+  transition: color 0.15s, border-color 0.15s;
 }
 
-.doc-tab {
-  display: flex;
-  align-items: center;
-  gap: 8px;
-  padding: 6px 12px;
-  background: var(--bg-panel, #181825);
-  border: 1px solid var(--border, #313244);
-  border-bottom: none;
-  border-top-left-radius: 6px;
-  border-top-right-radius: 6px;
-  cursor: pointer;
-  max-width: 160px;
-  transition: all 0.15s ease;
-  user-select: none;
-}
-
-.doc-tab:hover {
-  background: var(--bg-hover, #252735);
-  color: var(--text-primary);
-}
-
-.doc-tab.active {
-  background: #0f0f14;
-  color: var(--accent, #89b4fa);
-  border-bottom: 1px solid #0f0f14;
-  margin-bottom: -1px;
-}
-
-.doc-tab-name {
-  font-size: 11px;
-  font-weight: 500;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
-  flex: 1;
-}
-
-.doc-tab-close {
-  background: none;
-  border: none;
-  color: var(--text-muted, #7f849c);
-  font-size: 14px;
-  cursor: pointer;
-  line-height: 1;
-  padding: 2px;
-  border-radius: 4px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
-  transition: all 0.15s;
-}
-
-.doc-tab-close:hover {
-  color: var(--danger, #f38ba8);
-  background: rgba(243, 139, 168, 0.12);
-}
-
-.doc-tab-add {
-  background: none;
-  border: 1px dashed var(--border, #313244);
-  border-radius: 4px;
-  color: var(--text-muted, #7f849c);
-  font-size: 11px;
-  padding: 4px 8px;
-  cursor: pointer;
-  margin-bottom: 6px;
-  margin-left: 6px;
-  transition: all 0.15s;
-}
-
-.doc-tab-add:hover {
+.doc-change-btn:hover {
   color: var(--text-primary);
   border-color: var(--text-muted);
-  background: var(--bg-hover);
 }
 
+.doc-sidebar-item.drag-over-before {
+  border-top: 2px solid var(--accent) !important;
+}
+
+.doc-sidebar-item.drag-over-after {
+  border-bottom: 2px solid var(--accent) !important;
+}

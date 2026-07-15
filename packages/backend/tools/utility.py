@@ -21,6 +21,15 @@ from llm.base import ToolDeclaration
 from tools import cache, http as http_client
 from tools.geo import area_breakdown
 from tools.google import GoogleUnavailable, geocode_query as google_geocode_query, has_key as has_google_key
+import asyncio
+
+_active_questions: dict[int, asyncio.Future] = {}
+
+def register_question_response(ws, response) -> None:
+    ws_id = id(ws)
+    future = _active_questions.get(ws_id)
+    if future and not future.done():
+        future.set_result(response)
 
 
 def _haversine_km(lon1: float, lat1: float, lon2: float, lat2: float) -> float:
@@ -92,7 +101,7 @@ class UtilityServer:
         "web_search", "geocode", "measure_distance", "measure_area",
         "create_artifact", "list_artifacts", "get_artifact",
         "extract_attribute_table", "georeference_active_document",
-        "digitize_image_features",
+        "digitize_image_features", "ask_clarifying_question",
     }
 
     def __init__(self, db_path: Path):
@@ -245,6 +254,33 @@ class UtilityServer:
                 },
             ),
             ToolDeclaration(
+                name="ask_clarifying_question",
+                description=(
+                    "Ask the user a clarifying multiple-choice question when there is ambiguity, "
+                    "low-resolution/blurry inputs, missing coordinate references, or key decisions to align on. "
+                    "Blocks execution until the user selects an option or submits a response."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "question": {
+                            "type": "string",
+                            "description": "The question text to display to the user."
+                        },
+                        "options": {
+                            "type": "array",
+                            "description": "List of options for the user to choose from. Must provide at least 2 options.",
+                            "items": {"type": "string"}
+                        },
+                        "is_multi_select": {
+                            "type": "boolean",
+                            "description": "Whether the user can select multiple options using checkboxes."
+                        }
+                    },
+                    "required": ["question", "options"]
+                }
+            ),
+            ToolDeclaration(
                 name="georeference_active_document",
                 description=(
                     "Calculate the georeferencing coordinates for the dropped/active map document image. "
@@ -345,6 +381,8 @@ class UtilityServer:
             return self._get_artifact(args)
         if tool_name == "extract_attribute_table":
             return await self._extract_attribute_table(args)
+        if tool_name == "ask_clarifying_question":
+            return await self._ask_clarifying_question(args)
         if tool_name == "georeference_active_document":
             return await self._georeference_active_document(args)
         if tool_name == "digitize_image_features":
@@ -765,14 +803,24 @@ class UtilityServer:
         overlay_name = f"Aligned Map: {file_name}"
         abs_saved_path = str(target_path)
         
-        # Fire WS action
+        # Fire WS actions: send success notification and add markers to pin landmarks
         if ws:
-            await _send_action(ws, "add_raster_overlay", {
+            await _send_action(ws, "georeference_success", {
                 "id": layer_id,
                 "name": overlay_name,
-                "filePath": abs_saved_path,
                 "corners": corners
             })
+            if control_points:
+                markers = []
+                for cp in control_points:
+                    markers.append({
+                        "lat": cp["lat"],
+                        "lng": cp["lng"],
+                        "label": cp.get("name") or "Landmark",
+                        "color": "#e6194b",
+                        "description": f"Ground Control Point at image pixel ({cp['x']:.2f}, {cp['y']:.2f})"
+                    })
+                await _send_action(ws, "add_markers", {"markers": markers})
 
         return {
             "status": "success",
@@ -781,6 +829,38 @@ class UtilityServer:
             "file_path": abs_saved_path,
             "corners": corners
         }
+
+    async def _ask_clarifying_question(self, args: dict) -> dict:
+        import json
+        ws = args.get("_ws")
+        if not ws:
+            return {"error": "No active WebSocket connection to ask the question."}
+
+        question = args.get("question")
+        options = args.get("options", [])
+        is_multi_select = args.get("is_multi_select", False)
+
+        if not question or not options:
+            return {"error": "Question and options are required parameters."}
+
+        future = asyncio.Future()
+        ws_id = id(ws)
+        _active_questions[ws_id] = future
+
+        try:
+            # Send question frame to client
+            await ws.send_text(json.dumps({
+                "type": "ask_question",
+                "question": question,
+                "options": options,
+                "is_multi_select": is_multi_select
+            }))
+            
+            # Wait for user's response
+            response = await future
+            return {"status": "success", "response": response}
+        finally:
+            _active_questions.pop(ws_id, None)
 
     async def _digitize_image_features(self, args: dict) -> dict:
         import json

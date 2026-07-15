@@ -11,6 +11,7 @@ import {
   ChatErrorMessage,
 } from '../types'
 import type { DocumentImage } from './DocumentView'
+import appIcon from '../assets/icon.png'
 import './ChatPanel.css'
 
 const SUGGESTION_POOL: string[] = [
@@ -312,6 +313,7 @@ export default function ChatPanel({
   const [researchExpanded, setResearchExpanded] = useState(false)
   const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
+  const headerContainerRef = useRef<HTMLDivElement>(null)
 
 
   const wsRef = useRef<WebSocket | null>(null)
@@ -379,6 +381,19 @@ export default function ChatPanel({
       }, 0)
     }
   }, [activeConversation?.id]) // eslint-disable-line react-hooks/exhaustive-deps
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (headerContainerRef.current && !headerContainerRef.current.contains(e.target as Node)) {
+        setShowHistory(false)
+        setShowApiKeyInput(false)
+      }
+    }
+    window.addEventListener('click', handleOutsideClick, true)
+    return () => {
+      window.removeEventListener('click', handleOutsideClick, true)
+    }
+  }, [])
 
   const lastInjectedNonceRef = useRef<number>(0)
 
@@ -1008,45 +1023,42 @@ export default function ChatPanel({
   }
 
   return (
-    <div className="chat-panel">
+    <div ref={headerContainerRef} className="chat-panel">
       {/* ── Chat header ── */}
       <div className="chat-header">
-        <button
-          className="chat-history-toggle"
-          onClick={() => setShowHistory(!showHistory)}
-          title="View chat history"
-        >
-          <svg width="16" height="16" viewBox="0 0 16 16" fill="none">
-            <path
-              d="M8 3.5V8L11 10M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z"
-              stroke="currentColor"
-              strokeWidth="1.5"
-              strokeLinecap="round"
-              strokeLinejoin="round"
-            />
-          </svg>
-          <div className="chat-history-labels">
-            <span className="chat-history-label">View history</span>
-            <span className="chat-header-title">
-              {activeConversation?.title || 'New chat'}
-            </span>
-          </div>
-          <svg
-            className={`chat-chevron ${showHistory ? 'open' : ''}`}
-            width="10"
-            height="10"
-            viewBox="0 0 10 10"
-            fill="none"
+        <span className="chat-header-title">
+          {activeConversation?.title || 'Urban Planning Assistant'}
+        </span>
+        <div className="chat-header-actions">
+          <button
+            className={`chat-header-action-btn ${showHistory ? 'active' : ''}`}
+            onClick={() => {
+              setShowHistory(!showHistory);
+              setShowApiKeyInput(false);
+            }}
+            title="View chat history"
           >
-            <path d="M2.5 4L5 6.5L7.5 4" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-        </button>
-        <button className="chat-new-btn-header" onClick={handleNewChat} title="Start a new chat">
-          <svg width="14" height="14" viewBox="0 0 16 16" fill="none">
-            <path d="M8 3V13M3 8H13" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
-          </svg>
-          <span>New chat</span>
-        </button>
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path
+                d="M8 3.5V8L11 10M14 8A6 6 0 1 1 2 8a6 6 0 0 1 12 0Z"
+                stroke="currentColor"
+                strokeWidth="1.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+              />
+            </svg>
+          </button>
+          
+          <button
+            className="chat-header-action-btn"
+            onClick={handleNewChat}
+            title="Start a new chat"
+          >
+            <svg width="15" height="15" viewBox="0 0 16 16" fill="none">
+              <path d="M8 3V13M3 8H13" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" />
+            </svg>
+          </button>
+        </div>
       </div>
 
       {/* ── API Key Configuration Bar ── */}
@@ -1080,12 +1092,25 @@ export default function ChatPanel({
                 )}
               </div>
 
+              {/* API Settings toggle — cursor arrow icon */}
               <button
-                className={`api-key-toggle-btn ${showApiKeyInput ? 'active' : ''}`}
-                onClick={() => setShowApiKeyInput(!showApiKeyInput)}
-                title={showApiKeyInput ? 'Hide settings' : 'Show settings'}
+                className={`api-settings-btn ${showApiKeyInput ? 'active' : ''}`}
+                onClick={() => {
+                  setShowApiKeyInput(!showApiKeyInput);
+                  setShowHistory(false);
+                }}
+                title="API Key Settings"
               >
-                ⚙
+                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
+                  {/* Cursor arrow — matches app icon style */}
+                  <path
+                    d="M5 3L19 12L12.5 13.5L9 20L5 3Z"
+                    fill={showApiKeyInput ? '#2dd4bf' : '#4ecca3'}
+                    stroke={showApiKeyInput ? '#0f766e' : '#1a9e7e'}
+                    strokeWidth="1.2"
+                    strokeLinejoin="round"
+                  />
+                </svg>
               </button>
             </div>
           </div>
@@ -1313,7 +1338,7 @@ export default function ChatPanel({
       <div className="chat-messages">
         {messages.length === 0 && (
           <div className="chat-empty">
-            <div className="chat-empty-icon">&#10022;</div>
+            <img src={appIcon} className="chat-empty-logo" alt="App Logo" />
             <p className="chat-empty-title">Urban Planning Assistant</p>
             <p className="chat-empty-hint">
               Ask about zoning, land use, transportation, or spatial analysis. I can see your map

@@ -4,10 +4,11 @@
   flex: 1;
   min-height: 0;
   font-size: 12px;
+  color: var(--text-secondary);
 }
 
 .export-hint {
-  opacity: 0.85;
+  color: var(--text-muted);
   line-height: 1.4;
   margin: 0 0 12px 0;
 }
@@ -22,21 +23,34 @@
 .export-btn {
   padding: 8px 12px;
   border-radius: 6px;
-  border: 1px solid #444;
-  background: #2a2a30;
-  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   cursor: pointer;
   font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.export-btn:hover:not(:disabled) {
+  background: var(--bg-hover);
+  border-color: var(--text-muted);
 }
 
 .export-btn.primary {
-  background: #2563eb;
-  border-color: #1d4ed8;
-  color: white;
+  background: var(--accent);
+  border-color: var(--accent);
+  color: var(--bg-surface);
+  font-weight: 600;
+}
+
+.export-btn.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+  border-color: var(--accent-hover);
+  color: var(--bg-surface);
 }
 
 .export-btn.small {
-  padding: 4px 8px;
+  padding: 6px 10px;
   font-size: 11px;
 }
 
@@ -49,16 +63,17 @@
   margin: 12px 0 8px 0;
   font-size: 12px;
   font-weight: 600;
+  color: var(--text-primary);
 }
 
 .export-empty,
 .export-warn {
-  opacity: 0.7;
+  color: var(--text-muted);
   font-size: 11px;
 }
 
 .export-warn {
-  color: #fbbf24;
+  color: var(--warning, #fbbf24);
 }
 
 .export-layer-list {
@@ -73,7 +88,7 @@
   justify-content: space-between;
   gap: 8px;
   padding: 6px 0;
-  border-bottom: 1px solid #2a2a2a;
+  border-bottom: 1px solid var(--border);
 }
 
 .export-layer-name {
@@ -81,6 +96,7 @@
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;
+  color: var(--text-secondary);
 }
 
 .export-clip-form {
@@ -92,10 +108,15 @@
 .export-input {
   padding: 6px 8px;
   border-radius: 4px;
-  border: 1px solid #444;
-  background: #1a1a1e;
-  color: inherit;
+  border: 1px solid var(--border);
+  background: var(--bg-secondary);
+  color: var(--text-primary);
   font-size: 12px;
+}
+
+.export-input:focus {
+  outline: none;
+  border-color: var(--accent);
 }
 
 .export-region-search {
@@ -122,24 +143,26 @@
 .export-region-result-btn {
   width: 100%;
   text-align: left;
-  background: #1a1a1e;
-  border: 1px solid #444;
+  background: var(--bg-secondary);
+  border: 1px solid var(--border);
   border-radius: 4px;
-  color: inherit;
+  color: var(--text-secondary);
   font-size: 11px;
   padding: 5px 8px;
   cursor: pointer;
   line-height: 1.4;
+  transition: all 0.15s ease;
 }
 
 .export-region-result-btn:hover {
-  background: #252530;
-  border-color: #3b82f6;
+  background: var(--bg-hover);
+  border-color: var(--accent);
+  color: var(--text-primary);
 }
 
 .export-region-selected {
-  background: #1a1a1e;
-  border: 1px solid #3b82f6;
+  background: var(--bg-secondary);
+  border: 1px solid var(--accent);
   border-radius: 6px;
   padding: 10px;
   display: flex;
@@ -149,7 +172,7 @@
 
 .export-region-name {
   font-size: 11px;
-  color: #a6adc8;
+  color: var(--text-muted);
   margin: 0;
   line-height: 1.4;
 }

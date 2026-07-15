@@ -131,8 +131,25 @@ export default function PinsPanel({ layer, onChange, onZoomToPin, onAddPin }: Pi
           className={`pins-add-toggle-btn ${showAddForm ? 'active' : ''}`}
           onClick={() => setShowAddForm(!showAddForm)}
           title="Add Pin Manually"
+          style={{ display: 'inline-flex', alignItems: 'center' }}
         >
-          {showAddForm ? '✕ Close' : '＋ Add Pin'}
+          {showAddForm ? (
+            <>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+              Close
+            </>
+          ) : (
+            <>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Add Pin
+            </>
+          )}
         </button>
       </div>
 
@@ -270,7 +287,14 @@ export default function PinsPanel({ layer, onChange, onZoomToPin, onAddPin }: Pi
                         onClick={() => onZoomToPin(lng, lat)}
                         title="Zoom to pin"
                       >
-                        ⌖
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                          <circle cx="12" cy="12" r="10" />
+                          <circle cx="12" cy="12" r="3" />
+                          <line x1="12" y1="1" x2="12" y2="3" />
+                          <line x1="12" y1="21" x2="12" y2="23" />
+                          <line x1="1" y1="12" x2="3" y2="12" />
+                          <line x1="21" y1="12" x2="23" y2="12" />
+                        </svg>
                       </button>
                       <button
                         type="button"
@@ -278,7 +302,10 @@ export default function PinsPanel({ layer, onChange, onZoomToPin, onAddPin }: Pi
                         onClick={() => deletePin(idx)}
                         title="Delete pin"
                       >
-                        🗑
+                        <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                          <polyline points="3 6 5 6 21 6"></polyline>
+                          <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                        </svg>
                       </button>
                     </div>
                   </div>

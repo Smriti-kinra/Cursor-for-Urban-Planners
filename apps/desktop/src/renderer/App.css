@@ -146,6 +146,42 @@ body.resizing .resize-handle {
 .titlebar-right {
   /* Grid cell 3 – right side mirror, keeps centre truly centred */
   grid-column: 3;
+  display: flex;
+  justify-content: flex-end;
+  align-items: center;
+  gap: 8px;
+}
+
+.sidebar-toggles {
+  display: flex;
+  gap: 6px;
+  -webkit-app-region: no-drag;
+}
+
+.sidebar-toggle-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted, #a0a6b2);
+  padding: 6px;
+  border-radius: 6px;
+  cursor: pointer;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
+}
+
+.sidebar-toggle-btn:hover {
+  background: var(--bg-hover, #2e3047);
+  color: var(--text-primary, #f4f4f7);
+}
+
+.sidebar-toggle-btn.active {
+  color: var(--accent, #3b82f6);
+}
+
+.sidebar-toggle-btn svg {
+  transition: fill-opacity 0.15s;
 }
 
 .mode-switcher {
@@ -154,7 +190,7 @@ body.resizing .resize-handle {
   background: var(--bg-hover);
   border-radius: 6px;
   padding: 2px;
-  max-width: 160px;
+  max-width: 250px;
   -webkit-app-region: no-drag;
 }
 
@@ -400,3 +436,46 @@ body.resizing .resize-handle {
   display: none !important;
 }
 
+@keyframes global-spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.spinning {
+  display: inline-block;
+  animation: global-spin 1.2s linear infinite;
+}
+
+/* ── Global consistent <select> styling (cross-platform) ── */
+/* Overrides the native OS select to look the same on macOS, Windows, Linux */
+select {
+  -webkit-appearance: none;
+  appearance: none;
+  background-color: var(--bg-surface);
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='12' viewBox='0 0 24 24' fill='none' stroke='%236c7086' stroke-width='2.5' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpolyline points='6 9 12 15 18 9'%3E%3C/polyline%3E%3C/svg%3E");
+  background-repeat: no-repeat;
+  background-position: right 8px center;
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  font-family: inherit;
+  font-size: 12px;
+  padding: 6px 28px 6px 10px;
+  border-radius: 6px;
+  cursor: pointer;
+  outline: none;
+  transition: border-color 0.15s;
+}
+
+select:hover {
+  border-color: var(--text-muted);
+}
+
+select:focus {
+  border-color: var(--accent);
+  box-shadow: 0 0 0 2px rgba(137, 180, 250, 0.15);
+}
+
+select option {
+  background: var(--bg-surface);
+  color: var(--text-primary);
+}

@@ -160,6 +160,10 @@ interface MapViewProps {
   streetViewBearing: number
   isMiniMap: boolean
   onStreetViewLayoutChange?: (layout: 'split' | 'full') => void
+  onUndo?: () => void
+  onRedo?: () => void
+  canUndo?: boolean
+  canRedo?: boolean
 }
 
 type DrawMode = 'point' | 'line' | 'polygon' | null
@@ -188,6 +192,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     streetViewBearing,
     isMiniMap,
     onStreetViewLayoutChange,
+    onUndo,
+    onRedo,
+    canUndo = false,
+    canRedo = false,
   },
   ref,
 ) {
@@ -212,6 +220,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   onDrawCompleteRef.current = onDrawComplete
   const drawModeRef = useRef<DrawMode>(null)
   const drawVerticesRef = useRef<number[][]>([])
+  const drawVerticesHistoryRef = useRef<number[][][]>([])
+  const drawRedoHistoryRef = useRef<number[][][]>([])
   const ownLayerIds = useRef(new Set<string>())
   const layersRef = useRef(layers)
   layersRef.current = layers
@@ -230,6 +240,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   // Per-source revision token: setData() is only called when layer.data changes.
   const layerRevisionRef = useRef(new Map<string, FeatureCollection>())
   const initBasemapRef = useRef(basemap)
+  const basemapPanelRef = useRef<HTMLDivElement>(null)
+  const basemapButtonRef = useRef<HTMLButtonElement>(null)
 
   const [mapReady, setMapReady] = useState(false)
   const [searchQuery, setSearchQuery] = useState('')
@@ -599,6 +611,34 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
       }
     }
+
+    // Sync rendering order in MapLibre to match the layers array order
+    const style = map.getStyle()
+    if (style && style.layers) {
+      const ownSubLayerIds = new Set(
+        layers.flatMap((l) => [
+          `${l.id}-raster`,
+          `${l.id}-fill`,
+          `${l.id}-outline`,
+          `${l.id}-line`,
+          `${l.id}-circle`,
+          `${l.id}-label`
+        ])
+      )
+      const boundaryLayer = style.layers.find(
+        (ly) => ly.id !== 'basemap' && !ownSubLayerIds.has(ly.id)
+      )
+      const boundaryId = boundaryLayer ? boundaryLayer.id : undefined
+
+      for (const layer of layers) {
+        for (const suffix of ['-raster', '-fill', '-outline', '-line', '-circle', '-label']) {
+          const subId = `${layer.id}${suffix}`
+          if (map.getLayer(subId)) {
+            map.moveLayer(subId, boundaryId)
+          }
+        }
+      }
+    }
   }, [layers, mapReady])
 
   // ── Basemap switching ──
@@ -682,6 +722,22 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         pegmanMarkerRef.current.remove()
         pegmanMarkerRef.current = null
       }
+    }
+  }, [])
+
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (
+        basemapPanelRef.current &&
+        !basemapPanelRef.current.contains(e.target as Node) &&
+        (!basemapButtonRef.current || !basemapButtonRef.current.contains(e.target as Node))
+      ) {
+        setShowBasemaps(false)
+      }
+    }
+    window.addEventListener('click', handleOutsideClick, true)
+    return () => {
+      window.removeEventListener('click', handleOutsideClick, true)
     }
   }, [])
 
@@ -971,6 +1027,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     }
     drawModeRef.current = null
     drawVerticesRef.current = []
+    drawVerticesHistoryRef.current = []
+    drawRedoHistoryRef.current = []
     setDrawMode(null)
     setDrawCount(0)
     redrawDraft()
@@ -981,6 +1039,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   const cancelDraw = useCallback(() => {
     drawModeRef.current = null
     drawVerticesRef.current = []
+    drawVerticesHistoryRef.current = []
+    drawRedoHistoryRef.current = []
     setDrawMode(null)
     setDrawCount(0)
     redrawDraft()
@@ -993,6 +1053,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     if (drawModeRef.current === mode) { cancelDraw(); return }
     drawModeRef.current = mode
     drawVerticesRef.current = []
+    drawVerticesHistoryRef.current = []
+    drawRedoHistoryRef.current = []
     setDrawMode(mode)
     setDrawCount(0)
     redrawDraft()
@@ -1003,6 +1065,24 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.doubleClickZoom.disable()
     }
   }, [cancelDraw, redrawDraft])
+
+  const handleDrawUndo = useCallback(() => {
+    if (drawVerticesHistoryRef.current.length === 0) return
+    const prev = drawVerticesHistoryRef.current.pop()!
+    drawRedoHistoryRef.current.push([...drawVerticesRef.current])
+    drawVerticesRef.current = prev
+    setDrawCount(prev.length)
+    redrawDraft()
+  }, [redrawDraft])
+
+  const handleDrawRedo = useCallback(() => {
+    if (drawRedoHistoryRef.current.length === 0) return
+    const next = drawRedoHistoryRef.current.pop()!
+    drawVerticesHistoryRef.current.push([...drawVerticesRef.current])
+    drawVerticesRef.current = next
+    setDrawCount(next.length)
+    redrawDraft()
+  }, [redrawDraft])
 
   // Set up the draft source/layers + bind draw event handlers once the map is
   // ready. Handlers read drawMode/vertices from refs, so they never go stale.
@@ -1183,13 +1263,6 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           // Fire WMS GetFeatureInfo first; if it returns data, skip the rest.
           fireWmsGetFeatureInfo(e)
 
-          const ids = renderLayerIds()
-          const feats = ids.length ? map.queryRenderedFeatures(e.point, { layers: ids }) : []
-          const pointCoords = feats.length ? featurePointCoordinates(feats[0]) : null
-          if (pointCoords) {
-            onOpenStreetViewRef.current?.(pointCoords[0], pointCoords[1])
-            return
-          }
           // Clear visual feedback if clicked elsewhere without ctrl/meta key
           const hlId = 'highlight-temp'
           for (const suffix of ['-fill', '-line', '-circle']) {
@@ -1205,6 +1278,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         finishDraw()
         return
       }
+      drawVerticesHistoryRef.current.push([...drawVerticesRef.current])
+      drawRedoHistoryRef.current = []
       drawVerticesRef.current = [...drawVerticesRef.current, pt]
       setDrawCount(drawVerticesRef.current.length)
       redrawDraft()
@@ -1289,14 +1364,12 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       else if (e.key === 'Escape') { e.preventDefault(); cancelDraw() }
       else if (e.key === 'Backspace') {
         e.preventDefault()
-        drawVerticesRef.current = drawVerticesRef.current.slice(0, -1)
-        setDrawCount(drawVerticesRef.current.length)
-        redrawDraft()
+        handleDrawUndo()
       }
     }
     window.addEventListener('keydown', onKey)
     return () => window.removeEventListener('keydown', onKey)
-  }, [drawMode, finishDraw, cancelDraw, redrawDraft])
+  }, [drawMode, finishDraw, cancelDraw, handleDrawUndo])
 
   // ── Geocoding search ──
 
@@ -1383,6 +1456,26 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         <div className="toolbar-spacer" />
 
         <button
+          className="toolbar-btn"
+          onClick={onUndo}
+          disabled={!canUndo}
+          title="Undo (Ctrl+Z)"
+        >
+          ↶
+        </button>
+        <button
+          className="toolbar-btn"
+          onClick={onRedo}
+          disabled={!canRedo}
+          title="Redo (Ctrl+Y)"
+        >
+          ↷
+        </button>
+
+        <div className="toolbar-divider" />
+
+        <button
+          ref={basemapButtonRef}
           className={`toolbar-btn ${showBasemaps ? 'active' : ''}`}
           onClick={() => {
             setShowBasemaps(!showBasemaps)
@@ -1397,6 +1490,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       {/* ── Draw helper bar ── */}
       {drawMode && (
         <div className="draw-bar">
+          <span className="draw-icon" style={{ fontSize: '13px', display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
+            {drawMode === 'point' ? '📍' : drawMode === 'line' ? '╱' : '⬠'}
+          </span>
           <span className="draw-hint">
             {drawMode === 'point'
               ? 'Click the map to place a point.'
@@ -1455,11 +1551,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {/* ── Basemap switcher ── */}
       {showBasemaps && (
-        <div className="basemap-panel-redesigned">
-          <div className="basemap-header">
-            <h3>Map display</h3>
-            <button className="basemap-close" onClick={() => setShowBasemaps(false)}>✕</button>
-          </div>
+        <div ref={basemapPanelRef} className="basemap-panel-redesigned">
+          
           
           <div className="basemap-section">
             <div className="section-title">Map type</div>

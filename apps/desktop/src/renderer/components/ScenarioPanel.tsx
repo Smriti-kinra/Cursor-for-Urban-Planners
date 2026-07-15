@@ -55,8 +55,21 @@ export default function ScenarioPanel({
     <div className="scenario-panel">
       <div className="scenario-toolbar">
         <span className="scenario-title">Planning Scenarios</span>
-        <button className="scenario-new-btn" onClick={() => setShowForm(v => !v)}>
-          {showForm ? '✕' : '＋ New'}
+        <button className="scenario-new-btn" onClick={() => setShowForm(v => !v)} style={{ display: 'inline-flex', alignItems: 'center' }}>
+          {showForm ? (
+            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          ) : (
+            <>
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              New
+            </>
+          )}
         </button>
       </div>
 
@@ -112,8 +125,17 @@ export default function ScenarioPanel({
                   className="scenario-expand-btn"
                   onClick={() => setExpandedId(isExpanded ? null : scenario.id)}
                   title="Expand"
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  {isExpanded ? '▾' : '▸'}
+                  {isExpanded ? (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="6 9 12 15 18 9"></polyline>
+                    </svg>
+                  ) : (
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <polyline points="9 18 15 12 9 6"></polyline>
+                    </svg>
+                  )}
                 </button>
 
                 {editingId === scenario.id ? (
@@ -142,15 +164,34 @@ export default function ScenarioPanel({
                     className={`scenario-activate-btn ${isActive ? 'deactivate' : ''}`}
                     onClick={() => onActivate(isActive ? null : scenario.id)}
                     title={isActive ? 'Deactivate' : 'Activate this scenario'}
+                    style={{ display: 'inline-flex', alignItems: 'center' }}
                   >
-                    {isActive ? '◉ Active' : '○ Activate'}
+                    {isActive ? (
+                      <>
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="currentColor" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                          <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        Active
+                      </>
+                    ) : (
+                      <>
+                        <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                          <circle cx="12" cy="12" r="10"></circle>
+                        </svg>
+                        Activate
+                      </>
+                    )}
                   </button>
                   <button
                     className="scenario-delete-btn"
                     onClick={() => onDelete(scenario.id)}
                     title="Delete scenario"
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                   >
-                    ✕
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
                 </div>
               </div>
@@ -180,8 +221,18 @@ export default function ScenarioPanel({
                               ? onRemoveLayer(scenario.id, layer.id)
                               : onAddLayer(scenario.id, layer.id)
                           }
+                          style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
                         >
-                          {included ? '－' : '＋'}
+                          {included ? (
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                          ) : (
+                            <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                              <line x1="12" y1="5" x2="12" y2="19"></line>
+                              <line x1="5" y1="12" x2="19" y2="12"></line>
+                            </svg>
+                          )}
                         </button>
                       </div>
                     )

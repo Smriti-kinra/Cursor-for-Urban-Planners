@@ -24,17 +24,19 @@
 }
 
 .bookmark-save-btn {
-  padding: 6px 10px;
-  border-radius: 4px;
+  padding: 6px 12px;
+  border-radius: 6px;
   border: none;
-  background: #2563eb;
-  color: white;
+  background: var(--accent);
+  color: var(--bg-surface, #11111b);
+  font-weight: 600;
   cursor: pointer;
   font-size: 12px;
+  transition: background 0.15s;
 }
 
 .bookmark-save-btn:hover {
-  background: #1d4ed8;
+  background: var(--accent-hover);
 }
 
 .bookmark-empty {
@@ -80,13 +82,17 @@
 .bookmark-del {
   background: none;
   border: none;
-  color: #f87171;
+  color: var(--text-muted);
   cursor: pointer;
-  padding: 4px 8px;
-  font-size: 16px;
-  line-height: 1;
+  padding: 6px;
+  border-radius: 4px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: background 0.15s, color 0.15s;
 }
 
 .bookmark-del:hover {
-  color: #ef4444;
+  background: rgba(243, 139, 168, 0.15);
+  color: var(--danger);
 }

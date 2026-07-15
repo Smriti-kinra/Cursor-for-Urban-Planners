@@ -1455,6 +1455,11 @@ async def chat_websocket(websocket: WebSocket):
                 await websocket.send_text(json.dumps({"type": "stopped"}))
                 continue
 
+            if payload.get("type") == "question_response":
+                from tools.utility import register_question_response
+                register_question_response(websocket, payload.get("response"))
+                continue
+
             if active_task is not None and not active_task.done():
                 await websocket.send_text(json.dumps({
                     "type": "error",
@@ -1466,6 +1471,7 @@ async def chat_websocket(websocket: WebSocket):
             user_content = payload.get("content", "")
             map_context = payload.get("map_context")
             image_data = payload.get("image")  # {base64, mime_type} or None
+            chat_attachments = payload.get("chat_attachments", [])
             history_payload = payload.get("history")
             api_key = payload.get("api_key")
             google_maps_api_key = payload.get("google_maps_api_key", "")
@@ -1498,31 +1504,43 @@ async def chat_websocket(websocket: WebSocket):
                         replayed.append({"role": role, "content": content})
                 messages = replayed
 
-            is_document_mode = image_data is not None
+            # Fallback to chat attachments for active_image if none in Document tab
+            georef_target_image = image_data
+            has_attached_image = False
+            for att in chat_attachments:
+                mtype = att.get("mime_type", "")
+                if att.get("base64") and (mtype.startswith("image/") or "pdf" in mtype):
+                    has_attached_image = True
+                    if not georef_target_image:
+                        georef_target_image = att
 
-            if is_document_mode:
-                system = DOCUMENT_SYSTEM_PROMPT
-                # Document mode now bridges to the live map: send map_context too so
-                # the model can fly_to / add markers / run GIS tools while looking at
-                # the document. Backend accepts both fields in either mode.
-                if map_context:
-                    system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
-                tools = _TOOLS
-                # Build vision message
-                user_msg: dict = {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": user_content},
-                        {"type": "image_url", "image_url": {
-                            "url": f"data:{image_data['mime_type']};base64,{image_data['base64']}"
-                        }},
-                    ],
-                }
+            is_document_mode = (image_data is not None) or has_attached_image
+            system = DOCUMENT_SYSTEM_PROMPT if is_document_mode else SYSTEM_PROMPT
+            if map_context:
+                system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
+            tools = _TOOLS
+
+            # Build unified message content parts for vision model
+            content_list: list[dict] = [{"type": "text", "text": user_content}]
+            if image_data and image_data.get("base64"):
+                content_list.append({
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:{image_data['mime_type']};base64,{image_data['base64']}"
+                    }
+                })
+            for att in chat_attachments:
+                if att.get("base64"):
+                    content_list.append({
+                        "type": "image_url",
+                        "image_url": {
+                            "url": f"data:{att['mime_type']};base64,{att['base64']}"
+                        }
+                    })
+
+            if len(content_list) > 1:
+                user_msg = {"role": "user", "content": content_list}
             else:
-                system = SYSTEM_PROMPT
-                if map_context:
-                    system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
-                tools = _TOOLS
                 user_msg = {"role": "user", "content": user_content}
 
             full_messages = [{"role": "system", "content": system}] + messages
@@ -1531,7 +1549,7 @@ async def chat_websocket(websocket: WebSocket):
             stop_event = asyncio.Event()
             _set_stop_event(stop_event)
             current_full_messages = full_messages
-            active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context, active_image=image_data))
+            active_task = asyncio.create_task(_run_agent(full_messages, websocket, client, tools=tools, map_context=map_context, active_image=georef_target_image))
 
     except WebSocketDisconnect:
         if active_task and not active_task.done():

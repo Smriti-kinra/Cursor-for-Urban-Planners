@@ -67,8 +67,15 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
     return (
       <div className="attr-table">
         <div className="attr-header">
-          <span className="attr-title">Attributes — {layer.name}</span>
-          <button className="attr-close" onClick={onClose}>×</button>
+          <div className="attr-title-group">
+            <span className="attr-title">Attributes</span>
+            <button className="attr-close-btn" onClick={onClose} title="Close table">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <line x1="18" y1="6" x2="6" y2="18"></line>
+                <line x1="6" y1="6" x2="18" y2="18"></line>
+              </svg>
+            </button>
+          </div>
         </div>
         <p className="attr-empty">This layer has no features.</p>
       </div>
@@ -78,21 +85,27 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
   return (
     <div className="attr-table">
       <div className="attr-header">
-        <span className="attr-title">Attributes — {layer.name}</span>
-        <button className="attr-close" onClick={onClose} title="Close">×</button>
-      </div>
-
-      <div className="attr-addcol">
-        <input
-          className="attr-input"
-          placeholder="New property (e.g. zone_code)"
-          value={newCol}
-          onChange={(e) => setNewCol(e.target.value)}
-          onKeyDown={(e) => e.key === 'Enter' && addColumn()}
-        />
-        <button className="attr-btn" onClick={addColumn} disabled={!newCol.trim()}>
-          Add
-        </button>
+        <div className="attr-title-group">
+          <span className="attr-title">Attributes</span>
+          <button className="attr-close-btn" onClick={onClose} title="Close table">
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        <div className="attr-header-addcol">
+          <input
+            className="attr-input attr-header-input"
+            placeholder="New property (e.g. zone_code)"
+            value={newCol}
+            onChange={(e) => setNewCol(e.target.value)}
+            onKeyDown={(e) => e.key === 'Enter' && addColumn()}
+          />
+          <button className="attr-btn attr-header-btn" onClick={addColumn} disabled={!newCol.trim()}>
+            Add
+          </button>
+        </div>
       </div>
 
       <div className="attr-scroll">
@@ -108,7 +121,10 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
                     onClick={() => deleteColumn(c)}
                     title={`Delete property "${c}"`}
                   >
-                    ×
+                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
                   </button>
                 </th>
               ))}
@@ -134,7 +150,10 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
                     onClick={() => deleteRow(rowIdx)}
                     title="Delete feature"
                   >
-                    🗑
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                      <polyline points="3 6 5 6 21 6"></polyline>
+                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                    </svg>
                   </button>
                 </td>
               </tr>

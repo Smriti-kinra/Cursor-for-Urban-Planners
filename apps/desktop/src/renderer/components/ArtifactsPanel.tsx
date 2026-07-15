@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from 'react'
+import { useState, useEffect, useCallback, useRef } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -44,13 +44,84 @@ interface ArtifactPreview extends Omit<Artifact, 'content'> {
 interface ArtifactsPanelProps {
   revision?: number
   onAddToMap: (geojson: object, name: string) => void
+  showSidebar?: boolean
+  sidebarWidth?: number
+  onLeftResizeStart?: (e: React.MouseEvent) => void
 }
 
-export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelProps) {
+export default function ArtifactsPanel({
+  revision,
+  onAddToMap,
+  showSidebar = true,
+  sidebarWidth = 260,
+  onLeftResizeStart,
+}: ArtifactsPanelProps) {
   const [artifacts, setArtifacts] = useState<ArtifactPreview[]>([])
   const [selectedId, setSelectedId] = useState<number | null>(null)
   const [fullArtifact, setFullArtifact] = useState<Artifact | null>(null)
   const [loadingFull, setLoadingFull] = useState(false)
+
+  const containerRef = useRef<HTMLDivElement>(null)
+  const [isWide, setIsWide] = useState(false)
+
+  const [draggedArtId, setDraggedArtId] = useState<number | null>(null)
+  const [dragOverArtId, setDragOverArtId] = useState<number | null>(null)
+  const [dropArtPosition, setDropArtPosition] = useState<'before' | 'after' | null>(null)
+
+  const handleArtDragStart = (id: number, e: React.DragEvent) => {
+    setDraggedArtId(id)
+    e.dataTransfer.setData('text/plain', String(id))
+  }
+
+  const handleArtDragOver = (id: number, e: React.DragEvent) => {
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relativeY = e.clientY - rect.top
+    const pos = relativeY < rect.height / 2 ? 'before' : 'after'
+    setDragOverArtId(id)
+    setDropArtPosition(pos)
+  }
+
+  const handleArtDragEnd = () => {
+    setDraggedArtId(null)
+    setDragOverArtId(null)
+    setDropArtPosition(null)
+  }
+
+  const handleArtDrop = (targetId: number, e: React.DragEvent) => {
+    e.preventDefault()
+    if (draggedArtId === null || draggedArtId === targetId) return
+
+    const draggedArt = artifacts.find((a) => a.id === draggedArtId)
+    if (!draggedArt) return
+
+    const remainingArts = artifacts.filter((a) => a.id !== draggedArtId)
+    let insertIndex = remainingArts.findIndex((a) => a.id === targetId)
+    if (insertIndex !== -1) {
+      if (dropArtPosition === 'after') {
+        insertIndex += 1
+      }
+      const newArts = [
+        ...remainingArts.slice(0, insertIndex),
+        draggedArt,
+        ...remainingArts.slice(insertIndex),
+      ]
+      setArtifacts(newArts)
+      localStorage.setItem('artifacts_order', JSON.stringify(newArts.map((a) => a.id)))
+    }
+    handleArtDragEnd()
+  }
+
+  useEffect(() => {
+    if (!containerRef.current) return
+    const observer = new ResizeObserver((entries) => {
+      for (const entry of entries) {
+        setIsWide(entry.contentRect.width >= 580)
+      }
+    })
+    observer.observe(containerRef.current)
+    return () => observer.disconnect()
+  }, [])
 
   // Create-form state
   const [showForm, setShowForm] = useState(false)
@@ -70,7 +141,21 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
       const res = await fetch(API_BASE)
       if (res.ok) {
         const data = await res.json()
-        setArtifacts(data)
+        const savedOrder = localStorage.getItem('artifacts_order')
+        if (savedOrder) {
+          const orderIds: number[] = JSON.parse(savedOrder)
+          const sorted = [...data].sort((a, b) => {
+            const idxA = orderIds.indexOf(a.id)
+            const idxB = orderIds.indexOf(b.id)
+            if (idxA === -1 && idxB === -1) return 0
+            if (idxA === -1) return 1
+            if (idxB === -1) return -1
+            return idxA - idxB
+          })
+          setArtifacts(sorted)
+        } else {
+          setArtifacts(data)
+        }
       }
     } catch {
       /* backend may not be available */
@@ -209,36 +294,65 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
                 <button
                   className="edit-btn"
                   onClick={() => { setEditContentValue(content); setEditingContent(true) }}
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  ✏️ Edit
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                    <path d="M12 20h9"></path>
+                    <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                  </svg>
+                  Edit
                 </button>
                 <a
                   className="download-btn docx-btn"
                   href={`${API_BASE}/${id}/docx`}
                   download
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  📄 Word
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                    <line x1="16" y1="13" x2="8" y2="13"></line>
+                    <line x1="16" y1="17" x2="8" y2="17"></line>
+                    <polyline points="10 9 9 9 8 9"></polyline>
+                  </svg>
+                  Word
                 </a>
                 <a
                   className="download-btn pdf-btn"
                   href={`${API_BASE}/${id}/pdf`}
                   download
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  🖨️ PDF
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                    <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                    <polyline points="14 2 14 8 20 8"></polyline>
+                  </svg>
+                  PDF
                 </a>
                 <a
                   className="download-btn latex-btn"
                   href={`${API_BASE}/${id}/latex`}
                   download
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  𝛌 LaTeX
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                    <polyline points="16 18 22 12 16 6"></polyline>
+                    <polyline points="8 6 2 12 8 18"></polyline>
+                  </svg>
+                  LaTeX
                 </a>
                 <a
                   className="download-btn markdown-btn"
                   href={`${API_BASE}/${id}/download`}
                   download
+                  style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
-                  ⬇️ Markdown
+                  <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 4 }}>
+                    <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                    <polyline points="7 10 12 15 17 10"></polyline>
+                    <line x1="12" y1="15" x2="12" y2="3"></line>
+                  </svg>
+                  Markdown
                 </a>
               </div>
 
@@ -377,7 +491,6 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
         </div>
       )
     }
-
     // Fallback for unknown formats
     return (
       <div className="artifact-detail">
@@ -387,121 +500,189 @@ export default function ArtifactsPanel({ revision, onAddToMap }: ArtifactsPanelP
     )
   }
 
-  return (
-    <div className="artifacts-panel">
-      <div className="artifacts-toolbar">
-        <button className="new-artifact-btn" onClick={() => setShowForm(!showForm)}>
-          {showForm ? 'Cancel' : '+ New'}
-        </button>
-        <button className="refresh-btn" onClick={fetchArtifacts}>
-          &#8635;
-        </button>
-      </div>
+  const shouldShowSidebar = showSidebar || !isWide
 
-      {showForm && (
-        <div className="artifact-form">
-          <input
-            className="artifact-input"
-            placeholder="Title"
-            value={title}
-            onChange={(e) => setTitle(e.target.value)}
-          />
-          <select
-            className="artifact-select"
-            value={artifactType}
-            onChange={(e) => setArtifactType(e.target.value)}
-          >
-            <option value="note">Note</option>
-            <option value="analysis">Analysis</option>
-            <option value="report">Report</option>
-            <option value="sketch">Sketch</option>
-          </select>
-          <select
-            className="artifact-select"
-            value={format}
-            onChange={(e) => setFormat(e.target.value as 'markdown' | 'table' | 'geojson')}
-          >
-            <option value="markdown">Markdown</option>
-            <option value="table">Table</option>
-            <option value="geojson">GeoJSON</option>
-          </select>
-          <textarea
-            className="artifact-textarea"
-            placeholder="Content..."
-            value={content}
-            onChange={(e) => setContent(e.target.value)}
-            rows={4}
-          />
-          <button className="save-btn" onClick={createArtifact}>
-            Save
-          </button>
+  return (
+    <div ref={containerRef} className={`artifacts-panel ${isWide ? 'wide' : ''}`}>
+      {shouldShowSidebar && (
+        <div className="artifacts-sidebar" style={isWide ? { width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` } : undefined}>
+          <div className="artifacts-toolbar">
+            <button className="new-artifact-btn" onClick={() => setShowForm(!showForm)}>
+              {showForm ? 'Cancel' : '+ New Artifact'}
+            </button>
+            <button className="refresh-btn" onClick={fetchArtifacts} style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+            </button>
+          </div>
+
+          {showForm && (
+            <div className="artifact-form">
+              <input
+                className="artifact-input"
+                placeholder="Title"
+                value={title}
+                onChange={(e) => setTitle(e.target.value)}
+              />
+              <select
+                className="artifact-select"
+                value={artifactType}
+                onChange={(e) => setArtifactType(e.target.value)}
+              >
+                <option value="note">Note</option>
+                <option value="analysis">Analysis</option>
+                <option value="report">Report</option>
+                <option value="sketch">Sketch</option>
+              </select>
+              <select
+                className="artifact-select"
+                value={format}
+                onChange={(e) => setFormat(e.target.value as 'markdown' | 'table' | 'geojson')}
+              >
+                <option value="markdown">Markdown</option>
+                <option value="table">Table</option>
+                <option value="geojson">GeoJSON</option>
+              </select>
+              <textarea
+                className="artifact-textarea"
+                placeholder="Content..."
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={4}
+              />
+              <button className="save-btn" onClick={createArtifact}>
+                Save
+              </button>
+            </div>
+          )}
+
+          <div className="artifacts-list">
+            {artifacts.length === 0 && !showForm && (
+              <div className="artifacts-empty">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.35, marginBottom: 4 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <p className="title">No artifacts yet</p>
+                <p className="hint">Save notes, analyses, and reports here.</p>
+              </div>
+            )}
+            {artifacts.map((a) => (
+              <div
+                key={a.id}
+                className={`artifact-item ${selectedId === a.id ? 'selected' : ''} ${dragOverArtId === a.id ? `drag-over-${dropArtPosition}` : ''}`}
+                onClick={() => handleToggleSelect(a.id)}
+                draggable={true}
+                onDragStart={(e) => handleArtDragStart(a.id, e)}
+                onDragOver={(e) => handleArtDragOver(a.id, e)}
+                onDrop={(e) => handleArtDrop(a.id, e)}
+                onDragEnd={handleArtDragEnd}
+                style={{ cursor: 'grab' }}
+              >
+                <div className="artifact-item-header">
+                  <span className="artifact-type-badge">{a.format ?? a.artifact_type}</span>
+                  {editingTitle === a.id ? (
+                    <input
+                      className="artifact-title-input"
+                      value={editTitleValue}
+                      autoFocus
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => setEditTitleValue(e.target.value)}
+                      onBlur={() => saveTitle(a.id, editTitleValue)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') saveTitle(a.id, editTitleValue)
+                        if (e.key === 'Escape') setEditingTitle(null)
+                      }}
+                    />
+                  ) : (
+                    <span className="artifact-title">{a.title}</span>
+                  )}
+                  <button
+                    className="rename-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      setEditingTitle(a.id)
+                      setEditTitleValue(a.title)
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M12 20h9"></path>
+                      <path d="M16.5 3.5a2.121 2.121 0 0 1 3 3L7 19l-4 1 1-4L16.5 3.5z"></path>
+                    </svg>
+                  </button>
+                  <button
+                    className="delete-btn"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      deleteArtifact(a.id)
+                    }}
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+                {!isWide && selectedId === a.id && (
+                  loadingFull ? (
+                    <div className="artifact-detail">
+                      <p className="artifact-geojson-summary">Loading…</p>
+                    </div>
+                  ) : fullArtifact && fullArtifact.id === a.id ? (
+                    renderDetail(fullArtifact)
+                  ) : null
+                )}
+              </div>
+            ))}
+          </div>
         </div>
       )}
 
-      <div className="artifacts-list">
-        {artifacts.length === 0 && !showForm && (
-          <div className="artifacts-empty">
-            <p>No artifacts yet</p>
-            <p className="hint">Save notes, analyses, and reports here.</p>
-          </div>
-        )}
-        {artifacts.map((a) => (
-          <div
-            key={a.id}
-            className={`artifact-item ${selectedId === a.id ? 'selected' : ''}`}
-            onClick={() => handleToggleSelect(a.id)}
-          >
-            <div className="artifact-item-header">
-              <span className="artifact-type-badge">{a.format ?? a.artifact_type}</span>
-              {editingTitle === a.id ? (
-                <input
-                  className="artifact-title-input"
-                  value={editTitleValue}
-                  autoFocus
-                  onClick={(e) => e.stopPropagation()}
-                  onChange={(e) => setEditTitleValue(e.target.value)}
-                  onBlur={() => saveTitle(a.id, editTitleValue)}
-                  onKeyDown={(e) => {
-                    if (e.key === 'Enter') saveTitle(a.id, editTitleValue)
-                    if (e.key === 'Escape') setEditingTitle(null)
-                  }}
-                />
-              ) : (
-                <span className="artifact-title">{a.title}</span>
-              )}
-              <button
-                className="edit-title-btn"
-                title="Edit title"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  setEditingTitle(a.id)
-                  setEditTitleValue(a.title)
-                }}
-              >
-                ✎
-              </button>
-              <button
-                className="delete-btn"
-                onClick={(e) => {
-                  e.stopPropagation()
-                  deleteArtifact(a.id)
-                }}
-              >
-                &times;
-              </button>
+      {shouldShowSidebar && isWide && onLeftResizeStart && (
+        <div className="resize-handle" onMouseDown={onLeftResizeStart} />
+      )}
+
+      {isWide && (
+        <div className="artifacts-detail-pane">
+          {selectedId === null ? (
+            <div className="artifacts-empty-detail">
+              <div className="artifacts-empty-detail-icon">
+                <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" style={{ opacity: 0.35 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                  <line x1="16" y1="13" x2="8" y2="13"></line>
+                  <line x1="16" y1="17" x2="8" y2="17"></line>
+                  <polyline points="10 9 9 9 8 9"></polyline>
+                </svg>
+              </div>
+              <p className="artifacts-empty-detail-title">Select an artifact to view its contents</p>
+              <p className="artifacts-empty-detail-hint">View reports, maps, analyses, and tables in full page width.</p>
             </div>
-            {selectedId === a.id && (
-              loadingFull ? (
-                <div className="artifact-detail">
-                  <p className="artifact-geojson-summary">Loading…</p>
-                </div>
-              ) : fullArtifact && fullArtifact.id === a.id ? (
-                renderDetail(fullArtifact)
-              ) : null
-            )}
-          </div>
-        ))}
-      </div>
+          ) : loadingFull ? (
+            <div className="artifacts-detail-loading" style={{ display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="spinning" style={{ marginRight: 6 }}>
+                <path d="M23 4v6h-6"></path>
+                <path d="M1 20v-6h6"></path>
+                <path d="M3.51 9a9 9 0 0 1 14.85-3.36L23 10M1 14l4.64 4.36A9 9 0 0 0 20.49 15"></path>
+              </svg>
+              Loading artifact contents...
+            </div>
+          ) : fullArtifact && fullArtifact.id === selectedId ? (
+            <div className="artifacts-detail-content">
+              <div className="artifacts-detail-header">
+                <h2 className="artifacts-detail-title">{fullArtifact.title}</h2>
+                <span className="artifacts-detail-badge">{fullArtifact.format ?? fullArtifact.artifact_type}</span>
+              </div>
+              {renderDetail(fullArtifact)}
+            </div>
+          ) : null}
+        </div>
+      )}
     </div>
   )
 }

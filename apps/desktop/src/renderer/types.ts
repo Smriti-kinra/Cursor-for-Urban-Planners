@@ -102,6 +102,7 @@ export interface ChatMessage {
     markdown: string
     citations: Array<{ url: string; title: string }>
   }
+  attachments?: Array<{ fileName: string; filePath: string }>
 }
 
 export interface Conversation {
@@ -239,6 +240,14 @@ export type MapAction =
         id: string
         name: string
         filePath: string
+        corners: [number, number][]
+      }
+    }
+  | {
+      type: 'georeference_success'
+      payload: {
+        id: string
+        name: string
         corners: [number, number][]
       }
     }

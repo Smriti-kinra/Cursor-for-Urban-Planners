@@ -1,16 +1,17 @@
 .map-legend {
   position: absolute;
   right: 12px;
-  bottom: 28px;
+  bottom: 44px;
   z-index: 5;
   max-width: 220px;
   max-height: 50%;
   overflow-y: auto;
-  background: rgba(255, 255, 255, 0.92);
-  color: #1f2937;
-  border-radius: 6px;
-  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
-  padding: 8px 10px;
+  background: var(--bg-surface, #1e1e2e);
+  color: var(--text-primary, #cdd6f4);
+  border: 1px solid var(--border, #313244);
+  border-radius: 8px;
+  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.35);
+  padding: 8px 12px;
   font-size: 11px;
   pointer-events: auto;
 }
@@ -45,9 +46,10 @@
 .legend-swatch {
   width: 12px;
   height: 12px;
-  border-radius: 2px;
+  border-radius: 3.5px;
   flex-shrink: 0;
-  border: 1px solid rgba(0, 0, 0, 0.15);
+  border: 1px solid rgba(255, 255, 255, 0.15);
+  box-sizing: border-box;
 }
 
 .legend-text {

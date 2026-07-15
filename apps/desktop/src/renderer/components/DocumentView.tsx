@@ -1,11 +1,12 @@
 import { useState } from 'react'
 import './DocumentView.css'
+import { IMAGE_EXTS, MIME_MAP, rasterizePdfPage } from '../lib/pdf-raster'
 
 export interface DocumentImage {
   base64: string
   mimeType: string
   fileName: string
-  filePath: string
+  filePath?: string
   /** For multi-page sources, the page number that was rasterized (1-indexed). */
   page?: number
   /** For multi-page sources, the total number of pages. */
@@ -14,6 +15,9 @@ export interface DocumentImage {
 
 interface DocumentViewProps {
   onImageChange: (img: DocumentImage | null) => void
+  showSidebar?: boolean
+  sidebarWidth?: number
+  onLeftResizeStart?: (e: React.MouseEvent) => void
 }
 
 interface OpenDocument {
@@ -27,58 +31,70 @@ interface OpenDocument {
   documentImage: DocumentImage | null
 }
 
-const IMAGE_EXTS = ['png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp']
-const PDF_RASTER_SCALE = 1.5
-const PDF_MAX_PIXELS = 2200
-
 function toLocalFileUrl(absPath: string): string {
   const encoded = absPath.split('/').map((seg) => encodeURIComponent(seg)).join('/')
   return `localfile://${encoded}`
 }
 
-async function rasterizePdfPage(
-  absPath: string,
-  pageNumber: number,
-): Promise<{ base64: string; totalPages: number } | null> {
-  const base64Pdf = await window.electronAPI.readFileBase64(absPath)
-  if (!base64Pdf) return null
-  const binary = atob(base64Pdf)
-  const bytes = new Uint8Array(binary.length)
-  for (let i = 0; i < binary.length; i++) bytes[i] = binary.charCodeAt(i)
-
-  const pdfjs = await import('pdfjs-dist')
-  type GlobalOptions = { disableWorker?: boolean }
-  ;(pdfjs as unknown as { GlobalWorkerOptions: GlobalOptions }).GlobalWorkerOptions.disableWorker = true
-
-  const doc = await pdfjs.getDocument({ data: bytes }).promise
-  const total = doc.numPages
-  const page = await doc.getPage(Math.max(1, Math.min(pageNumber, total)))
-  let viewport = page.getViewport({ scale: PDF_RASTER_SCALE })
-  const longer = Math.max(viewport.width, viewport.height)
-  if (longer > PDF_MAX_PIXELS) {
-    const adj = PDF_MAX_PIXELS / longer
-    viewport = page.getViewport({ scale: PDF_RASTER_SCALE * adj })
-  }
-
-  const canvas = document.createElement('canvas')
-  canvas.width = Math.ceil(viewport.width)
-  canvas.height = Math.ceil(viewport.height)
-  const ctx = canvas.getContext('2d')
-  if (!ctx) return null
-  await page.render({ canvasContext: ctx, viewport, canvas }).promise
-
-  const dataUrl = canvas.toDataURL('image/png')
-  const base64 = dataUrl.split(',')[1] || ''
-  return { base64, totalPages: total }
-}
-
-export default function DocumentView({ onImageChange }: DocumentViewProps) {
+export default function DocumentView({
+  onImageChange,
+  showSidebar = true,
+  sidebarWidth = 260,
+  onLeftResizeStart,
+}: DocumentViewProps) {
   const [openDocs, setOpenDocs] = useState<OpenDocument[]>([])
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [pdfRasterError, setPdfRasterError] = useState<string | null>(null)
 
   const activeDoc = openDocs.find((d) => d.id === activeDocId) || null
+
+  const [draggedDocId, setDraggedDocId] = useState<string | null>(null)
+  const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
+  const [dropDocPosition, setDropDocPosition] = useState<'before' | 'after' | null>(null)
+
+  const handleDocDragStart = (id: string, e: React.DragEvent) => {
+    setDraggedDocId(id)
+    e.dataTransfer.setData('text/plain', id)
+  }
+
+  const handleDocDragOver = (id: string, e: React.DragEvent) => {
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relativeY = e.clientY - rect.top
+    const pos = relativeY < rect.height / 2 ? 'before' : 'after'
+    setDragOverDocId(id)
+    setDropDocPosition(pos)
+  }
+
+  const handleDocDragEnd = () => {
+    setDraggedDocId(null)
+    setDragOverDocId(null)
+    setDropDocPosition(null)
+  }
+
+  const handleDocDrop = (targetId: string, e: React.DragEvent) => {
+    e.preventDefault()
+    if (!draggedDocId || draggedDocId === targetId) return
+
+    const draggedDoc = openDocs.find((d) => d.id === draggedDocId)
+    if (!draggedDoc) return
+
+    const remainingDocs = openDocs.filter((d) => d.id !== draggedDocId)
+    let insertIndex = remainingDocs.findIndex((d) => d.id === targetId)
+    if (insertIndex !== -1) {
+      if (dropDocPosition === 'after') {
+        insertIndex += 1
+      }
+      const newDocs = [
+        ...remainingDocs.slice(0, insertIndex),
+        draggedDoc,
+        ...remainingDocs.slice(insertIndex),
+      ]
+      setOpenDocs(newDocs)
+    }
+    handleDocDragEnd()
+  }
 
   const openFile = async () => {
     const chosen = await window.electronAPI.openFile({
@@ -113,11 +129,7 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
       if (IMAGE_EXTS.includes(ext)) {
         const base64 = await window.electronAPI.readFileBase64(chosen)
         if (base64) {
-          const mimes: Record<string, string> = {
-            png: 'image/png', jpg: 'image/jpeg', jpeg: 'image/jpeg',
-            webp: 'image/webp', gif: 'image/gif', bmp: 'image/bmp',
-          }
-          newDoc.documentImage = { base64, mimeType: mimes[ext] || 'image/png', fileName: name, filePath: chosen }
+          newDoc.documentImage = { base64, mimeType: MIME_MAP[ext] || 'image/png', fileName: name, filePath: chosen }
         }
       } else if (pdf) {
         const out = await rasterizePdfPage(chosen, 1)
@@ -202,99 +214,153 @@ export default function DocumentView({ onImageChange }: DocumentViewProps) {
     setPdfRasterError(null)
   }
 
-  if (openDocs.length === 0) {
-    return (
-      <div className="doc-empty">
-        <div className="doc-empty-icon">🗺</div>
-        <p className="doc-empty-title">No document open</p>
-        <p className="doc-empty-hint">
-          Open a saved map image or PDF to analyze it with the AI assistant.
-          The assistant can see images and answer planning questions about them.
-        </p>
-        <button className="doc-open-btn" onClick={openFile}>Open file…</button>
-      </div>
-    )
-  }
+  /* Resize is handled by the global panel resize handle in App.tsx */
 
   return (
     <div className="doc-view">
-      {/* ── Document Tabs ── */}
-      <div className="doc-tabs-bar">
-        {openDocs.map((doc) => (
-          <div
-            key={doc.id}
-            className={`doc-tab ${doc.id === activeDocId ? 'active' : ''}`}
-            onClick={() => handleSelectDoc(doc.id)}
-          >
-            <span className="doc-tab-name" title={doc.filePath}>
-              {doc.fileName}
-            </span>
-            <button
-              className="doc-tab-close"
-              onClick={(e) => {
-                e.stopPropagation()
-                handleCloseDoc(doc.id)
-              }}
-              title="Close document"
-            >
-              ×
+      {/* ── Document List Sidebar (always visible) ── */}
+      {showSidebar && (
+        <div className="doc-sidebar" style={{ width: sidebarWidth, flex: `0 0 ${sidebarWidth}px` }}>
+          <div className="doc-sidebar-toolbar">
+            <button className="doc-sidebar-add-btn" onClick={openFile} title="Open document">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" style={{ marginRight: 6 }}>
+                <line x1="12" y1="5" x2="12" y2="19"></line>
+                <line x1="5" y1="12" x2="19" y2="12"></line>
+              </svg>
+              Open File
             </button>
           </div>
-        ))}
-        <button className="doc-tab-add" onClick={openFile} title="Open another document">
-          + Open File
-        </button>
-      </div>
 
-      {activeDoc && (
-        <>
-          <div className="doc-toolbar">
-            <span className="doc-filename" title={activeDoc.filePath}>
-              {activeDoc.fileName}
-            </span>
-            {activeDoc.isPdf && (
-              <span className="doc-pdf-note">
-                PDF — AI sees page {activeDoc.pdfPage} of {activeDoc.pdfTotalPages}
-              </span>
-            )}
-            {activeDoc.isPdf && activeDoc.pdfTotalPages > 1 && (
-              <span className="doc-pdf-pager">
-                <button
-                  className="doc-pdf-pager-btn"
-                  onClick={() => switchPdfPage(-1)}
-                  disabled={loading || activeDoc.pdfPage <= 1}
-                  title="Previous page"
+          <div className="doc-sidebar-list">
+            {openDocs.length === 0 ? (
+              <div className="doc-sidebar-empty">
+                <svg width="32" height="32" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5" style={{ opacity: 0.3 }}>
+                  <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                  <polyline points="14 2 14 8 20 8"></polyline>
+                </svg>
+                <p>No documents open</p>
+              </div>
+            ) : (
+              openDocs.map((doc) => (
+                <div
+                  key={doc.id}
+                  className={`doc-sidebar-item ${doc.id === activeDocId ? 'active' : ''} ${dragOverDocId === doc.id ? `drag-over-${dropDocPosition}` : ''}`}
+                  onClick={() => handleSelectDoc(doc.id)}
+                  draggable={true}
+                  onDragStart={(e) => handleDocDragStart(doc.id, e)}
+                  onDragOver={(e) => handleDocDragOver(doc.id, e)}
+                  onDrop={(e) => handleDocDrop(doc.id, e)}
+                  onDragEnd={handleDocDragEnd}
+                  style={{ cursor: 'grab' }}
                 >
-                  ‹
-                </button>
-                <span className="doc-pdf-pager-label">
-                  {activeDoc.pdfPage} / {activeDoc.pdfTotalPages}
-                </span>
-                <button
-                  className="doc-pdf-pager-btn"
-                  onClick={() => switchPdfPage(1)}
-                  disabled={loading || activeDoc.pdfPage >= activeDoc.pdfTotalPages}
-                  title="Next page"
-                >
-                  ›
-                </button>
-              </span>
+                  <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="doc-sidebar-item-icon">
+                    {doc.isPdf ? (
+                      <>
+                        <path d="M14 2H6a2 2 0 0 0-2 2v16a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2V8z"></path>
+                        <polyline points="14 2 14 8 20 8"></polyline>
+                      </>
+                    ) : (
+                      <>
+                        <rect x="3" y="3" width="18" height="18" rx="2" ry="2"></rect>
+                        <circle cx="8.5" cy="8.5" r="1.5"></circle>
+                        <polyline points="21 15 16 10 5 21"></polyline>
+                      </>
+                    )}
+                  </svg>
+                  <span className="doc-sidebar-item-name" title={doc.filePath}>
+                    {doc.fileName}
+                  </span>
+                  <button
+                    className="doc-sidebar-item-close"
+                    onClick={(e) => {
+                      e.stopPropagation()
+                      handleCloseDoc(doc.id)
+                    }}
+                    title="Close document"
+                    style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                  >
+                    <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <line x1="18" y1="6" x2="6" y2="18"></line>
+                      <line x1="6" y1="6" x2="18" y2="18"></line>
+                    </svg>
+                  </button>
+                </div>
+              ))
             )}
-            {loading && <span className="doc-loading-inline">Rendering…</span>}
-            {pdfRasterError && <span className="doc-loading-inline doc-error">{pdfRasterError}</span>}
           </div>
-
-          <div className="doc-content">
-            {activeDoc.displayUrl && (
-              activeDoc.isPdf ? (
-                <iframe src={activeDoc.displayUrl} className="doc-pdf" title={activeDoc.fileName} />
-              ) : (
-                <img src={activeDoc.displayUrl} alt={activeDoc.fileName} className="doc-img" />
-              )
-            )}
-          </div>
-        </>
+        </div>
       )}
+
+      {showSidebar && onLeftResizeStart && (
+        <div className="resize-handle" onMouseDown={onLeftResizeStart} />
+      )}
+
+      {/* ── Detail Pane ── */}
+      <div className="doc-detail-pane">
+        {activeDoc === null ? (
+          <div className="doc-empty-detail">
+            <div className="doc-empty-detail-icon">
+              <svg width="52" height="52" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.2" style={{ opacity: 0.35 }}>
+                <path d="M9 20H6a2 2 0 0 1-2-2V6a2 2 0 0 1 2-2h8l4 4v4" />
+                <path d="M9 20h9a2 2 0 0 0 2-2v-7" />
+                <rect x="9" y="14" width="8" height="6" rx="1" />
+              </svg>
+            </div>
+            <p className="doc-empty-detail-title">No document open</p>
+            <p className="doc-empty-detail-hint">
+              Open a map image or PDF to analyse it with the AI assistant.
+            </p>
+          </div>
+        ) : (
+          <>
+            <div className="doc-toolbar">
+              <span className="doc-filename" title={activeDoc.filePath}>
+                {activeDoc.fileName}
+              </span>
+              {activeDoc.isPdf && (
+                <span className="doc-pdf-note">
+                  PDF — AI sees page {activeDoc.pdfPage} of {activeDoc.pdfTotalPages}
+                </span>
+              )}
+              {activeDoc.isPdf && activeDoc.pdfTotalPages > 1 && (
+                <span className="doc-pdf-pager">
+                  <button
+                    className="doc-pdf-pager-btn"
+                    onClick={() => switchPdfPage(-1)}
+                    disabled={loading || activeDoc.pdfPage <= 1}
+                    title="Previous page"
+                  >
+                    ‹
+                  </button>
+                  <span className="doc-pdf-pager-label">
+                    {activeDoc.pdfPage} / {activeDoc.pdfTotalPages}
+                  </span>
+                  <button
+                    className="doc-pdf-pager-btn"
+                    onClick={() => switchPdfPage(1)}
+                    disabled={loading || activeDoc.pdfPage >= activeDoc.pdfTotalPages}
+                    title="Next page"
+                  >
+                    ›
+                  </button>
+                </span>
+              )}
+              {loading && <span className="doc-loading-inline">Rendering…</span>}
+              {pdfRasterError && <span className="doc-loading-inline doc-error">{pdfRasterError}</span>}
+            </div>
+
+            <div className="doc-content">
+              {activeDoc.displayUrl && (
+                activeDoc.isPdf ? (
+                  <iframe src={activeDoc.displayUrl} className="doc-pdf" title={activeDoc.fileName} />
+                ) : (
+                  <img src={activeDoc.displayUrl} alt={activeDoc.fileName} className="doc-img" />
+                )
+              )}
+            </div>
+          </>
+        )}
+      </div>
     </div>
   )
 }

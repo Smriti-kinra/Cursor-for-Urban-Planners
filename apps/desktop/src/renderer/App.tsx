@@ -44,7 +44,7 @@ import { composeFigure } from './lib/compose-figure'
 import { buildLegendEntries } from './lib/legend-data'
 
 type LeftTab = 'files' | 'layers' | 'bookmarks' | 'export' | 'zoning' | 'scenarios'
-type RightTab = 'chat' | 'artifacts'
+type AppMode = 'map' | 'document' | 'artifacts'
 
 function genId() {
   return `${Date.now()}-${Math.random().toString(36).slice(2, 7)}`
@@ -150,7 +150,6 @@ function App() {
   const [documentImage, setDocumentImage] = useState<DocumentImage | null>(null)
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
-  const [activeRightTab, setActiveRightTab] = useState<RightTab>('chat')
   const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
   const [attrLayerId, setAttrLayerId] = useState<string | null>(null)
   const [convertingFile, setConvertingFile] = useState<string | null>(null)
@@ -190,6 +189,77 @@ function App() {
   const [scenarios, setScenarios] = useState<Scenario[]>([])
   const [activeScenarioId, setActiveScenarioId] = useState<string | null>(null)
 
+  // Undo/Redo stack states
+  const [pastHistory, setPastHistory] = useState<{ layers: GeoJSONLayer[]; bookmarks: MapBookmark[] }[]>([])
+  const [futureHistory, setFutureHistory] = useState<{ layers: GeoJSONLayer[]; bookmarks: MapBookmark[] }[]>([])
+  const isUndoRedoRef = useRef(false)
+  const lastStateRef = useRef<{ layers: GeoJSONLayer[]; bookmarks: MapBookmark[] }>({ layers: [], bookmarks: [] })
+
+  useEffect(() => {
+    if (lastStateRef.current.layers.length === 0 && lastStateRef.current.bookmarks.length === 0) {
+      lastStateRef.current = { layers, bookmarks }
+      return
+    }
+
+    if (isUndoRedoRef.current) {
+      isUndoRedoRef.current = false
+      lastStateRef.current = { layers, bookmarks }
+      return
+    }
+
+    const layersDiff = JSON.stringify(layers) !== JSON.stringify(lastStateRef.current.layers)
+    const bookmarksDiff = JSON.stringify(bookmarks) !== JSON.stringify(lastStateRef.current.bookmarks)
+
+    if (layersDiff || bookmarksDiff) {
+      setPastHistory((prev) => [...prev, lastStateRef.current])
+      setFutureHistory([]) // Clear redo stack on new action
+      lastStateRef.current = { layers, bookmarks }
+    }
+  }, [layers, bookmarks])
+
+  const handleGlobalUndo = useCallback(() => {
+    if (pastHistory.length === 0) return
+    const prev = pastHistory[pastHistory.length - 1]
+    setPastHistory((p) => p.slice(0, -1))
+    setFutureHistory((f) => [...f, { layers, bookmarks }])
+    isUndoRedoRef.current = true
+    setLayers(prev.layers)
+    setBookmarks(prev.bookmarks)
+  }, [pastHistory, layers, bookmarks])
+
+  const handleGlobalRedo = useCallback(() => {
+    if (futureHistory.length === 0) return
+    const next = futureHistory[futureHistory.length - 1]
+    setFutureHistory((f) => f.slice(0, -1))
+    setPastHistory((p) => [...p, { layers, bookmarks }])
+    isUndoRedoRef.current = true
+    setLayers(next.layers)
+    setBookmarks(next.bookmarks)
+  }, [futureHistory, layers, bookmarks])
+
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      const target = e.target as HTMLElement
+      if (target && (target.tagName === 'INPUT' || target.tagName === 'TEXTAREA' || target.isContentEditable)) {
+        return
+      }
+
+      if ((e.ctrlKey || e.metaKey) && !e.shiftKey && e.key.toLowerCase() === 'z') {
+        e.preventDefault()
+        handleGlobalUndo()
+      } else if (
+        ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key.toLowerCase() === 'z') ||
+        ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'y')
+      ) {
+        e.preventDefault()
+        handleGlobalRedo()
+      }
+    }
+
+    window.addEventListener('keydown', handleKeyDown)
+    return () => window.removeEventListener('keydown', handleKeyDown)
+  }, [handleGlobalUndo, handleGlobalRedo])
+
   const mapViewRef = useRef<MapViewHandle>(null)
   const bookmarksRef = useRef<MapBookmark[]>([])
   const mapBoundsRef = useRef<typeof mapBounds>(null)
@@ -204,6 +274,20 @@ function App() {
   const aiMarkersGroupIdRef = useRef(`group-ai-markers-${genId()}`)
   const userShapeCounterRef = useRef(0)
   const isLoadingRef = useRef(false)
+  const leftPanelRef = useRef<HTMLElement>(null)
+
+  // Deselect active layer when clicking outside the left panel
+  useEffect(() => {
+    const handleOutsideClick = (e: MouseEvent) => {
+      if (!leftPanelRef.current) return
+      if (!leftPanelRef.current.contains(e.target as Node)) {
+        if (stylingLayerId) setStylingLayerId(null)
+        if (attrLayerId) setAttrLayerId(null)
+      }
+    }
+    document.addEventListener('mousedown', handleOutsideClick)
+    return () => document.removeEventListener('mousedown', handleOutsideClick)
+  }, [stylingLayerId, attrLayerId])
   const isSavingRef = useRef(false)
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyLayerIdsRef = useRef<Set<string>>(new Set())
@@ -217,6 +301,13 @@ function App() {
   const [leftWidth, setLeftWidth] = useState(260)
   const [rightWidth, setRightWidth] = useState(380)
 
+  // Caching refs for sidebar toggle restore widths
+  const lastLeftWidthRef = useRef(260)
+  const lastRightWidthRef = useRef(380)
+
+  const [showArtifactsSidebar, setShowArtifactsSidebar] = useState(true)
+  const [showDocumentSidebar, setShowDocumentSidebar] = useState(true)
+
   const onResizeStart = useCallback(
     (side: 'left' | 'right') => (e: React.MouseEvent) => {
       e.preventDefault()
@@ -228,9 +319,13 @@ function App() {
       const onMove = (ev: MouseEvent) => {
         const delta = ev.clientX - startX
         if (side === 'left') {
-          setLeftWidth(Math.max(180, Math.min(500, startW + delta)))
+          const w = Math.max(180, Math.min(500, startW + delta))
+          setLeftWidth(w)
+          lastLeftWidthRef.current = w
         } else {
-          setRightWidth(Math.max(280, Math.min(600, startW - delta)))
+          const w = Math.max(280, Math.min(600, startW - delta))
+          setRightWidth(w)
+          lastRightWidthRef.current = w
         }
       }
 
@@ -245,6 +340,22 @@ function App() {
     },
     [leftWidth, rightWidth],
   )
+
+  const toggleLeft = useCallback(() => {
+    if (leftWidth > 0) {
+      setLeftWidth(0)
+    } else {
+      setLeftWidth(lastLeftWidthRef.current)
+    }
+  }, [leftWidth])
+
+  const toggleRight = useCallback(() => {
+    if (rightWidth > 0) {
+      setRightWidth(0)
+    } else {
+      setRightWidth(lastRightWidthRef.current)
+    }
+  }, [rightWidth])
 
   // ── Workspace ──
 
@@ -492,6 +603,18 @@ function App() {
           layer.groupId === targetGroupToMerge
         return shouldJoin ? { ...layer, groupId, groupName } : layer
       })
+    })
+  }, [])
+
+  const groupLayersMulti = useCallback((ids: string[]) => {
+    if (ids.length < 2) return
+    setLayers((prev) => {
+      const groupId = `group-${genId()}`
+      const firstName = prev.find((l) => l.id === ids[0])?.name ?? 'Layer'
+      const groupName = `${firstName} Group`
+      return prev.map((layer) =>
+        ids.includes(layer.id) ? { ...layer, groupId, groupName } : layer
+      )
     })
   }, [])
 
@@ -1280,6 +1403,10 @@ function App() {
       }
       return
     }
+    if (action.type === 'georeference_success') {
+      setAppMode('map')
+      return
+    }
     if (action.type === 'style_layer') {
       const p = action.payload
       setLayers((prev) =>
@@ -1413,6 +1540,7 @@ function App() {
     }
     if (action.type === 'add_geojson') {
       const { geojson, name, color } = action.payload
+      setAppMode('map') // Auto-switch to Map view
       const geometryTypes = ['Point','MultiPoint','LineString','MultiLineString','Polygon','MultiPolygon','GeometryCollection']
       const data: FeatureCollection =
         geojson && 'type' in geojson && geojson.type === 'FeatureCollection'
@@ -1450,6 +1578,7 @@ function App() {
     }
     if (action.type === 'refresh_artifacts') {
       setArtifactsRevision((n) => n + 1)
+      setAppMode('artifacts')
       return
     }
     // AI-placed pins become separate one-point layers inside the persistent
@@ -2160,7 +2289,10 @@ function App() {
                 onClick={handleCloseWorkspace}
                 title="Close workspace"
               >
-                ✕
+                <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                  <line x1="18" y1="6" x2="6" y2="18"></line>
+                  <line x1="6" y1="6" x2="18" y2="18"></line>
+                </svg>
               </button>
             )}
           </div>
@@ -2180,16 +2312,83 @@ function App() {
             >
               Document
             </button>
+            <button
+              className={`mode-btn ${appMode === 'artifacts' ? 'active' : ''}`}
+              onClick={() => setAppMode('artifacts')}
+            >
+              Artifacts
+            </button>
           </div>
         </div>
 
-        <div className="titlebar-right" />
+        <div className="titlebar-right">
+          <div className="sidebar-toggles">
+            {(appMode === 'map' || appMode === 'artifacts' || appMode === 'document') && (
+              <button
+                className={`sidebar-toggle-btn ${
+                  (appMode === 'map'
+                    ? leftWidth > 0
+                    : appMode === 'document'
+                    ? showDocumentSidebar
+                    : showArtifactsSidebar)
+                    ? 'active'
+                    : ''
+                }`}
+                title={
+                  (appMode === 'map'
+                    ? leftWidth > 0
+                    : appMode === 'document'
+                    ? showDocumentSidebar
+                    : showArtifactsSidebar)
+                    ? "Hide Left Sidebar"
+                    : "Show Left Sidebar"
+                }
+                onClick={
+                  appMode === 'map'
+                    ? toggleLeft
+                    : appMode === 'document'
+                    ? () => setShowDocumentSidebar(!showDocumentSidebar)
+                    : () => setShowArtifactsSidebar(!showArtifactsSidebar)
+                }
+              >
+                <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                  <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                  <line x1="6" y1="2" x2="6" y2="14" />
+                  <path
+                    d="M2 2h4v12H2z"
+                    fill="currentColor"
+                    fillOpacity={
+                      (appMode === 'map'
+                        ? leftWidth > 0
+                        : appMode === 'document'
+                        ? showDocumentSidebar
+                        : showArtifactsSidebar)
+                        ? 0.3
+                        : 0
+                    }
+                  />
+                </svg>
+              </button>
+            )}
+            <button
+              className={`sidebar-toggle-btn ${rightWidth > 0 ? 'active' : ''}`}
+              title={rightWidth > 0 ? "Hide Right Sidebar" : "Show Right Sidebar"}
+              onClick={toggleRight}
+            >
+              <svg width="16" height="16" viewBox="0 0 16 16" fill="none" stroke="currentColor" strokeWidth="1.5">
+                <rect x="2" y="2" width="12" height="12" rx="1.5" />
+                <line x1="10" y1="2" x2="10" y2="14" />
+                <path d="M10 2h4v12h-4z" fill="currentColor" fillOpacity={rightWidth > 0 ? 0.3 : 0} />
+              </svg>
+            </button>
+          </div>
+        </div>
       </header>
 
       <div className="layout">
         {/* Left panel — map mode only */}
-        {appMode === 'document' ? null : (
-        <aside className="panel left-panel" style={{ width: leftWidth }}>
+        {appMode !== 'map' || leftWidth === 0 ? null : (
+        <aside ref={leftPanelRef} className="panel left-panel" style={{ width: leftWidth }}>
           <div className="tab-bar tab-bar-scroll">
             <button
               className={`tab ${activeLeftTab === 'files' ? 'active' : ''}`}
@@ -2254,7 +2453,10 @@ function App() {
             <>
               <LayerPanel
                 layers={layers}
-                        onStyle={(id) => {
+                onToggle={toggleLayer}
+                onRemove={removeLayer}
+                onZoomTo={zoomToLayer}
+                onStyle={(id) => {
                   // Raster layers (WMS/GEE) have no vector symbology — block the panel unless it's a raster overlay.
                   const layer = layers.find((l) => l.id === id)
                   if ((layer?.wmsSpec || layer?.geeSpec) && !layer?.rasterOverlaySpec) return
@@ -2266,27 +2468,17 @@ function App() {
                 activeAttrId={attrLayerId}
                 onRename={renameLayer}
                 onGroupWith={groupLayers}
+                onGroupMulti={groupLayersMulti}
                 onUngroup={ungroupLayer}
                 onToggleGroup={toggleLayerGroup}
                 onRenameGroup={renameGroup}
+                onStyleChange={handleSymbologyChange}
+                onUpdateLayer={(layerId, updates) => {
+                  setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, ...updates } : l)))
+                }}
+                onAttributesChange={handleAttributesChange}
+                onReorderLayers={setLayers}
               />
-              {stylingLayer && (
-                <SymbologyPanel
-                  layer={stylingLayer}
-                  onChange={handleSymbologyChange}
-                  onClose={() => setStylingLayerId(null)}
-                  onUpdateLayer={(layerId, updates) => {
-                    setLayers((prev) => prev.map((l) => (l.id === layerId ? { ...l, ...updates } : l)))
-                  }}
-                />
-              )}
-              {attrLayer && (
-                <AttributeTable
-                  layer={attrLayer}
-                  onChange={handleAttributesChange}
-                  onClose={() => setAttrLayerId(null)}
-                />
-              )}
             </>
           )}
 
@@ -2370,7 +2562,7 @@ function App() {
         )}
 
         {/* Left resize handle — map mode only */}
-        {appMode === 'map' && <div className="resize-handle" onMouseDown={onResizeStart('left')} />}
+        {appMode === 'map' && leftWidth > 0 && <div className="resize-handle" onMouseDown={onResizeStart('left')} />}
 
         {/* Center */}
         <main className="center-panel">
@@ -2459,6 +2651,10 @@ function App() {
                   streetViewBearing={streetViewBearing}
                   isMiniMap={streetViewActive && streetViewLayout === 'full'}
                   onStreetViewLayoutChange={setStreetViewLayout}
+                  onUndo={handleGlobalUndo}
+                  onRedo={handleGlobalRedo}
+                  canUndo={pastHistory.length > 0}
+                  canRedo={futureHistory.length > 0}
                 />
               </ErrorBoundary>
             </div>
@@ -2467,61 +2663,58 @@ function App() {
 
           <div style={{ display: appMode === 'document' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Document">
-              <DocumentView onImageChange={setDocumentImage} />
-            </ErrorBoundary>
-          </div>
-        </main>
-
-        {/* Right resize handle */}
-        <div className="resize-handle" onMouseDown={onResizeStart('right')} />
-
-        {/* Right panel */}
-        <aside className="panel right-panel" style={{ width: rightWidth }}>
-          <div className="tab-bar">
-            <button
-              className={`tab ${activeRightTab === 'chat' ? 'active' : ''}`}
-              onClick={() => setActiveRightTab('chat')}
-            >
-              Chat
-            </button>
-            <button
-              className={`tab ${activeRightTab === 'artifacts' ? 'active' : ''}`}
-              onClick={() => setActiveRightTab('artifacts')}
-            >
-              Artifacts
-            </button>
-          </div>
-          {activeRightTab === 'chat' ? (
-            <ErrorBoundary label="Chat">
-              <ChatPanel
-                conversations={conversations}
-                activeConversation={activeConversation}
-                onCreateConversation={handleCreateConversation}
-                onSelectConversation={handleSelectConversation}
-                onDeleteConversation={handleDeleteConversation}
-                onMessagesChange={handleConversationMessagesChange}
-                onRenameConversation={handleRenameConversation}
-                mapContext={mapContext}
-                onMapAction={handleMapAction}
-                documentImage={appMode === 'document' ? documentImage : null}
-                injectedMessage={injectedMessage}
-                onComposeMapFigure={composeMapFigure}
+              <DocumentView
+                onImageChange={setDocumentImage}
+                showSidebar={showDocumentSidebar}
+                sidebarWidth={leftWidth}
+                onLeftResizeStart={onResizeStart('left')}
               />
             </ErrorBoundary>
-          ) : activeRightTab === 'artifacts' ? (
+          </div>
+
+          <div style={{ display: appMode === 'artifacts' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Artifacts">
               <ArtifactsPanel
                 revision={artifactsRevision}
+                showSidebar={showArtifactsSidebar}
+                sidebarWidth={leftWidth}
+                onLeftResizeStart={onResizeStart('left')}
                 onAddToMap={(geojson, name) => {
                   setMapActions((prev) => [
                     ...prev,
                     { type: 'add_geojson', payload: { geojson: geojson as FeatureCollection, name } },
                   ])
+                  setAppMode('map') // Auto-switch to map view
                 }}
               />
             </ErrorBoundary>
-          ) : null}
+          </div>
+        </main>
+
+        {/* Right resize handle */}
+        {rightWidth > 0 && <div className="resize-handle" onMouseDown={onResizeStart('right')} />}
+
+        {/* Right panel */}
+        {rightWidth > 0 && (
+        <aside className="panel right-panel" style={{ width: rightWidth }}>
+          <ErrorBoundary label="Chat">
+            <ChatPanel
+              conversations={conversations}
+              activeConversation={activeConversation}
+              onCreateConversation={handleCreateConversation}
+              onSelectConversation={handleSelectConversation}
+              onDeleteConversation={handleDeleteConversation}
+              onMessagesChange={handleConversationMessagesChange}
+              onRenameConversation={handleRenameConversation}
+              mapContext={mapContext}
+              onMapAction={handleMapAction}
+              documentImage={appMode === 'document' ? documentImage : null}
+              injectedMessage={injectedMessage}
+              onComposeMapFigure={composeMapFigure}
+            />
+          </ErrorBoundary>
         </aside>
+        )}
       </div>
     </div>
   )
