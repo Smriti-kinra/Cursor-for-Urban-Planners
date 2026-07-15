@@ -1092,7 +1092,7 @@ export default function ChatPanel({
                 )}
               </div>
 
-              {/* API Settings toggle — cursor arrow icon */}
+              {/* API Settings toggle — gear outline with API text inside */}
               <button
                 className={`api-settings-btn ${showApiKeyInput ? 'active' : ''}`}
                 onClick={() => {
@@ -1101,15 +1101,30 @@ export default function ChatPanel({
                 }}
                 title="API Key Settings"
               >
-                <svg width="18" height="18" viewBox="0 0 24 24" fill="none">
-                  {/* Cursor arrow — matches app icon style */}
+                <svg width="22" height="22" viewBox="0 0 24 24" fill="none" strokeLinecap="round" strokeLinejoin="round">
+                  {/* Gear outline */}
                   <path
-                    d="M5 3L19 12L12.5 13.5L9 20L5 3Z"
-                    fill={showApiKeyInput ? '#2dd4bf' : '#4ecca3'}
-                    stroke={showApiKeyInput ? '#0f766e' : '#1a9e7e'}
-                    strokeWidth="1.2"
-                    strokeLinejoin="round"
+                    d="M12 16.5a4.5 4.5 0 1 0 0-9 4.5 4.5 0 0 0 0 9Z"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
                   />
+                  <path
+                    d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 0 1-2.83-2.83l.06-.06A1.65 1.65 0 0 0 4.68 15a1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 0 1 2.83-2.83l.06.06A1.65 1.65 0 0 0 9 4.68a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 0 1 2.83 2.83l-.06.06A1.65 1.65 0 0 0 19.4 9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1Z"
+                    stroke="currentColor"
+                    strokeWidth="1.3"
+                  />
+                  {/* API text inside gear */}
+                  <text
+                    x="12"
+                    y="13.5"
+                    textAnchor="middle"
+                    fontSize="4"
+                    fontWeight="800"
+                    fontFamily="Inter, system-ui, sans-serif"
+                    fill="currentColor"
+                    stroke="none"
+                    letterSpacing="0.2"
+                  >API</text>
                 </svg>
               </button>
             </div>

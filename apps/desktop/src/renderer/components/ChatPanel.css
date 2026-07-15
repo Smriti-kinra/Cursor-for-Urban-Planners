@@ -1219,6 +1219,34 @@
   flex: 1;
 }
 
+.api-settings-btn {
+  background: var(--bg-hover, rgba(255, 255, 255, 0.05));
+  color: var(--text-muted);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  width: 32px;
+  height: 32px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.15s ease;
+  flex-shrink: 0;
+}
+
+.api-settings-btn:hover {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.api-settings-btn.active {
+  background: var(--bg-surface);
+  border-color: var(--accent);
+  color: var(--accent);
+  box-shadow: 0 0 8px rgba(45, 212, 191, 0.2);
+}
+
 .api-key-status.info {
   display: flex;
   align-items: center;
