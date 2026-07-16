@@ -7,6 +7,8 @@ export interface GeoJSONLayer {
   visible: boolean
   groupId?: string
   groupName?: string
+  groupPathIds?: string[]
+  groupPathNames?: string[]
   data: FeatureCollection
   color: string
   fillColor?: string

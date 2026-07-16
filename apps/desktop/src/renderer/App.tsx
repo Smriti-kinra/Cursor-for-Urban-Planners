@@ -17,6 +17,7 @@ import BookmarkPanel from './components/BookmarkPanel'
 import ExportPanel from './components/ExportPanel'
 import ZoningPanel from './components/ZoningPanel'
 import ScenarioPanel, { type Scenario } from './components/ScenarioPanel'
+import ScenarioBuilderPanel from './components/ScenarioBuilderPanel'
 
 import DocumentView, { type DocumentImage } from './components/DocumentView'
 import ErrorBoundary from './components/ErrorBoundary'
@@ -548,9 +549,15 @@ function App() {
     })
   }, [])
 
+  const matchesGroup = (l: GeoJSONLayer, groupId: string) => {
+    if (l.groupPathIds?.includes(groupId)) return true
+    if (l.groupId === groupId) return true
+    return false
+  }
+
   const toggleLayerGroup = useCallback((groupId: string, visible: boolean) => {
     setLayers((prev) => {
-      const next = prev.map((l) => (l.groupId === groupId ? { ...l, visible } : l))
+      const next = prev.map((l) => (matchesGroup(l, groupId) ? { ...l, visible } : l))
       setActiveScenarioId((activeId) => {
         if (activeId) {
           setScenarios((prevScenarios) =>
@@ -558,7 +565,7 @@ function App() {
               if (s.id === activeId) {
                 const updatedVis = { ...s.layerVisibility }
                 prev.forEach((l) => {
-                  if (l.groupId === groupId) {
+                  if (matchesGroup(l, groupId)) {
                     updatedVis[l.id] = visible
                   }
                 })
@@ -578,56 +585,239 @@ function App() {
     setLayers((prev) => prev.map((l) => (l.id === id ? { ...l, name } : l)))
   }, [])
 
-  const renameGroup = useCallback((groupId: string, groupName: string) => {
-    setLayers((prev) => prev.map((l) => (l.groupId === groupId ? { ...l, groupName } : l)))
+  const renameGroup = useCallback((groupId: string, newGroupName: string) => {
+    setLayers((prev) => prev.map((l) => {
+      let updated = false
+      let nextIds = l.groupPathIds ? [...l.groupPathIds] : (l.groupId ? [l.groupId] : [])
+      let nextNames = l.groupPathNames ? [...l.groupPathNames] : (l.groupName ? [l.groupName] : [])
+      
+      const idx = nextIds.indexOf(groupId)
+      if (idx !== -1) {
+        nextNames[idx] = newGroupName
+        updated = true
+      }
+      
+      if (l.groupId === groupId) {
+        return {
+          ...l,
+          groupName: newGroupName,
+          groupPathIds: nextIds,
+          groupPathNames: nextNames,
+        }
+      }
+      if (updated) {
+        return {
+          ...l,
+          groupPathIds: nextIds,
+          groupPathNames: nextNames,
+        }
+      }
+      return l
+    }))
+  }, [])
+
+  const groupLayersMulti = useCallback((ids: string[], customGroupName?: string) => {
+    if (ids.length < 1) return
+    setLayers((prev) => {
+      const newGroupId = `group-${genId()}`
+      const firstName = prev.find((l) => l.id === ids[0])?.name ?? 'Layer'
+      const newGroupName = customGroupName || `${firstName} Group`
+      
+      // Find a common parent path if they already share one
+      const firstLayer = prev.find((l) => ids.includes(l.id))
+      let commonIds: string[] = []
+      let commonNames: string[] = []
+      if (firstLayer) {
+        commonIds = firstLayer.groupPathIds ? [...firstLayer.groupPathIds] : (firstLayer.groupId ? [firstLayer.groupId] : [])
+        commonNames = firstLayer.groupPathNames ? [...firstLayer.groupPathNames] : (firstLayer.groupName ? [firstLayer.groupName] : [])
+      }
+      
+      return prev.map((layer) => {
+        if (!ids.includes(layer.id)) return layer
+        
+        const finalIds = [...commonIds, newGroupId]
+        const finalNames = [...commonNames, newGroupName]
+        
+        return {
+          ...layer,
+          groupId: newGroupId,
+          groupName: newGroupName,
+          groupPathIds: finalIds,
+          groupPathNames: finalNames,
+        }
+      })
+    })
   }, [])
 
   const groupLayers = useCallback((sourceId: string, targetId: string) => {
-    if (sourceId === targetId) return
-    setLayers((prev) => {
-      const source = prev.find((l) => l.id === sourceId)
-      const target = prev.find((l) => l.id === targetId)
-      if (!source || !target) return prev
-
-      const groupId = target.groupId || source.groupId || `group-${genId()}`
-      const groupName = target.groupName || source.groupName || `${source.name} Group`
-      const sourceGroupToMerge = source.groupId && source.groupId !== groupId ? source.groupId : null
-      const targetGroupToMerge = target.groupId && target.groupId !== groupId ? target.groupId : null
-
-      return prev.map((layer) => {
-        const shouldJoin =
-          layer.id === sourceId ||
-          layer.id === targetId ||
-          layer.groupId === groupId ||
-          layer.groupId === sourceGroupToMerge ||
-          layer.groupId === targetGroupToMerge
-        return shouldJoin ? { ...layer, groupId, groupName } : layer
-      })
-    })
-  }, [])
-
-  const groupLayersMulti = useCallback((ids: string[]) => {
-    if (ids.length < 2) return
-    setLayers((prev) => {
-      const groupId = `group-${genId()}`
-      const firstName = prev.find((l) => l.id === ids[0])?.name ?? 'Layer'
-      const groupName = `${firstName} Group`
-      return prev.map((layer) =>
-        ids.includes(layer.id) ? { ...layer, groupId, groupName } : layer
-      )
-    })
-  }, [])
+    groupLayersMulti([sourceId, targetId])
+  }, [groupLayersMulti])
 
   const ungroupLayer = useCallback((id: string) => {
     setLayers((prev) => {
-      const layer = prev.find((l) => l.id === id)
-      if (!layer?.groupId) return prev
-      const next = prev.map((l) => {
+      return prev.map((l) => {
         if (l.id !== id) return l
-        const { groupId: _groupId, groupName: _groupName, ...rest } = l
-        return rest
+        
+        let ids = l.groupPathIds ? [...l.groupPathIds] : (l.groupId ? [l.groupId] : [])
+        let names = l.groupPathNames ? [...l.groupPathNames] : (l.groupName ? [l.groupName] : [])
+        
+        if (ids.length > 0) {
+          ids.pop()
+          names.pop()
+        }
+        
+        return {
+          ...l,
+          groupId: ids.length > 0 ? ids[ids.length - 1] : undefined,
+          groupName: names.length > 0 ? names[names.length - 1] : undefined,
+          groupPathIds: ids.length > 0 ? ids : undefined,
+          groupPathNames: names.length > 0 ? names : undefined,
+        }
       })
-      return compactLayerGroups(next)
+    })
+  }, [])
+
+  const ungroupGroup = useCallback((groupId: string) => {
+    setLayers((prev) => {
+      return prev.map((l) => {
+        let ids = l.groupPathIds ? [...l.groupPathIds] : (l.groupId ? [l.groupId] : [])
+        let names = l.groupPathNames ? [...l.groupPathNames] : (l.groupName ? [l.groupName] : [])
+        
+        const idx = ids.indexOf(groupId)
+        if (idx !== -1) {
+          ids.splice(idx, 1)
+          names.splice(idx, 1)
+        }
+        
+        return {
+          ...l,
+          groupId: ids.length > 0 ? ids[ids.length - 1] : undefined,
+          groupName: names.length > 0 ? names[names.length - 1] : undefined,
+          groupPathIds: ids.length > 0 ? ids : undefined,
+          groupPathNames: names.length > 0 ? names : undefined,
+        }
+      })
+    })
+  }, [])
+
+  const moveLayerOrGroup = useCallback((sourceId: string, targetId: string, position: 'before' | 'after' | 'inside') => {
+    setLayers((prev) => {
+      const isSourceGroup = prev.some((l) => l.groupPathIds?.includes(sourceId) || l.groupId === sourceId)
+      const sourceLayer = prev.find((l) => l.id === sourceId)
+      
+      let sourceLayerIds: string[] = []
+      if (isSourceGroup) {
+        sourceLayerIds = prev.filter((l) => l.groupPathIds?.includes(sourceId) || l.groupId === sourceId).map((l) => l.id)
+      } else if (sourceLayer) {
+        sourceLayerIds = [sourceId]
+      }
+      
+      if (sourceLayerIds.length === 0) return prev
+      
+      const isTargetGroup = prev.some((l) => l.groupPathIds?.includes(targetId) || l.groupId === targetId)
+      const targetLayer = prev.find((l) => l.id === targetId)
+      
+      let newPathIds: string[] = []
+      let newPathNames: string[] = []
+      
+      if (position === 'inside') {
+        const firstTargetInGroup = prev.find((l) => l.groupPathIds?.includes(targetId) || l.groupId === targetId)
+        if (firstTargetInGroup) {
+          let tIds = firstTargetInGroup.groupPathIds ? [...firstTargetInGroup.groupPathIds] : (firstTargetInGroup.groupId ? [firstTargetInGroup.groupId] : [])
+          let tNames = firstTargetInGroup.groupPathNames ? [...firstTargetInGroup.groupPathNames] : (firstTargetInGroup.groupName ? [firstTargetInGroup.groupName] : [])
+          
+          const idx = tIds.indexOf(targetId)
+          if (idx !== -1) {
+            newPathIds = tIds.slice(0, idx + 1)
+            newPathNames = tNames.slice(0, idx + 1)
+          } else {
+            newPathIds = [targetId]
+            newPathNames = [firstTargetInGroup.groupName || 'Group']
+          }
+        }
+      } else {
+        if (isTargetGroup) {
+          const firstTargetInGroup = prev.find((l) => l.groupPathIds?.includes(targetId) || l.groupId === targetId)
+          if (firstTargetInGroup) {
+            let tIds = firstTargetInGroup.groupPathIds ? [...firstTargetInGroup.groupPathIds] : (firstTargetInGroup.groupId ? [firstTargetInGroup.groupId] : [])
+            let tNames = firstTargetInGroup.groupPathNames ? [...firstTargetInGroup.groupPathNames] : (firstTargetInGroup.groupName ? [firstTargetInGroup.groupName] : [])
+            
+            const idx = tIds.indexOf(targetId)
+            if (idx !== -1) {
+              newPathIds = tIds.slice(0, idx)
+              newPathNames = tNames.slice(0, idx)
+            }
+          }
+        } else if (targetLayer) {
+          let tIds = targetLayer.groupPathIds ? [...targetLayer.groupPathIds] : (targetLayer.groupId ? [targetLayer.groupId] : [])
+          let tNames = targetLayer.groupPathNames ? [...targetLayer.groupPathNames] : (targetLayer.groupName ? [targetLayer.groupName] : [])
+          newPathIds = tIds
+          newPathNames = tNames
+        }
+      }
+      
+      const updatedMovedLayers = prev.filter((l) => sourceLayerIds.includes(l.id)).map((l) => {
+        let relativeIds: string[] = []
+        let relativeNames: string[] = []
+        if (isSourceGroup) {
+          let sIds = l.groupPathIds ? [...l.groupPathIds] : (l.groupId ? [l.groupId] : [])
+          let sNames = l.groupPathNames ? [...l.groupPathNames] : (l.groupName ? [l.groupName] : [])
+          const idx = sIds.indexOf(sourceId)
+          if (idx !== -1) {
+            relativeIds = sIds.slice(idx)
+            relativeNames = sNames.slice(idx)
+          }
+        }
+        
+        const finalIds = [...newPathIds, ...relativeIds]
+        const finalNames = [...newPathNames, ...relativeNames]
+        
+        return {
+          ...l,
+          groupId: finalIds.length > 0 ? finalIds[finalIds.length - 1] : undefined,
+          groupName: finalNames.length > 0 ? finalNames[finalNames.length - 1] : undefined,
+          groupPathIds: finalIds.length > 0 ? finalIds : undefined,
+          groupPathNames: finalNames.length > 0 ? finalNames : undefined,
+        }
+      })
+      
+      const remainingLayers = prev.filter((l) => !sourceLayerIds.includes(l.id))
+      
+      let insertIndex = -1
+      if (position === 'inside') {
+        const lastChild = [...remainingLayers].reverse().find((l) => l.groupPathIds?.includes(targetId) || l.groupId === targetId)
+        if (lastChild) {
+          insertIndex = remainingLayers.indexOf(lastChild) + 1
+        } else {
+          insertIndex = remainingLayers.length
+        }
+      } else {
+        if (isTargetGroup) {
+          const groupLayers = remainingLayers.filter((l) => l.groupPathIds?.includes(targetId) || l.groupId === targetId)
+          if (groupLayers.length > 0) {
+            insertIndex = position === 'before'
+              ? remainingLayers.indexOf(groupLayers[0])
+              : remainingLayers.indexOf(groupLayers[groupLayers.length - 1]) + 1
+          } else {
+            insertIndex = remainingLayers.length
+          }
+        } else {
+          insertIndex = remainingLayers.findIndex((l) => l.id === targetId)
+          if (insertIndex !== -1 && position === 'after') {
+            insertIndex += 1
+          }
+        }
+      }
+      
+      if (insertIndex === -1) {
+        insertIndex = remainingLayers.length
+      }
+      
+      return [
+        ...remainingLayers.slice(0, insertIndex),
+        ...updatedMovedLayers,
+        ...remainingLayers.slice(insertIndex),
+      ]
     })
   }, [])
 
@@ -2131,6 +2321,8 @@ function App() {
             visible: l.visible,
             ...(l.groupId !== undefined ? { groupId: l.groupId } : {}),
             ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
+            ...(l.groupPathIds !== undefined ? { groupPathIds: l.groupPathIds } : {}),
+            ...(l.groupPathNames !== undefined ? { groupPathNames: l.groupPathNames } : {}),
             color: l.color,
             ...(l.fillColor !== undefined ? { fillColor: l.fillColor } : {}),
             ...(l.lineColor !== undefined ? { lineColor: l.lineColor } : {}),
@@ -2215,6 +2407,8 @@ function App() {
             continue
           }
           if (isWmsOrGee) {
+            const gpIds = info.groupPathIds || (info.groupId ? [info.groupId] : undefined)
+            const gpNames = info.groupPathNames || (info.groupName ? [info.groupName] : (info.groupId ? ['Group'] : undefined))
             loadedLayers.push({
               id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               name: info.name,
@@ -2222,6 +2416,8 @@ function App() {
               visible: info.visible,
               ...(info.groupId !== undefined ? { groupId: info.groupId } : {}),
               ...(info.groupName !== undefined ? { groupName: info.groupName } : {}),
+              ...(gpIds !== undefined ? { groupPathIds: gpIds } : {}),
+              ...(gpNames !== undefined ? { groupPathNames: gpNames } : {}),
               data: { type: 'FeatureCollection', features: [] },
               color: info.color,
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
@@ -2281,6 +2477,8 @@ function App() {
                 } : info.styleSpec)
               : defaultStyleSpec
 
+            const gpIds = info.groupPathIds || (info.groupId ? [info.groupId] : undefined)
+            const gpNames = info.groupPathNames || (info.groupName ? [info.groupName] : (info.groupId ? ['Group'] : undefined))
             loadedLayers.push({
               id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
               name: info.name,
@@ -2288,6 +2486,8 @@ function App() {
               visible: info.visible,
               ...(info.groupId !== undefined ? { groupId: info.groupId } : {}),
               ...(info.groupName !== undefined ? { groupName: info.groupName } : {}),
+              ...(gpIds !== undefined ? { groupPathIds: gpIds } : {}),
+              ...(gpNames !== undefined ? { groupPathNames: gpNames } : {}),
               data: geojson,
               color: info.color,
               ...(info.fillColor !== undefined ? { fillColor: info.fillColor } : {}),
@@ -2548,6 +2748,7 @@ function App() {
                 onGroupWith={groupLayers}
                 onGroupMulti={groupLayersMulti}
                 onUngroup={ungroupLayer}
+                onUngroupGroup={ungroupGroup}
                 onToggleGroup={toggleLayerGroup}
                 onRenameGroup={renameGroup}
                 onStyleChange={handleSymbologyChange}
@@ -2556,6 +2757,7 @@ function App() {
                 }}
                 onAttributesChange={handleAttributesChange}
                 onReorderLayers={setLayers}
+                onMoveLayerOrGroup={moveLayerOrGroup}
               />
             </>
           )}
@@ -2585,56 +2787,67 @@ function App() {
           )}
           {activeLeftTab === 'zoning' && <ZoningPanel />}
           {activeLeftTab === 'scenarios' && (
-            <ScenarioPanel
-              scenarios={scenarios}
-              activeScenarioId={activeScenarioId}
-              layers={layers}
-              onCreateScenario={(name, description) => {
-                const id = `scenario-${genId()}`
-                setScenarios(prev => [...prev, {
-                  id, name, description,
-                  createdAt: Date.now(),
-                  layerIds: layers.map(l => l.id),
-                  layerVisibility: Object.fromEntries(layers.map(l => [l.id, l.visible]))
-                }])
-              }}
-              onActivate={(id) => {
-                setActiveScenarioId(id)
-                if (!id) {
-                  // Restore all layers to visible
-                  setLayers(prev => prev.map(l => ({ ...l, visible: true })))
-                } else {
-                  const scenario = scenarios.find(s => s.id === id)
-                  if (scenario) {
-                    setLayers(prev => prev.map(l => ({
-                      ...l,
-                      visible: scenario.layerIds.includes(l.id)
-                        ? (scenario.layerVisibility[l.id] ?? true)
-                        : false
-                    })))
-                  }
-                }
-              }}
-              onDelete={(id) => {
-                setScenarios(prev => prev.filter(s => s.id !== id))
-                if (activeScenarioId === id) setActiveScenarioId(null)
-              }}
-              onRename={(id, name) => setScenarios(prev =>
-                prev.map(s => s.id === id ? { ...s, name } : s)
-              )}
-              onAddLayer={(scenarioId, layerId) => setScenarios(prev =>
-                prev.map(s => s.id === scenarioId
-                  ? { ...s, layerIds: s.layerIds.includes(layerId) ? s.layerIds : [...s.layerIds, layerId] }
-                  : s
-                )
-              )}
-              onRemoveLayer={(scenarioId, layerId) => setScenarios(prev =>
-                prev.map(s => s.id === scenarioId
-                  ? { ...s, layerIds: s.layerIds.filter(id => id !== layerId) }
-                  : s
-                )
-              )}
-            />
+            <div style={{ display: 'flex', flexDirection: 'column', height: '100%', overflow: 'hidden' }}>
+              {/* AI Scenario Builder — top section */}
+              <div style={{ flex: '0 0 auto', maxHeight: '55%', overflowY: 'auto', borderBottom: '2px solid var(--border)' }}>
+                <ScenarioBuilderPanel
+                  mapBounds={mapBounds}
+                  onOpenArtifacts={() => setAppMode('artifacts')}
+                />
+              </div>
+              {/* Manual scenario manager — bottom section */}
+              <div style={{ flex: 1, overflowY: 'auto', minHeight: 0 }}>
+                <ScenarioPanel
+                  scenarios={scenarios}
+                  activeScenarioId={activeScenarioId}
+                  layers={layers}
+                  onCreateScenario={(name, description) => {
+                    const id = `scenario-${genId()}`
+                    setScenarios(prev => [...prev, {
+                      id, name, description,
+                      createdAt: Date.now(),
+                      layerIds: layers.map(l => l.id),
+                      layerVisibility: Object.fromEntries(layers.map(l => [l.id, l.visible]))
+                    }])
+                  }}
+                  onActivate={(id) => {
+                    setActiveScenarioId(id)
+                    if (!id) {
+                      setLayers(prev => prev.map(l => ({ ...l, visible: true })))
+                    } else {
+                      const scenario = scenarios.find(s => s.id === id)
+                      if (scenario) {
+                        setLayers(prev => prev.map(l => ({
+                          ...l,
+                          visible: scenario.layerIds.includes(l.id)
+                            ? (scenario.layerVisibility[l.id] ?? true)
+                            : false
+                        })))
+                      }
+                    }
+                  }}
+                  onDelete={(id) => {
+                    setScenarios(prev => prev.filter(s => s.id !== id))
+                    if (activeScenarioId === id) setActiveScenarioId(null)
+                  }}
+                  onRename={(id, name) => setScenarios(prev =>
+                    prev.map(s => s.id === id ? { ...s, name } : s)
+                  )}
+                  onAddLayer={(scenarioId, layerId) => setScenarios(prev =>
+                    prev.map(s => s.id === scenarioId
+                      ? { ...s, layerIds: s.layerIds.includes(layerId) ? s.layerIds : [...s.layerIds, layerId] }
+                      : s
+                    )
+                  )}
+                  onRemoveLayer={(scenarioId, layerId) => setScenarios(prev =>
+                    prev.map(s => s.id === scenarioId
+                      ? { ...s, layerIds: s.layerIds.filter(id => id !== layerId) }
+                      : s
+                    )
+                  )}
+                />
+              </div>
+            </div>
           )}
         </aside>
         )}

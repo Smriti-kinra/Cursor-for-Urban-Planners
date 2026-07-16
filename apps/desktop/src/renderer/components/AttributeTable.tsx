@@ -69,12 +69,6 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
         <div className="attr-header">
           <div className="attr-title-group">
             <span className="attr-title">Attributes</span>
-            <button className="attr-close-btn" onClick={onClose} title="Close table">
-              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                <line x1="18" y1="6" x2="6" y2="18"></line>
-                <line x1="6" y1="6" x2="18" y2="18"></line>
-              </svg>
-            </button>
           </div>
         </div>
         <p className="attr-empty">This layer has no features.</p>
@@ -87,12 +81,6 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
       <div className="attr-header">
         <div className="attr-title-group">
           <span className="attr-title">Attributes</span>
-          <button className="attr-close-btn" onClick={onClose} title="Close table">
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-              <line x1="18" y1="6" x2="6" y2="18"></line>
-              <line x1="6" y1="6" x2="18" y2="18"></line>
-            </svg>
-          </button>
         </div>
         <div className="attr-header-addcol">
           <input
@@ -116,16 +104,6 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
               {columns.map((c) => (
                 <th key={c}>
                   <span className="attr-colname" title={c}>{c}</span>
-                  <button
-                    className="attr-coldel"
-                    onClick={() => deleteColumn(c)}
-                    title={`Delete property "${c}"`}
-                  >
-                    <svg width="8" height="8" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                      <line x1="18" y1="6" x2="6" y2="18"></line>
-                      <line x1="6" y1="6" x2="18" y2="18"></line>
-                    </svg>
-                  </button>
                 </th>
               ))}
               <th className="attr-rowdel-h" />

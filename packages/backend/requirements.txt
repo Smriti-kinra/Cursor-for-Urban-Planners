@@ -21,3 +21,10 @@ python-docx>=1.1.0
 pyinstaller>=6.0
 networkx>=3.0,<4
 earthengine-api>=0.1.400,<1
+# ── PDF / LaTeX export backends (cascade: pypandoc → xelatex → weasyprint) ──
+# pypandoc_binary bundles its own pandoc binary; no system install needed.
+pypandoc_binary
+# weasyprint: pure-Python HTML→PDF fallback (requires pango: brew install pango)
+weasyprint
+# markdown: used by the weasyprint fallback to convert .md → HTML
+markdown>=3.5,<4

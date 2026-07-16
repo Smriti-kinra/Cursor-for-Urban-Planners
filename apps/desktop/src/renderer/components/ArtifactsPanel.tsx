@@ -64,12 +64,14 @@ export default function ArtifactsPanel({
   const containerRef = useRef<HTMLDivElement>(null)
   const [isWide, setIsWide] = useState(false)
 
-  const [draggedArtId, setDraggedArtId] = useState<number | null>(null)
+  const draggedArtIdRef = useRef<number | null>(null)
   const [dragOverArtId, setDragOverArtId] = useState<number | null>(null)
   const [dropArtPosition, setDropArtPosition] = useState<'before' | 'after' | null>(null)
+  const [editingArtId, setEditingArtId] = useState<number | null>(null)
 
   const handleArtDragStart = (id: number, e: React.DragEvent) => {
-    setDraggedArtId(id)
+    draggedArtIdRef.current = id
+    e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', String(id))
   }
 
@@ -83,19 +85,21 @@ export default function ArtifactsPanel({
   }
 
   const handleArtDragEnd = () => {
-    setDraggedArtId(null)
+    draggedArtIdRef.current = null
     setDragOverArtId(null)
     setDropArtPosition(null)
   }
 
   const handleArtDrop = (targetId: number, e: React.DragEvent) => {
     e.preventDefault()
-    if (draggedArtId === null || draggedArtId === targetId) return
+    const draggedIdStr = e.dataTransfer.getData('text/plain')
+    const draggedId = draggedArtIdRef.current !== null ? draggedArtIdRef.current : (draggedIdStr ? Number(draggedIdStr) : null)
+    if (draggedId === null || draggedId === targetId) return
 
-    const draggedArt = artifacts.find((a) => a.id === draggedArtId)
+    const draggedArt = artifacts.find((a) => a.id === draggedId)
     if (!draggedArt) return
 
-    const remainingArts = artifacts.filter((a) => a.id !== draggedArtId)
+    const remainingArts = artifacts.filter((a) => a.id !== draggedId)
     let insertIndex = remainingArts.findIndex((a) => a.id === targetId)
     if (insertIndex !== -1) {
       if (dropArtPosition === 'after') {
@@ -586,25 +590,42 @@ export default function ArtifactsPanel({
               >
                 <div className="artifact-item-header">
                   <span className="artifact-type-badge">{a.format ?? a.artifact_type}</span>
-                  <input
-                    type="text"
-                    className="artifact-title-input"
-                    value={a.title}
-                    onClick={(e) => e.stopPropagation()}
-                    onChange={(e) => {
-                      const val = e.target.value
-                      setArtifacts((prev) =>
-                        prev.map((art) => (art.id === a.id ? { ...art, title: val } : art)),
-                      )
-                    }}
-                    onBlur={() => saveTitle(a.id, a.title)}
-                    onKeyDown={(e) => {
-                      if (e.key === 'Enter') {
-                        (e.target as HTMLInputElement).blur()
-                      }
-                    }}
-                    title="Rename artifact"
-                  />
+                  {editingArtId === a.id ? (
+                    <input
+                      type="text"
+                      className="artifact-title-input"
+                      value={a.title}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setArtifacts((prev) =>
+                          prev.map((art) => (art.id === a.id ? { ...art, title: val } : art)),
+                        )
+                      }}
+                      onBlur={() => {
+                        saveTitle(a.id, a.title)
+                        setEditingArtId(null)
+                      }}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          (e.target as HTMLInputElement).blur()
+                        }
+                      }}
+                      autoFocus
+                      title="Rename artifact"
+                    />
+                  ) : (
+                    <span
+                      className="artifact-title-span"
+                      title={a.title}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        setEditingArtId(a.id)
+                      }}
+                    >
+                      {a.title}
+                    </span>
+                  )}
                   <button
                     className="delete-btn"
                     title="Delete"

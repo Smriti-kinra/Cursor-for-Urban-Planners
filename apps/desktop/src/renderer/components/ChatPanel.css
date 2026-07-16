@@ -74,11 +74,9 @@
 
 .chat-header-action-btn:hover {
   background: var(--bg-hover, #2e3047);
-  color: var(--text-primary, #f4f4f7);
 }
 
 .chat-header-action-btn.active {
-  color: var(--accent, #3b82f6);
   background: rgba(137, 180, 250, 0.12);
   border-color: rgba(137, 180, 250, 0.2);
 }
@@ -1238,7 +1236,6 @@
 
 .api-settings-btn:hover {
   background: var(--bg-hover, #2e3047);
-  color: var(--text-primary, #f4f4f7);
 }
 
 .api-settings-btn:hover svg {
@@ -1247,7 +1244,6 @@
 
 .api-settings-btn.active {
   background: rgba(137, 180, 250, 0.12);
-  color: var(--accent);
   border-color: rgba(137, 180, 250, 0.2);
 }
 
@@ -1571,7 +1567,6 @@
 }
 
 .chat-attach-btn:hover:not(:disabled) {
-  color: var(--accent);
   background: var(--bg-hover);
 }
 

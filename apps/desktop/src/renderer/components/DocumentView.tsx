@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useState, useRef } from 'react'
 import './DocumentView.css'
 import { IMAGE_EXTS, MIME_MAP, rasterizePdfPage } from '../lib/pdf-raster'
 
@@ -49,12 +49,14 @@ export default function DocumentView({
 
   const activeDoc = openDocs.find((d) => d.id === activeDocId) || null
 
-  const [draggedDocId, setDraggedDocId] = useState<string | null>(null)
+  const draggedDocIdRef = useRef<string | null>(null)
   const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
   const [dropDocPosition, setDropDocPosition] = useState<'before' | 'after' | null>(null)
+  const [editingDocId, setEditingDocId] = useState<string | null>(null)
 
   const handleDocDragStart = (id: string, e: React.DragEvent) => {
-    setDraggedDocId(id)
+    draggedDocIdRef.current = id
+    e.dataTransfer.effectAllowed = 'move'
     e.dataTransfer.setData('text/plain', id)
   }
 
@@ -68,19 +70,20 @@ export default function DocumentView({
   }
 
   const handleDocDragEnd = () => {
-    setDraggedDocId(null)
+    draggedDocIdRef.current = null
     setDragOverDocId(null)
     setDropDocPosition(null)
   }
 
   const handleDocDrop = (targetId: string, e: React.DragEvent) => {
     e.preventDefault()
-    if (!draggedDocId || draggedDocId === targetId) return
+    const draggedId = draggedDocIdRef.current || e.dataTransfer.getData('text/plain')
+    if (!draggedId || draggedId === targetId) return
 
-    const draggedDoc = openDocs.find((d) => d.id === draggedDocId)
+    const draggedDoc = openDocs.find((d) => d.id === draggedId)
     if (!draggedDoc) return
 
-    const remainingDocs = openDocs.filter((d) => d.id !== draggedDocId)
+    const remainingDocs = openDocs.filter((d) => d.id !== draggedId)
     let insertIndex = remainingDocs.findIndex((d) => d.id === targetId)
     if (insertIndex !== -1) {
       if (dropDocPosition === 'after') {
@@ -231,7 +234,21 @@ export default function DocumentView({
             </button>
           </div>
 
-          <div className="doc-sidebar-list">
+          <div
+            className="doc-sidebar-list"
+            onDragOver={(e) => e.preventDefault()}
+            onDrop={(e) => {
+              e.preventDefault()
+              const draggedId = draggedDocIdRef.current || e.dataTransfer.getData('text/plain')
+              if (!draggedId) return
+              const draggedDoc = openDocs.find((d) => d.id === draggedId)
+              if (!draggedDoc) return
+              const remainingDocs = openDocs.filter((d) => d.id !== draggedId)
+              const newDocs = [...remainingDocs, draggedDoc]
+              setOpenDocs(newDocs)
+              handleDocDragEnd()
+            }}
+          >
             {openDocs.length === 0 ? (
               <div className="doc-sidebar-empty">
                 <div className="empty-icon-container-sm">
@@ -270,9 +287,38 @@ export default function DocumentView({
                       </>
                     )}
                   </svg>
-                  <span className="doc-sidebar-item-name" title={doc.filePath}>
-                    {doc.fileName}
-                  </span>
+                  {editingDocId === doc.id ? (
+                    <input
+                      type="text"
+                      className="doc-title-input"
+                      value={doc.fileName}
+                      onClick={(e) => e.stopPropagation()}
+                      onChange={(e) => {
+                        const val = e.target.value
+                        setOpenDocs((prev) =>
+                          prev.map((d) => (d.id === doc.id ? { ...d, fileName: val } : d)),
+                        )
+                      }}
+                      onBlur={() => setEditingDocId(null)}
+                      onKeyDown={(e) => {
+                        if (e.key === 'Enter') {
+                          setEditingDocId(null)
+                        }
+                      }}
+                      autoFocus
+                    />
+                  ) : (
+                    <span
+                      className="doc-sidebar-item-name"
+                      title={doc.filePath}
+                      onDoubleClick={(e) => {
+                        e.stopPropagation()
+                        setEditingDocId(doc.id)
+                      }}
+                    >
+                      {doc.fileName}
+                    </span>
+                  )}
                   <button
                     className="doc-sidebar-item-close"
                     onClick={(e) => {
@@ -313,9 +359,6 @@ export default function DocumentView({
             <p className="doc-empty-detail-hint">
               Open a map image or PDF to analyse it with the AI assistant.
             </p>
-            <button className="doc-empty-open-btn" onClick={openFile}>
-              Open File
-            </button>
           </div>
         ) : (
           <>

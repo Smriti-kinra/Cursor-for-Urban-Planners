@@ -15,8 +15,9 @@ interface LayerPanelProps {
   activeAttrId?: string | null
   onRename?: (id: string, name: string) => void
   onGroupWith?: (sourceId: string, targetId: string) => void
-  onGroupMulti?: (ids: string[]) => void
+  onGroupMulti?: (ids: string[], customGroupName?: string) => void
   onUngroup?: (id: string) => void
+  onUngroupGroup?: (groupId: string) => void
   onToggleGroup?: (groupId: string, visible: boolean) => void
   onRenameGroup?: (groupId: string, name: string) => void
   // Props to drive the popups inside LayerPanel
@@ -24,11 +25,25 @@ interface LayerPanelProps {
   onUpdateLayer?: (layerId: string, updates: Partial<GeoJSONLayer>) => void
   onAttributesChange?: (layerId: string, data: any) => void
   onReorderLayers?: (layers: GeoJSONLayer[]) => void
+  onMoveLayerOrGroup?: (sourceId: string, targetId: string, position: 'before' | 'after' | 'inside') => void
 }
 
-type LayerRow =
-  | { type: 'layer'; layer: GeoJSONLayer }
-  | { type: 'group'; groupId: string; groupName: string; layers: GeoJSONLayer[] }
+export interface TreeGroupNode {
+  type: 'group'
+  id: string
+  name: string
+  depth: number
+  children: TreeNode[]
+}
+
+export interface TreeLayerNode {
+  type: 'layer'
+  id: string
+  depth: number
+  layer: GeoJSONLayer
+}
+
+export type TreeNode = TreeGroupNode | TreeLayerNode
 
 export default function LayerPanel({
   layers,
@@ -43,20 +58,26 @@ export default function LayerPanel({
   onGroupWith,
   onGroupMulti,
   onUngroup,
+  onUngroupGroup,
   onToggleGroup,
   onRenameGroup,
   onStyleChange,
   onUpdateLayer,
   onAttributesChange,
   onReorderLayers,
+  onMoveLayerOrGroup,
 }: LayerPanelProps) {
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
-  // menu carries the right-clicked layerId + cursor pos + snapshot of selected IDs at time of right-click
-  const [menu, setMenu] = useState<{ layerId: string; x: number; y: number; selectedIds: Set<string> } | null>(null)
-
-  // multi-select state
+  const [menu, setMenu] = useState<{ id: string; type: 'layer' | 'group'; x: number; y: number; selectedIds: Set<string> } | null>(null)
+  const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
   const [selectedLayerIds, setSelectedLayerIds] = useState<Set<string>>(new Set())
   const panelRef = useRef<HTMLDivElement>(null)
+
+  // drag-and-drop state
+  const [draggedId, setDraggedId] = useState<string | null>(null)
+  const [draggedType, setDraggedType] = useState<'layer' | 'group' | null>(null)
+  const [dragOverId, setDragOverId] = useState<string | null>(null)
+  const [dropPosition, setDropPosition] = useState<'before' | 'after' | 'inside' | null>(null)
 
   // Clear selection when clicking anywhere outside the panel
   useEffect(() => {
@@ -85,40 +106,6 @@ export default function LayerPanel({
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [activeStyleId, onStyle])
 
-  // drag-and-drop state
-  const [draggedId, setDraggedId] = useState<string | null>(null)
-  const [draggedType, setDraggedType] = useState<'layer' | 'group' | null>(null)
-  const [dragOverId, setDragOverId] = useState<string | null>(null)
-  const [dropPosition, setDropPosition] = useState<'before' | 'after' | null>(null)
-
-  const menuLayer = useMemo(
-    () => (menu ? layers.find((l) => l.id === menu.layerId) : null),
-    [menu, layers],
-  )
-
-  const groupTargets = useMemo(() => {
-    if (!menuLayer) return []
-    // Allow grouping with other ungrouped layers, or existing group leaders.
-    const uniqueGroups = new Map<string, string>() // groupId -> name
-    layers.forEach((l) => {
-      if (l.groupId && l.groupId !== menuLayer.groupId) {
-        uniqueGroups.set(l.groupId, l.groupName || l.groupId)
-      }
-    })
-
-    const groupLeaders = Array.from(uniqueGroups.entries()).map(([id, name]) => ({
-      id,
-      name: '',
-      groupName: name,
-    }))
-
-    const rawLayers = layers
-      .filter((l) => l.id !== menuLayer.id && !l.groupId)
-      .map((l) => ({ id: l.id, name: l.name, groupName: '' }))
-
-    return [...groupLeaders, ...rawLayers]
-  }, [menuLayer, layers])
-
   useEffect(() => {
     if (!menu) return
     const close = () => setMenu(null)
@@ -130,34 +117,220 @@ export default function LayerPanel({
     }
   }, [menu])
 
-  const rows = useMemo<LayerRow[]>(() => {
-    const emittedGroups = new Set<string>()
-    const byGroup = new Map<string, GeoJSONLayer[]>()
-    layers.forEach((layer) => {
-      if (!layer.groupId) return
-      byGroup.set(layer.groupId, [...(byGroup.get(layer.groupId) || []), layer])
-    })
+  // Helper functions for recursively resolving group layers
+  const getGroupLayersRecursively = (node: TreeGroupNode): GeoJSONLayer[] => {
+    const result: GeoJSONLayer[] = []
+    const traverse = (n: TreeNode) => {
+      if (n.type === 'layer') {
+        result.push(n.layer)
+      } else {
+        n.children.forEach(traverse)
+      }
+    }
+    node.children.forEach(traverse)
+    return result
+  }
 
-    return layers.flatMap((layer): LayerRow[] => {
-      if (!layer.groupId) return [{ type: 'layer', layer }]
-      if (emittedGroups.has(layer.groupId)) return []
-      emittedGroups.add(layer.groupId)
-      return [{
-        type: 'group',
-        groupId: layer.groupId,
-        groupName: layer.groupName || 'Group',
-        layers: byGroup.get(layer.groupId) || [layer],
-      }]
+  const getGroupPathKey = (node: TreeGroupNode): string => {
+    const sample = layers.find((l) => l.groupPathIds?.includes(node.id) || l.groupId === node.id)
+    if (sample) {
+      const ids = sample.groupPathIds || (sample.groupId ? [sample.groupId] : [])
+      const idx = ids.indexOf(node.id)
+      if (idx !== -1) {
+        return ids.slice(0, idx + 1).join('/')
+      }
+    }
+    return node.id
+  }
+
+  const onToggleGroupPath = (node: TreeGroupNode, visible: boolean) => {
+    const childLayers = getGroupLayersRecursively(node)
+    childLayers.forEach((l) => {
+      if (l.visible !== visible) {
+        onToggle(l.id)
+      }
     })
+  }
+
+  const onRenameGroupPath = (node: TreeGroupNode, name: string) => {
+    if (name.trim()) {
+      onRenameGroup?.(node.id, name.trim())
+    }
+  }
+
+  // Build the tree dynamically from layers
+  const tree = useMemo(() => {
+    const root: TreeNode[] = []
+    layers.forEach((layer) => {
+      let ids: string[] = []
+      let names: string[] = []
+      
+      if (layer.groupPathIds && layer.groupPathIds.length > 0) {
+        ids = layer.groupPathIds
+        names = layer.groupPathNames || layer.groupPathIds.map(() => 'Group')
+      } else if (layer.groupId) {
+        ids = [layer.groupId]
+        names = [layer.groupName || 'Group']
+      }
+      
+      if (ids.length === 0) {
+        root.push({
+          type: 'layer',
+          id: layer.id,
+          depth: 0,
+          layer,
+        })
+        return
+      }
+      
+      let currentChildren = root
+      for (let i = 0; i < ids.length; i++) {
+        const gId = ids[i]
+        const gName = names[i] || 'Group'
+        
+        let groupNode = currentChildren.find((node) => node.type === 'group' && node.id === gId) as TreeGroupNode
+        if (!groupNode) {
+          groupNode = {
+            type: 'group',
+            id: gId,
+            name: gName,
+            depth: i,
+            children: [],
+          }
+          currentChildren.push(groupNode)
+        }
+        currentChildren = groupNode.children
+      }
+      
+      currentChildren.push({
+        type: 'layer',
+        id: layer.id,
+        depth: ids.length,
+        layer,
+      })
+    })
+    return root
   }, [layers])
 
-  if (layers.length === 0) {
-    return (
-      <div className="layer-panel-empty">
-        <p>No layers loaded</p>
-        <p className="hint">Click a .geojson file in Files to add a layer</p>
-      </div>
-    )
+  const menuLayer = useMemo(
+    () => (menu && menu.type === 'layer' ? layers.find((l) => l.id === menu.id) : null),
+    [menu, layers],
+  )
+
+  const menuGroupNode = useMemo(() => {
+    if (!menu || menu.type !== 'group') return null
+    let found: TreeGroupNode | null = null
+    const traverse = (node: TreeNode) => {
+      if (node.type === 'group') {
+        if (node.id === menu.id) {
+          found = node
+        } else {
+          node.children.forEach(traverse)
+        }
+      }
+    }
+    tree.forEach(traverse)
+    return found
+  }, [menu, tree])
+
+  // Context menu group targets
+  const groupTargets = useMemo(() => {
+    if (!menuLayer) return []
+    const pathsMap = new Map<string, string>()
+    layers.forEach((l) => {
+      const ids = l.groupPathIds || (l.groupId ? [l.groupId] : [])
+      const names = l.groupPathNames || (l.groupName ? [l.groupName] : [])
+      for (let i = 0; i < ids.length; i++) {
+        const subPath = ids.slice(0, i + 1).join('/')
+        const subName = names.slice(0, i + 1).join(' > ')
+        pathsMap.set(subPath, subName)
+      }
+    })
+    
+    const groupTargetsList = Array.from(pathsMap.entries()).map(([pathKey, fullName]) => {
+      const parts = pathKey.split('/')
+      const leafId = parts[parts.length - 1]
+      return {
+        id: leafId,
+        name: '',
+        groupName: fullName,
+      }
+    })
+    
+    const rawLayers = layers
+      .filter((l) => l.id !== menuLayer.id && !(l.groupPathIds && l.groupPathIds.length > 0) && !l.groupId)
+      .map((l) => ({ id: l.id, name: l.name, groupName: '' }))
+      
+    return [...groupTargetsList, ...rawLayers]
+  }, [menuLayer, layers])
+
+  // Context Menu triggers
+  const handleContextMenu = (layerId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    setSelectedLayerIds((prev) => {
+      const next = new Set(prev)
+      next.add(layerId)
+      setMenu({ id: layerId, type: 'layer', x: e.clientX, y: e.clientY, selectedIds: next })
+      return next
+    })
+  }
+
+  const handleGroupContextMenu = (groupId: string, e: React.MouseEvent) => {
+    e.preventDefault()
+    setMenu({ id: groupId, type: 'group', x: e.clientX, y: e.clientY, selectedIds: new Set() })
+  }
+
+  // Drag and Drop handlers
+  const handleDragStart = (id: string, e: React.DragEvent) => {
+    setDraggedId(id)
+    setDraggedType('layer')
+    e.dataTransfer.setData('text/plain', id)
+  }
+
+  const handleDragStartGroup = (id: string, e: React.DragEvent) => {
+    setDraggedId(id)
+    setDraggedType('group')
+    e.dataTransfer.setData('text/plain', id)
+  }
+
+  const handleDragOver = (id: string, e: React.DragEvent) => {
+    e.preventDefault()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relativeY = e.clientY - rect.top
+    const pos = relativeY < rect.height / 2 ? 'before' : 'after'
+    setDragOverId(id)
+    setDropPosition(pos)
+  }
+
+  const handleDragOverGroup = (id: string, e: React.DragEvent) => {
+    e.preventDefault()
+    e.stopPropagation()
+    const rect = e.currentTarget.getBoundingClientRect()
+    const relativeY = e.clientY - rect.top
+    if (relativeY < rect.height * 0.25) {
+      setDragOverId(id)
+      setDropPosition('before')
+    } else if (relativeY > rect.height * 0.75) {
+      setDragOverId(id)
+      setDropPosition('after')
+    } else {
+      setDragOverId(id)
+      setDropPosition('inside')
+    }
+  }
+
+  const handleDragEnd = () => {
+    setDraggedId(null)
+    setDraggedType(null)
+    setDragOverId(null)
+    setDropPosition(null)
+  }
+
+  const handleDrop = (targetId: string, e: React.DragEvent) => {
+    e.preventDefault()
+    if (!draggedId) return
+    onMoveLayerOrGroup?.(draggedId, targetId, dropPosition || 'after')
+    handleDragEnd()
   }
 
   const getSwatchStyle = (l: GeoJSONLayer): React.CSSProperties => {
@@ -222,100 +395,6 @@ export default function LayerPanel({
     })
   }
 
-  // Right-click: add the right-clicked layer to selection (without clearing others), then show context menu
-  const handleContextMenu = (layerId: string, e: React.MouseEvent) => {
-    e.preventDefault()
-    setSelectedLayerIds((prev) => {
-      const next = new Set(prev)
-      // Always include the right-clicked layer
-      next.add(layerId)
-      // Snapshot used by context menu rendering
-      setMenu({ layerId, x: e.clientX, y: e.clientY, selectedIds: next })
-      return next
-    })
-  }
-
-  // Drag and Drop handlers
-  const handleDragStart = (id: string, e: React.DragEvent) => {
-    setDraggedId(id)
-    setDraggedType('layer')
-    e.dataTransfer.setData('text/plain', id)
-  }
-
-  const handleDragOver = (id: string, e: React.DragEvent) => {
-    e.preventDefault()
-    const rect = e.currentTarget.getBoundingClientRect()
-    const relativeY = e.clientY - rect.top
-    const pos = relativeY < rect.height / 2 ? 'before' : 'after'
-    setDragOverId(id)
-    setDropPosition(pos)
-  }
-
-  const handleDragEnd = () => {
-    setDraggedId(null)
-    setDraggedType(null)
-    setDragOverId(null)
-    setDropPosition(null)
-  }
-
-  const handleDrop = (targetId: string, e: React.DragEvent) => {
-    e.preventDefault()
-    if (!draggedId) return
-
-    let draggedLayerIds: string[] = []
-    if (draggedType === 'group') {
-      draggedLayerIds = layers.filter((l) => l.groupId === draggedId).map((l) => l.id)
-    } else {
-      if (selectedLayerIds.has(draggedId)) {
-        draggedLayerIds = layers.filter((l) => selectedLayerIds.has(l.id)).map((l) => l.id)
-      } else {
-        draggedLayerIds = [draggedId]
-      }
-    }
-
-    if (draggedLayerIds.length === 0) return
-
-    const targetLayer = layers.find((l) => l.id === targetId)
-    const targetGroupId = targetLayer?.groupId || null
-    const targetGroupName = targetLayer?.groupName || null
-
-    const remainingLayers = layers.filter((l) => !draggedLayerIds.includes(l.id))
-    let insertIndex = remainingLayers.findIndex((l) => l.id === targetId)
-
-    if (insertIndex === -1) {
-      // Drop target might be a group header ID
-      const groupLayers = remainingLayers.filter((l) => l.groupId === targetId)
-      if (groupLayers.length > 0) {
-        insertIndex = dropPosition === 'before'
-          ? remainingLayers.indexOf(groupLayers[0])
-          : remainingLayers.indexOf(groupLayers[groupLayers.length - 1]) + 1
-      } else {
-        insertIndex = remainingLayers.length
-      }
-    } else {
-      if (dropPosition === 'after') {
-        insertIndex += 1
-      }
-    }
-
-    const updatedDraggedLayers = layers
-      .filter((l) => draggedLayerIds.includes(l.id))
-      .map((l) => ({
-        ...l,
-        groupId: targetGroupId,
-        groupName: targetGroupName,
-      }))
-
-    const newLayers = [
-      ...remainingLayers.slice(0, insertIndex),
-      ...updatedDraggedLayers,
-      ...remainingLayers.slice(insertIndex),
-    ]
-
-    onReorderLayers?.(newLayers)
-    handleDragEnd()
-  }
-
   const renderLayer = (layer: GeoJSONLayer, index: number, total: number, grouped = false) => {
     return (
       <LayerItemRow
@@ -337,7 +416,7 @@ export default function LayerPanel({
         getSwatchStyle={getSwatchStyle}
         isSelected={selectedLayerIds.has(layer.id)}
         dragOverId={dragOverId}
-        dropPosition={dropPosition}
+        dropPosition={dropPosition === 'inside' ? null : dropPosition}
         onSelect={handleSelect}
         onDragStart={handleDragStart}
         onDragOver={handleDragOver}
@@ -347,172 +426,368 @@ export default function LayerPanel({
     )
   }
 
+  const renderNode = (node: TreeNode) => {
+    if (node.type === 'layer') {
+      return (
+        <div key={node.id} className="nested-layer-item">
+          {renderLayer(node.layer, 0, 1, node.depth > 0)}
+        </div>
+      )
+    }
+    
+    const pathKey = getGroupPathKey(node)
+    const collapsed = collapsedGroups.has(pathKey)
+    const childLayers = getGroupLayersRecursively(node)
+    const allVisible = childLayers.every((layer) => layer.visible)
+    const isGroupSelected = childLayers.length > 0 && childLayers.every((l) => selectedLayerIds.has(l.id))
+
+    return (
+      <div key={node.id} className="layer-group">
+        <div
+          className={`layer-group-header ${isGroupSelected ? 'selected' : ''} ${!allVisible ? 'hidden' : ''} ${dragOverId === node.id ? `drag-over-${dropPosition}` : ''}`}
+          draggable={true}
+          onDragStart={(e) => handleDragStartGroup(node.id, e)}
+          onDragOver={(e) => handleDragOverGroup(node.id, e)}
+          onDragEnd={handleDragEnd}
+          onDrop={(e) => handleDrop(node.id, e)}
+          onContextMenu={(e) => handleGroupContextMenu(node.id, e)}
+          onClick={(e) => {
+            const target = e.target as HTMLElement
+            if (target.closest('button') || target.closest('input')) {
+              return
+            }
+            setSelectedLayerIds((prev) => {
+              const next = new Set(prev)
+              const groupLayerIds = childLayers.map((l) => l.id)
+              const allSelected = groupLayerIds.every((id) => next.has(id))
+              if (allSelected) {
+                groupLayerIds.forEach((id) => next.delete(id))
+              } else {
+                groupLayerIds.forEach((id) => next.add(id))
+              }
+              return next
+            })
+          }}
+        >
+          <button
+            className="layer-group-toggle"
+            onClick={() => {
+              setCollapsedGroups((prev) => {
+                const next = new Set(prev)
+                if (next.has(pathKey)) next.delete(pathKey)
+                else next.add(pathKey)
+                return next
+              })
+            }}
+            title={collapsed ? 'Expand group' : 'Collapse group'}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {collapsed ? (
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="9 18 15 12 9 6"></polyline>
+              </svg>
+            ) : (
+              <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                <polyline points="6 9 12 15 18 9"></polyline>
+              </svg>
+            )}
+          </button>
+          
+          <button
+            className="layer-visibility"
+            onClick={() => onToggleGroupPath(node, !allVisible)}
+            title={allVisible ? 'Hide group' : 'Show group'}
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            {allVisible ? (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
+                <circle cx="12" cy="12" r="3"></circle>
+              </svg>
+            ) : (
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+                <path d="M2 12c2-4 5-6 10-6s8 2 10 6"></path>
+                <path d="M6 15.5l-1.5 2"></path>
+                <path d="M12 17v2"></path>
+                <path d="M18 15.5l1.5 2"></path>
+              </svg>
+            )}
+          </button>
+          
+          {editingGroupId === node.id ? (
+            <input
+              type="text"
+              className="layer-group-name-input"
+              defaultValue={node.name}
+              onKeyDown={(e) => {
+                if (e.key === 'Enter') {
+                  const val = (e.target as HTMLInputElement).value
+                  onRenameGroupPath(node, val)
+                  setEditingGroupId(null)
+                }
+              }}
+              onBlur={(e) => {
+                const val = (e.target as HTMLInputElement).value
+                onRenameGroupPath(node, val)
+                setEditingGroupId(null)
+              }}
+              autoFocus
+              title="Rename group"
+            />
+          ) : (
+            <span
+              className="layer-group-name"
+              title={node.name}
+              onDoubleClick={(e) => {
+                e.stopPropagation()
+                setEditingGroupId(node.id)
+              }}
+            >
+              {node.name}
+            </span>
+          )}
+          
+          <span className="layer-count">{childLayers.length}</span>
+          
+          <button
+            className="layer-remove"
+            onClick={(e) => {
+              e.stopPropagation()
+              childLayers.forEach((l) => onRemove?.(l.id))
+              setSelectedLayerIds(new Set())
+            }}
+            title="Remove group and layers"
+            style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+          >
+            <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+              <line x1="18" y1="6" x2="6" y2="18"></line>
+              <line x1="6" y1="6" x2="18" y2="18"></line>
+            </svg>
+          </button>
+        </div>
+        
+        {!collapsed && (
+          <div className="layer-group-children">
+            {node.children.map((child) => renderNode(child))}
+          </div>
+        )}
+      </div>
+    )
+  }
+
+  if (layers.length === 0) {
+    return (
+      <div className="layer-panel-empty">
+        <p>No layers loaded</p>
+        <p className="hint">Click a .geojson file in Files to add a layer</p>
+      </div>
+    )
+  }
+
   return (
     <div
       ref={panelRef}
       className="layer-panel"
+      onDragOver={(e) => e.preventDefault()}
+      onDrop={(e) => {
+        e.preventDefault()
+        if (draggedId) {
+          onMoveLayerOrGroup?.(draggedId, '', 'after')
+          handleDragEnd()
+        }
+      }}
       onClick={(e) => {
-        // Clicking the panel background (not a row) clears selection
         if (e.target === e.currentTarget) setSelectedLayerIds(new Set())
       }}
     >
-      {rows.map((row, idx) => {
-        if (row.type === 'layer') return renderLayer(row.layer, idx, rows.length)
+      {tree.map((node) => renderNode(node))}
 
-        const collapsed = collapsedGroups.has(row.groupId)
-        const allVisible = row.layers.every((layer) => layer.visible)
-        return (
-          <div key={row.groupId} className="layer-group">
+      {menu && (() => {
+        if (menu.type === 'group' && menuGroupNode) {
+          const childLayers = getGroupLayersRecursively(menuGroupNode)
+          const allVisible = childLayers.every((layer) => layer.visible)
+          return (
             <div
-              className={`layer-group-header ${!allVisible ? 'hidden' : ''} ${dragOverId === row.groupId ? `drag-over-${dropPosition}` : ''}`}
-              draggable={true}
-              onDragStart={(e) => {
-                setDraggedId(row.groupId)
-                setDraggedType('group')
-                e.dataTransfer.setData('text/plain', row.groupId)
-              }}
-              onDragOver={(e) => {
-                e.preventDefault()
-                const rect = e.currentTarget.getBoundingClientRect()
-                const relativeY = e.clientY - rect.top
-                const pos = relativeY < rect.height / 2 ? 'before' : 'after'
-                setDragOverId(row.groupId)
-                setDropPosition(pos)
-              }}
-              onDragEnd={handleDragEnd}
-              onDrop={(e) => handleDrop(row.groupId, e)}
+              className="layer-context-menu"
+              style={{ left: menu.x, top: menu.y }}
+              onClick={(e) => e.stopPropagation()}
             >
+              <div className="layer-context-title">
+                Group: {menuGroupNode.name}
+              </div>
               <button
-                className="layer-group-toggle"
+                type="button"
                 onClick={() => {
-                  setCollapsedGroups((prev) => {
-                    const next = new Set(prev)
-                    if (next.has(row.groupId)) next.delete(row.groupId)
-                    else next.add(row.groupId)
-                    return next
-                  })
+                  onToggleGroupPath(menuGroupNode!, !allVisible)
+                  setMenu(null)
                 }}
-                title={collapsed ? 'Expand group' : 'Collapse group'}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
               >
-                {collapsed ? (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="9 18 15 12 9 6"></polyline>
-                  </svg>
-                ) : (
-                  <svg width="10" height="10" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
-                    <polyline points="6 9 12 15 18 9"></polyline>
-                  </svg>
-                )}
+                {allVisible ? 'Hide Group' : 'Show Group'}
               </button>
               <button
-                className="layer-visibility"
-                onClick={() => onToggleGroup?.(row.groupId, !allVisible)}
-                title={allVisible ? 'Hide group' : 'Show group'}
-                style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
+                type="button"
+                onClick={() => {
+                  onUngroupGroup?.(menuGroupNode!.id)
+                  setMenu(null)
+                  setSelectedLayerIds(new Set())
+                }}
               >
-                {allVisible ? (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M1 12s4-8 11-8 11 8 11 8-4 8-11 8-11-8-11-8z"></path>
-                    <circle cx="12" cy="12" r="3"></circle>
-                  </svg>
-                ) : (
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                    <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-                    <line x1="1" y1="1" x2="23" y2="23"></line>
-                  </svg>
-                )}
+                Ungroup all layers
               </button>
-              {onRenameGroup ? (
-                <input
-                  type="text"
-                  className="layer-group-name-input"
-                  value={row.groupName}
-                  onChange={(e) => onRenameGroup(row.groupId, e.target.value)}
-                  title="Rename group"
-                />
-              ) : (
-                <span className="layer-group-name" title={row.groupName}>
-                  {row.groupName}
-                </span>
-              )}
-              <span className="layer-count">{row.layers.length}</span>
+              <button
+                type="button"
+                onClick={() => {
+                  const childIds = childLayers.map((c) => c.id)
+                  onGroupMulti?.(childIds, 'New Subgroup')
+                  setMenu(null)
+                }}
+              >
+                Create Subgroup
+              </button>
+              <div className="layer-context-divider" />
+              <button
+                type="button"
+                style={{ color: 'var(--danger)' }}
+                onClick={() => {
+                  childLayers.forEach((l) => onRemove?.(l.id))
+                  setMenu(null)
+                  setSelectedLayerIds(new Set())
+                }}
+              >
+                Delete group & layers
+              </button>
             </div>
-            {!collapsed && row.layers.map((layer, subIdx) => renderLayer(layer, idx + subIdx + 1, rows.length, true))}
-          </div>
-        )
-      })}
-      {menu && menuLayer && (() => {
-        const menuSelectedIds = menu.selectedIds ?? new Set([menu.layerId])
-        const isMulti = menuSelectedIds.size > 1
-        // All selected layers that are in a group
-        const selectedInGroup = Array.from(menuSelectedIds).filter(
-          (id) => layers.find((l) => l.id === id)?.groupId
-        )
+          )
+        }
 
-        return (
-          <div
-            className="layer-context-menu"
-            style={{ left: menu.x, top: menu.y }}
-            onClick={(e) => e.stopPropagation()}
-          >
-            {isMulti ? (
-              // ── Multi-select menu ──
-              <>
-                <div className="layer-context-title">
-                  {menuSelectedIds.size} layers selected
-                </div>
-                <button
-                  type="button"
-                  onClick={() => {
-                    onGroupMulti?.(Array.from(menuSelectedIds))
-                    setMenu(null)
-                    setSelectedLayerIds(new Set())
-                  }}
-                >
-                  Group these layers
-                </button>
-                {selectedInGroup.length > 0 && (
-                  <>
-                    <div className="layer-context-divider" />
+        if (menu.type === 'layer' && menuLayer) {
+          const menuSelectedIds = menu.selectedIds ?? new Set([menu.id])
+          const isMulti = menuSelectedIds.size > 1
+          const selectedInGroup = Array.from(menuSelectedIds).filter(
+            (id) => {
+              const l = layers.find((layer) => layer.id === id)
+              return l && (l.groupPathIds?.length || l.groupId)
+            }
+          )
+          const featCount = menuLayer.data?.features?.length ?? 0
+          
+          return (
+            <div
+              className="layer-context-menu"
+              style={{ left: menu.x, top: menu.y }}
+              onClick={(e) => e.stopPropagation()}
+            >
+              {isMulti ? (
+                <>
+                  <div className="layer-context-title">
+                    {menuSelectedIds.size} layers selected
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onGroupMulti?.(Array.from(menuSelectedIds))
+                      setMenu(null)
+                      setSelectedLayerIds(new Set())
+                    }}
+                  >
+                    Group these layers
+                  </button>
+                  {selectedInGroup.length > 0 && (
+                    <>
+                      <div className="layer-context-divider" />
+                      <button
+                        type="button"
+                        onClick={() => {
+                          selectedInGroup.forEach((id) => onUngroup?.(id))
+                          setMenu(null)
+                          setSelectedLayerIds(new Set())
+                        }}
+                      >
+                        {selectedInGroup.length === menuSelectedIds.size
+                          ? 'Ungroup all selected'
+                          : `Ungroup ${selectedInGroup.length} grouped layer${selectedInGroup.length > 1 ? 's' : ''}`}
+                      </button>
+                    </>
+                  )}
+                </>
+              ) : (
+                <>
+                  <div className="layer-context-title">
+                    Feature Count: {featCount}
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      onToggle(menuLayer.id)
+                      setMenu(null)
+                    }}
+                  >
+                    {menuLayer.visible ? 'Hide Layer' : 'Show Layer'}
+                  </button>
+                  {featCount > 0 && (
                     <button
                       type="button"
                       onClick={() => {
-                        selectedInGroup.forEach((id) => onUngroup?.(id))
+                        onZoomTo(menuLayer.id)
                         setMenu(null)
-                        setSelectedLayerIds(new Set())
                       }}
                     >
-                      {selectedInGroup.length === menuSelectedIds.size
-                        ? 'Ungroup all selected'
-                        : `Ungroup ${selectedInGroup.length} grouped layer${selectedInGroup.length > 1 ? 's' : ''}`}
+                      Zoom to Layer
                     </button>
-                  </>
-                )}
-              </>
-            ) : (
-              // ── Single-layer menu ──
-              <>
-                <div className="layer-context-title">Group with</div>
-                {groupTargets.length === 0 ? (
-                  <div className="layer-context-empty">No other layers</div>
-                ) : (
-                  groupTargets.map((target) => (
+                  )}
+                  {onStyle && (!menuLayer.wmsSpec && !menuLayer.geeSpec || menuLayer.rasterOverlaySpec) && (
                     <button
-                      key={target.id}
                       type="button"
                       onClick={() => {
-                        onGroupWith?.(menuLayer.id, target.id)
+                        onStyle(menuLayer.id)
                         setMenu(null)
                       }}
                     >
-                      {target.groupName ? `${target.groupName} / ` : ''}{target.name}
+                      Adjust Symbology
                     </button>
-                  ))
-                )}
-                {menuLayer.groupId && (
-                  <>
-                    <div className="layer-context-divider" />
+                  )}
+                  {onAttributes && !menuLayer.wmsSpec && !menuLayer.geeSpec && featCount > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => {
+                        onAttributes(menuLayer.id)
+                        setMenu(null)
+                      }}
+                    >
+                      Edit Attribute Table
+                    </button>
+                  )}
+                  <button
+                    type="button"
+                    style={{ color: 'var(--danger)' }}
+                    onClick={() => {
+                      onRemove(menuLayer.id)
+                      setMenu(null)
+                      setSelectedLayerIds(new Set())
+                    }}
+                  >
+                    Delete Layer
+                  </button>
+
+                  <div className="layer-context-divider" />
+                  <div className="layer-context-title">Group Actions</div>
+                  {groupTargets.length === 0 ? (
+                    <div className="layer-context-empty">No other groups</div>
+                  ) : (
+                    groupTargets.map((target) => (
+                      <button
+                        key={target.id}
+                        type="button"
+                        onClick={() => {
+                          onMoveLayerOrGroup?.(menuLayer.id, target.id, 'inside')
+                          setMenu(null)
+                        }}
+                      >
+                        Move to: {target.groupName || target.name}
+                      </button>
+                    ))
+                  )}
+                  {(menuLayer.groupPathIds?.length || menuLayer.groupId) && (
                     <button
                       type="button"
                       onClick={() => {
@@ -520,14 +795,15 @@ export default function LayerPanel({
                         setMenu(null)
                       }}
                     >
-                      Ungroup layer
+                      Ungroup Layer
                     </button>
-                  </>
-                )}
-              </>
-            )}
-          </div>
-        )
+                  )}
+                </>
+              )}
+            </div>
+          )
+        }
+        return null
       })()}
     </div>
   )
@@ -589,6 +865,7 @@ function LayerItemRow({
   const isStyleActive = activeStyleId === layer.id
   const isAttrActive = activeAttrId === layer.id
   const [showAbove, setShowAbove] = useState(false)
+  const [isEditing, setIsEditing] = useState(false)
   const rowRef = useRef<HTMLDivElement>(null)
 
   useEffect(() => {
@@ -652,9 +929,11 @@ function LayerItemRow({
             <circle cx="12" cy="12" r="3"></circle>
           </svg>
         ) : (
-          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-            <path d="M17.94 17.94A10.07 10.07 0 0 1 12 20c-7 0-11-8-11-8a18.45 18.45 0 0 1 5.06-5.94M9.9 4.24A9.12 9.12 0 0 1 12 4c7 0 11 8 11 8a18.5 18.5 0 0 1-2.16 3.19m-6.72-1.07a3 3 0 1 1-4.24-4.24"></path>
-            <line x1="1" y1="1" x2="23" y2="23"></line>
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+            <path d="M2 12c2-4 5-6 10-6s8 2 10 6"></path>
+            <path d="M6 15.5l-1.5 2"></path>
+            <path d="M12 17v2"></path>
+            <path d="M18 15.5l1.5 2"></path>
           </svg>
         )}
       </button>
@@ -665,16 +944,30 @@ function LayerItemRow({
         title={layer.rasterOverlaySpec ? 'Raster overlay alignment & opacity' : (layer.wmsSpec || layer.geeSpec ? 'Raster layer — no symbology' : 'Symbology & labels')}
       />
 
-      {onRename ? (
+      {isEditing && onRename ? (
         <input
           type="text"
           className="layer-name-input"
           value={layer.name}
           onChange={(e) => onRename(layer.id, e.target.value)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter') {
+              setIsEditing(false)
+            }
+          }}
+          onBlur={() => setIsEditing(false)}
+          autoFocus
           title="Rename layer"
         />
       ) : (
-        <span className="layer-name" title={layer.name}>
+        <span
+          className="layer-name"
+          title={layer.name}
+          onDoubleClick={(e) => {
+            e.stopPropagation()
+            setIsEditing(true)
+          }}
+        >
           {layer.name}
         </span>
       )}

@@ -21,84 +21,102 @@ router = APIRouter()
 
 
 @router.get("")
-async def geocode(query: str = Query(..., description="Address or place name"), limit: int = 5):
+async def geocode(
+    query: str = Query(..., description="Address or place name"),
+    limit: int = 5,
+    polygon_geojson: int = Query(0, description="Whether to retrieve polygon geojson boundary geometry")
+):
     limit = max(1, min(int(limit), 20))
 
-    # Tier 1: Google Geocoding (when key is set). Falls through silently on any
-    # GoogleUnavailable — missing key, network blip, or non-OK status.
-    if has_google_key():
-        try:
-            results = await google_geocode_query(query, limit=limit)
-            if results:
-                return {"results": results}
-        except GoogleUnavailable:
-            pass
+    # Skip Google and Photon (komoot) if polygon geometries are explicitly requested,
+    # since neither returns full administrative boundary polygons.
+    if not polygon_geojson:
+        # Tier 1: Google Geocoding (when key is set). Falls through silently on any
+        # GoogleUnavailable — missing key, network blip, or non-OK status.
+        if has_google_key():
+            try:
+                results = await google_geocode_query(query, limit=limit)
+                if results:
+                    return {"results": results}
+            except GoogleUnavailable:
+                pass
 
-    # Tier 2: Photon (komoot) — returns well-ranked city/town nodes, far better
-    # than Nominatim for place-name lookups (e.g. "SAS Nagar" → Mohali city).
-    # Results are sorted: place/admin features before highway/waterway/railway.
-    _CLASS_RANK = {"place": 0, "boundary": 1, "natural": 2, "landuse": 3,
-                   "highway": 9, "railway": 9, "waterway": 9}
-    try:
-        photon = await http_client.fetch_json(
-            "https://photon.komoot.io/api/",
-            namespace="photon",
-            params={"q": query, "limit": limit},
-        )
-        features = (photon or {}).get("features", []) or []
-        photon_results = []
-        for feat in features:
-            coords = (feat.get("geometry") or {}).get("coordinates") or []
-            if len(coords) < 2:
-                continue
-            lng, lat = coords[0], coords[1]
-            props = feat.get("properties") or {}
-            parts = [
-                props.get("name"),
-                props.get("city") or props.get("locality"),
-                props.get("state"),
-                props.get("country"),
-            ]
-            display_name = ", ".join(p for p in parts if p) or props.get("name", "")
-            key = props.get("osm_key", "")
-            photon_results.append((_CLASS_RANK.get(key, 5), {
-                "display_name": display_name,
-                "lat": float(lat),
-                "lon": float(lng),
-                "type": props.get("osm_value"),
-                "class": key,
-                "importance": None,
-            }))
-        photon_results.sort(key=lambda x: x[0])
-        if photon_results:
-            return {"results": [r for _, r in photon_results]}
-    except Exception:
-        pass
+        # Tier 2: Photon (komoot) — returns well-ranked city/town nodes, far better
+        # than Nominatim for place-name lookups (e.g. "SAS Nagar" → Mohali city).
+        # Results are sorted: place/admin features before highway/waterway/railway.
+        _CLASS_RANK = {"place": 0, "boundary": 1, "natural": 2, "landuse": 3,
+                       "highway": 9, "railway": 9, "waterway": 9}
+        try:
+            photon = await http_client.fetch_json(
+                "https://photon.komoot.io/api/",
+                namespace="photon",
+                params={"q": query, "limit": limit},
+            )
+            features = (photon or {}).get("features", []) or []
+            photon_results = []
+            for feat in features:
+                coords = (feat.get("geometry") or {}).get("coordinates") or []
+                if len(coords) < 2:
+                    continue
+                lng, lat = coords[0], coords[1]
+                props = feat.get("properties") or {}
+                parts = [
+                    props.get("name"),
+                    props.get("city") or props.get("locality"),
+                    props.get("state"),
+                    props.get("country"),
+                ]
+                display_name = ", ".join(p for p in parts if p) or props.get("name", "")
+                key = props.get("osm_key", "")
+                photon_results.append((_CLASS_RANK.get(key, 5), {
+                    "display_name": display_name,
+                    "lat": float(lat),
+                    "lon": float(lng),
+                    "type": props.get("osm_value"),
+                    "class": key,
+                    "importance": None,
+                }))
+            photon_results.sort(key=lambda x: x[0])
+            if photon_results:
+                return {"results": [r for _, r in photon_results]}
+        except Exception:
+            pass
 
     # Tier 3: Nominatim fallback — sort by importance DESC so the most
     # significant administrative result leads (cities before bus stops).
     try:
+        params = {"q": query, "format": "json", "limit": limit, "addressdetails": 1}
+        if polygon_geojson:
+            params["polygon_geojson"] = 1
+
         data = await http_client.fetch_json(
             "https://nominatim.openstreetmap.org/search",
             namespace="nominatim",
-            params={"q": query, "format": "json", "limit": limit, "addressdetails": 1},
+            params=params,
         )
         if not isinstance(data, list):
             return {"error": "Nominatim returned an unexpected response.", "results": []}
         data.sort(key=lambda r: float(r.get("importance") or 0), reverse=True)
-        return {
-            "results": [
-                {
-                    "display_name": r.get("display_name", ""),
-                    "lat": float(r["lat"]) if r.get("lat") else None,
-                    "lon": float(r["lon"]) if r.get("lon") else None,
-                    "type": r.get("type"),
-                    "class": r.get("class"),
-                    "importance": r.get("importance"),
-                }
-                for r in data
-            ]
-        }
+        
+        results_list = []
+        for r in data:
+            item = {
+                "display_name": r.get("display_name", ""),
+                "lat": float(r["lat"]) if r.get("lat") else None,
+                "lon": float(r["lon"]) if r.get("lon") else None,
+                "type": r.get("type"),
+                "class": r.get("class"),
+                "importance": r.get("importance"),
+            }
+            if polygon_geojson and "geojson" in r:
+                item["geojson"] = r["geojson"]
+            results_list.append(item)
+            
+        return {"results": results_list}
+    except http_client.HTTPError as e:
+        return {"error": str(e), "results": []}
+    except Exception as e:
+        return {"error": f"Unexpected error: {e}", "results": []}
     except http_client.HTTPError as e:
         return {"error": str(e), "results": []}
     except Exception as e:

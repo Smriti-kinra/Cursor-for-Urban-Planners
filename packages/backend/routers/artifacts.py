@@ -155,8 +155,7 @@ async def download_artifact_docx(artifact_id: int):
 @router.get("/{artifact_id}/latex")
 async def download_artifact_latex(artifact_id: int, background_tasks: BackgroundTasks):
     import tempfile
-    import subprocess
-    import sys
+    from tools.md_to_pdf import convert as md_convert
 
     row = read_artifact(artifact_id)
     if not row:
@@ -172,36 +171,29 @@ async def download_artifact_latex(artifact_id: int, background_tasks: Background
 
     try:
         md_path.write_text(content, encoding="utf-8")
-
-        script_path = Path(__file__).parent.parent / "tools" / "md_to_pdf.py"
-        if not script_path.exists():
-            raise HTTPException(status_code=500, detail="md_to_pdf.py script not found in tools directory.")
-
-        cmd = [
-            sys.executable,
-            str(script_path),
-            str(md_path),
-            "-o",
-            str(tex_path),
-            "--tex-only"
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            _cleanup_temp_dir(temp_dir)
-            raise HTTPException(status_code=500, detail=f"LaTeX generation failed:\n{result.stderr}")
-
+        md_convert(str(md_path), str(tex_path), tex_only=True)
         background_tasks.add_task(_cleanup_temp_dir, temp_dir)
         return FileResponse(
             str(tex_path),
             media_type="application/x-tex",
-            filename=f"{title_safe}.tex"
+            filename=f"{title_safe}.tex",
+        )
+    except FileNotFoundError as e:
+        _cleanup_temp_dir(temp_dir)
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        _cleanup_temp_dir(temp_dir)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "LaTeX export is unavailable — no conversion backend is installed on this server.\n"
+                "Ask your administrator to run: pip install pypandoc_binary\n"
+                f"Details: {e}"
+            ),
         )
     except Exception as e:
         _cleanup_temp_dir(temp_dir)
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=f"Failed to generate LaTeX document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate LaTeX document: {e}")
 
 
 def _cleanup_temp_dir(temp_dir_path: str):
@@ -215,8 +207,7 @@ def _cleanup_temp_dir(temp_dir_path: str):
 @router.get("/{artifact_id}/pdf")
 async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTasks):
     import tempfile
-    import subprocess
-    import sys
+    from tools.md_to_pdf import convert as md_convert
 
     row = read_artifact(artifact_id)
     if not row:
@@ -232,36 +223,29 @@ async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTa
 
     try:
         md_path.write_text(content, encoding="utf-8")
-
-        script_path = Path(__file__).parent.parent / "tools" / "md_to_pdf.py"
-        if not script_path.exists():
-            raise HTTPException(status_code=500, detail="md_to_pdf.py script not found in tools directory.")
-
-        cmd = [
-            sys.executable,
-            str(script_path),
-            str(md_path),
-            "-o",
-            str(pdf_path)
-        ]
-
-        result = subprocess.run(cmd, capture_output=True, text=True)
-        if result.returncode != 0:
-            # Cleanup temp files immediately on error
-            _cleanup_temp_dir(temp_dir)
-            raise HTTPException(status_code=500, detail=f"PDF generation failed:\n{result.stderr}")
-
+        md_convert(str(md_path), str(pdf_path), tex_only=False)
         background_tasks.add_task(_cleanup_temp_dir, temp_dir)
         return FileResponse(
             str(pdf_path),
             media_type="application/pdf",
-            filename=f"{title_safe}.pdf"
+            filename=f"{title_safe}.pdf",
+        )
+    except FileNotFoundError as e:
+        _cleanup_temp_dir(temp_dir)
+        raise HTTPException(status_code=404, detail=str(e))
+    except RuntimeError as e:
+        _cleanup_temp_dir(temp_dir)
+        raise HTTPException(
+            status_code=503,
+            detail=(
+                "PDF export is unavailable — no conversion backend is installed on this server.\n"
+                "Ask your administrator to run: pip install pypandoc_binary\n"
+                f"Details: {e}"
+            ),
         )
     except Exception as e:
         _cleanup_temp_dir(temp_dir)
-        if isinstance(e, HTTPException):
-            raise e
-        raise HTTPException(status_code=500, detail=f"Failed to generate PDF document: {str(e)}")
+        raise HTTPException(status_code=500, detail=f"Failed to generate PDF document: {e}")
 
 
 

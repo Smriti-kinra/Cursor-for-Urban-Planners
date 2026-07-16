@@ -60,12 +60,12 @@ export default function ExportPanel({
     onPreviewBoundary(null)
     try {
       const resp = await fetch(
-        `https://nominatim.openstreetmap.org/search?q=${encodeURIComponent(regionQuery)}&format=json&polygon_geojson=1&limit=6`,
-        { headers: { 'User-Agent': 'CursorUrbanPlanners/1.0' } },
+        `http://localhost:8765/api/geocode?query=${encodeURIComponent(regionQuery)}&polygon_geojson=1&limit=6`
       )
-      const data: NominatimResult[] = await resp.json()
+      const json = await resp.json()
+      const results: NominatimResult[] = json.results || []
       // Only keep results that have a polygon boundary
-      const polygons = data.filter(
+      const polygons = results.filter(
         (r) => r.geojson && ['Polygon', 'MultiPolygon'].includes(r.geojson.type),
       )
       setRegionResults(polygons)
