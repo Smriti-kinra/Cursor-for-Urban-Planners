@@ -32,6 +32,8 @@ declare global {
     setAPIKey: (key: string) => Promise<boolean>
     getGoogleMapsKey: () => Promise<string>
     setGoogleMapsKey: (key: string) => Promise<boolean>
+    getGEEKey: () => Promise<string>
+    setGEEKey: (key: string) => Promise<boolean>
     savePDF: (htmlContent: string, defaultName: string) => Promise<boolean>
     onFullscreenChange: (handler: (isFullscreen: boolean) => void) => void
   }

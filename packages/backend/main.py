@@ -1,8 +1,19 @@
 from pathlib import Path
+import logging
+import os
 
 from dotenv import load_dotenv
 
 load_dotenv(Path(__file__).resolve().parent / ".env")
+
+# Initialize logging configuration based on LOG_LEVEL or DEBUG env vars
+log_level_str = os.environ.get("LOG_LEVEL", "DEBUG" if os.environ.get("DEBUG") else "INFO").upper()
+log_level = getattr(logging, log_level_str, logging.INFO)
+
+logging.basicConfig(
+    level=log_level,
+    format="%(asctime)s [%(levelname)s] %(name)s: %(message)s"
+)
 
 import re
 from contextlib import asynccontextmanager
@@ -11,7 +22,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from database import init_db
-from routers import files, chat, artifacts, geocode, streetview, wms, gee, scenarios
+from routers import files, chat, artifacts, geocode, streetview, wms, gee, scenarios, rag
 from tools import http as http_client
 
 
@@ -61,6 +72,7 @@ app.include_router(streetview.router, prefix="/api/streetview", tags=["streetvie
 app.include_router(wms.router, prefix="/api/wms", tags=["wms"])
 app.include_router(gee.router, prefix="/api/gee", tags=["gee"])
 app.include_router(scenarios.router, prefix="/api/scenarios", tags=["scenarios"])
+app.include_router(rag.router, prefix="/api/rag", tags=["rag"])
 
 
 @app.get("/health")

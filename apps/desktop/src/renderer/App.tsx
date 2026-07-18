@@ -2959,6 +2959,7 @@ function App() {
                 showSidebar={showDocumentSidebar}
                 sidebarWidth={leftWidth}
                 onLeftResizeStart={onResizeStart('left')}
+                workspacePath={workspacePath}
               />
             </ErrorBoundary>
           </div>
@@ -2966,6 +2967,7 @@ function App() {
           <div style={{ display: appMode === 'artifacts' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Artifacts">
               <ArtifactsPanel
+                workspacePath={workspacePath}
                 revision={artifactsRevision}
                 showSidebar={showArtifactsSidebar}
                 sidebarWidth={leftWidth}

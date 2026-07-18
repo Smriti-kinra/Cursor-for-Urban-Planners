@@ -3,20 +3,21 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException, UploadFile, File, Form, BackgroundTasks
 from fastapi.responses import FileResponse, Response
 from models import ArtifactCreate, ArtifactUpdate
-from tools.artifact_store import save_artifact, read_artifact, delete_artifact, ARTIFACTS_DIR
+from fastapi import Query
+from tools.artifact_store import save_artifact, read_artifact, delete_artifact, ARTIFACTS_DIR, get_artifacts_dir
 from database import get_connection
 
 router = APIRouter()
 
 
 @router.get("")
-async def list_artifacts():
-    conn = get_connection()
+async def list_artifacts(workspace: str | None = Query(None)):
+    conn = get_connection(workspace)
     try:
         rows = conn.execute(
             "SELECT id, title, artifact_type, format, meta, "
             "SUBSTR(content, 1, 200) as preview, file_path, created_at, updated_at "
-            "FROM artifacts ORDER BY updated_at DESC"
+            "FROM artifacts ORDER BY position ASC, updated_at DESC"
         ).fetchall()
         return [dict(r) for r in rows]
     finally:
@@ -24,7 +25,7 @@ async def list_artifacts():
 
 
 @router.post("", status_code=201)
-async def create_artifact(artifact: ArtifactCreate):
+async def create_artifact(artifact: ArtifactCreate, workspace: str | None = Query(None)):
     """Create a text-based artifact via JSON body (backward-compatible route)."""
     try:
         result = save_artifact(
@@ -33,6 +34,7 @@ async def create_artifact(artifact: ArtifactCreate):
             format=artifact.format,
             content=artifact.content if artifact.content else None,
             meta=artifact.meta if isinstance(artifact.meta, dict) else None,
+            workspace=workspace,
         )
         return result
     except ValueError as e:
@@ -47,6 +49,7 @@ async def upload_artifact(
     content: str = Form(""),
     meta: str = Form(""),
     file: UploadFile = File(None),
+    workspace: str | None = Form(None),
 ):
     """Create an artifact via multipart form — intended for image uploads."""
     try:
@@ -61,23 +64,40 @@ async def upload_artifact(
             file_bytes=file_bytes,
             file_ext=file_ext,
             meta=meta_dict,
+            workspace=workspace,
         )
         return result
     except ValueError as e:
         raise HTTPException(status_code=422, detail=str(e))
 
 
+@router.post("/reorder")
+async def reorder_artifacts(payload: dict, workspace: str | None = Query(None)):
+    order = payload.get("order", [])
+    conn = get_connection(workspace)
+    try:
+        for index, art_id in enumerate(order):
+            conn.execute(
+                "UPDATE artifacts SET position = ? WHERE id = ?",
+                (index, art_id)
+            )
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()
+
+
 @router.get("/{artifact_id}")
-async def get_artifact_http(artifact_id: int):
-    row = read_artifact(artifact_id)
+async def get_artifact_http(artifact_id: int, workspace: str | None = Query(None)):
+    row = read_artifact(artifact_id, workspace)
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
     return row
 
 
 @router.get("/{artifact_id}/download")
-async def download_artifact(artifact_id: int):
-    row = read_artifact(artifact_id)
+async def download_artifact(artifact_id: int, workspace: str | None = Query(None)):
+    row = read_artifact(artifact_id, workspace)
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
     fmt = row.get("format", "markdown")
@@ -86,7 +106,8 @@ async def download_artifact(artifact_id: int):
         fp = row.get("file_path")
         if not fp:
             raise HTTPException(status_code=404, detail="No file for this artifact")
-        full_path = ARTIFACTS_DIR.parent / fp
+        filename = Path(fp).name
+        full_path = get_artifacts_dir(workspace) / filename
         if not full_path.exists():
             raise HTTPException(status_code=404, detail="File missing from disk")
         mime = (json.loads(row["meta"]) if row.get("meta") else {}).get(
@@ -125,12 +146,12 @@ async def download_artifact(artifact_id: int):
 
 
 @router.get("/{artifact_id}/docx")
-async def download_artifact_docx(artifact_id: int):
+async def download_artifact_docx(artifact_id: int, workspace: str | None = Query(None)):
     import tempfile
     from tools.doc_exporter import markdown_to_docx
     from fastapi.responses import FileResponse
 
-    row = read_artifact(artifact_id)
+    row = read_artifact(artifact_id, workspace)
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
     
@@ -153,11 +174,11 @@ async def download_artifact_docx(artifact_id: int):
 
 
 @router.get("/{artifact_id}/latex")
-async def download_artifact_latex(artifact_id: int, background_tasks: BackgroundTasks):
+async def download_artifact_latex(artifact_id: int, background_tasks: BackgroundTasks, workspace: str | None = Query(None)):
     import tempfile
     from tools.md_to_pdf import convert as md_convert
 
-    row = read_artifact(artifact_id)
+    row = read_artifact(artifact_id, workspace)
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
@@ -205,11 +226,11 @@ def _cleanup_temp_dir(temp_dir_path: str):
 
 
 @router.get("/{artifact_id}/pdf")
-async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTasks):
+async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTasks, workspace: str | None = Query(None)):
     import tempfile
     from tools.md_to_pdf import convert as md_convert
 
-    row = read_artifact(artifact_id)
+    row = read_artifact(artifact_id, workspace)
     if not row:
         raise HTTPException(status_code=404, detail="Artifact not found")
 
@@ -251,8 +272,8 @@ async def download_artifact_pdf(artifact_id: int, background_tasks: BackgroundTa
 
 
 @router.put("/{artifact_id}")
-async def update_artifact(artifact_id: int, update: ArtifactUpdate):
-    conn = get_connection()
+async def update_artifact(artifact_id: int, update: ArtifactUpdate, workspace: str | None = Query(None)):
+    conn = get_connection(workspace)
     try:
         existing = conn.execute(
             "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
@@ -293,8 +314,8 @@ async def update_artifact(artifact_id: int, update: ArtifactUpdate):
 
 
 @router.delete("/{artifact_id}")
-async def delete_artifact_http(artifact_id: int):
-    conn = get_connection()
+async def delete_artifact_http(artifact_id: int, workspace: str | None = Query(None)):
+    conn = get_connection(workspace)
     try:
         existing = conn.execute(
             "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
@@ -303,5 +324,5 @@ async def delete_artifact_http(artifact_id: int):
         conn.close()
     if not existing:
         raise HTTPException(status_code=404, detail="Artifact not found")
-    delete_artifact(artifact_id)
+    delete_artifact(artifact_id, workspace)
     return {"deleted": True}

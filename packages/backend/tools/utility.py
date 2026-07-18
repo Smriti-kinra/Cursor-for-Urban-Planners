@@ -559,11 +559,14 @@ class UtilityServer:
         try:
             from tools.artifact_store import save_artifact
             fmt = args.get("format", "markdown")
+            map_context = args.get("_map_context", {})
+            workspace = map_context.get("workspace") if map_context else None
             result = save_artifact(
                 title=args.get("title", "Untitled"),
                 artifact_type=args.get("artifact_type", "note"),
                 format=fmt,
                 content=args.get("content", ""),
+                workspace=workspace,
             )
             return {"status": "created", "id": result["id"]}
         except ValueError as e:
@@ -577,7 +580,10 @@ class UtilityServer:
             limit = max(1, min(limit, 100))
             artifact_type = args.get("artifact_type")
             fmt = args.get("format")
-            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            map_context = args.get("_map_context", {})
+            workspace = map_context.get("workspace") if map_context else None
+            from database import get_connection
+            conn = get_connection(workspace)
             conn.row_factory = sqlite3.Row
 
             conditions = []
@@ -593,7 +599,7 @@ class UtilityServer:
             params.append(limit)
             rows = conn.execute(
                 f"SELECT id, title, artifact_type, format, meta, content, created_at, updated_at "
-                f"FROM artifacts {where} ORDER BY updated_at DESC LIMIT ?",
+                f"FROM artifacts {where} ORDER BY position ASC, updated_at DESC LIMIT ?",
                 params,
             ).fetchall()
             conn.close()
@@ -619,7 +625,10 @@ class UtilityServer:
     def _get_artifact(self, args: dict) -> dict:
         try:
             artifact_id = int(args.get("id"))
-            conn = sqlite3.connect(str(self._db_path), timeout=5.0)
+            map_context = args.get("_map_context", {})
+            workspace = map_context.get("workspace") if map_context else None
+            from database import get_connection
+            conn = get_connection(workspace)
             conn.row_factory = sqlite3.Row
             row = conn.execute(
                 "SELECT id, title, artifact_type, format, meta, content, created_at, updated_at "
@@ -718,11 +727,13 @@ class UtilityServer:
 
         try:
             from tools.artifact_store import save_artifact
+            ws_path = workspace or (map_context.get("workspace") if map_context else None)
             result = save_artifact(
                 title=title,
                 artifact_type="analysis",
                 format="table",
                 content=json.dumps({"columns": columns, "rows": rows}),
+                workspace=ws_path,
             )
             return {"status": "created", "id": result["id"], "columns_count": len(columns), "rows_count": len(rows)}
         except Exception as e:

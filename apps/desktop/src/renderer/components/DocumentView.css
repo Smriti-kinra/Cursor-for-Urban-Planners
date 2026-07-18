@@ -383,3 +383,13 @@
 .doc-sidebar-item.drag-over-after {
   border-bottom: 2px solid var(--accent) !important;
 }
+
+@keyframes spin {
+  from { transform: rotate(0deg); }
+  to { transform: rotate(360deg); }
+}
+
+.rag-spinner {
+  animation: spin 1s linear infinite;
+  display: inline-block;
+}

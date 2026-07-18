@@ -42,6 +42,7 @@ interface ArtifactPreview extends Omit<Artifact, 'content'> {
 }
 
 interface ArtifactsPanelProps {
+  workspacePath?: string
   revision?: number
   onAddToMap: (geojson: object, name: string) => void
   showSidebar?: boolean
@@ -50,6 +51,7 @@ interface ArtifactsPanelProps {
 }
 
 export default function ArtifactsPanel({
+  workspacePath,
   revision,
   onAddToMap,
   showSidebar = true,
@@ -90,6 +92,15 @@ export default function ArtifactsPanel({
     setDropArtPosition(null)
   }
 
+  const getUrl = useCallback((path: string = '') => {
+    const base = `${API_BASE}${path}`
+    if (workspacePath) {
+      const sep = base.includes('?') ? '&' : '?'
+      return `${base}${sep}workspace=${encodeURIComponent(workspacePath)}`
+    }
+    return base
+  }, [workspacePath])
+
   const handleArtDrop = (targetId: number, e: React.DragEvent) => {
     e.preventDefault()
     const draggedIdStr = e.dataTransfer.getData('text/plain')
@@ -111,7 +122,13 @@ export default function ArtifactsPanel({
         ...remainingArts.slice(insertIndex),
       ]
       setArtifacts(newArts)
-      localStorage.setItem('artifacts_order', JSON.stringify(newArts.map((a) => a.id)))
+      
+      const ids = newArts.map((a) => a.id)
+      fetch(getUrl('/reorder'), {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ order: ids }),
+      }).catch(err => console.error('Failed to sync artifact order:', err))
     }
     handleArtDragEnd()
   }
@@ -140,29 +157,15 @@ export default function ArtifactsPanel({
 
   const fetchArtifacts = useCallback(async () => {
     try {
-      const res = await fetch(API_BASE)
+      const res = await fetch(getUrl())
       if (res.ok) {
         const data = await res.json()
-        const savedOrder = localStorage.getItem('artifacts_order')
-        if (savedOrder) {
-          const orderIds: number[] = JSON.parse(savedOrder)
-          const sorted = [...data].sort((a, b) => {
-            const idxA = orderIds.indexOf(a.id)
-            const idxB = orderIds.indexOf(b.id)
-            if (idxA === -1 && idxB === -1) return 0
-            if (idxA === -1) return 1
-            if (idxB === -1) return -1
-            return idxA - idxB
-          })
-          setArtifacts(sorted)
-        } else {
-          setArtifacts(data)
-        }
+        setArtifacts(data)
       }
     } catch {
       /* backend may not be available */
     }
-  }, [])
+  }, [getUrl])
 
   useEffect(() => {
     fetchArtifacts()
@@ -181,7 +184,7 @@ export default function ArtifactsPanel({
     }
     const controller = new AbortController()
     setLoadingFull(true)
-    fetch(`${API_BASE}/${selectedId}`, { signal: controller.signal })
+    fetch(getUrl(`/${selectedId}`), { signal: controller.signal })
       .then((r) => (r.ok ? r.json() : null))
       .then((data: Artifact | null) => {
         if (data) setFullArtifact(data)
@@ -190,12 +193,12 @@ export default function ArtifactsPanel({
       })
       .catch(() => setLoadingFull(false))
     return () => controller.abort()
-  }, [selectedId])
+  }, [selectedId, getUrl])
 
   const createArtifact = async (): Promise<void> => {
     if (!title.trim()) return
     try {
-      const res = await fetch(API_BASE, {
+      const res = await fetch(getUrl(), {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title, content, artifact_type: artifactType, format }),
@@ -213,7 +216,7 @@ export default function ArtifactsPanel({
 
   const deleteArtifact = async (id: number): Promise<void> => {
     try {
-      await fetch(`${API_BASE}/${id}`, { method: 'DELETE' })
+      await fetch(getUrl(`/${id}`), { method: 'DELETE' })
       if (selectedId === id) setSelectedId(null)
       fetchArtifacts()
     } catch {
@@ -224,7 +227,7 @@ export default function ArtifactsPanel({
   const saveTitle = async (id: number, newTitle: string): Promise<void> => {
     if (!newTitle.trim()) return
     try {
-      await fetch(`${API_BASE}/${id}`, {
+      await fetch(getUrl(`/${id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ title: newTitle }),
@@ -241,7 +244,7 @@ export default function ArtifactsPanel({
   const saveContent = async (): Promise<void> => {
     if (!fullArtifact) return
     try {
-      await fetch(`${API_BASE}/${fullArtifact.id}`, {
+      await fetch(getUrl(`/${fullArtifact.id}`), {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ content: editContentValue }),
@@ -305,7 +308,7 @@ export default function ArtifactsPanel({
                 </button>
                 <a
                   className="download-btn docx-btn"
-                  href={`${API_BASE}/${id}/docx`}
+                  href={getUrl(`/${id}/docx`)}
                   download
                   style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
@@ -320,7 +323,7 @@ export default function ArtifactsPanel({
                 </a>
                 <a
                   className="download-btn pdf-btn"
-                  href={`${API_BASE}/${id}/pdf`}
+                  href={getUrl(`/${id}/pdf`)}
                   download
                   style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
@@ -332,7 +335,7 @@ export default function ArtifactsPanel({
                 </a>
                 <a
                   className="download-btn latex-btn"
-                  href={`${API_BASE}/${id}/latex`}
+                  href={getUrl(`/${id}/latex`)}
                   download
                   style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
@@ -344,7 +347,7 @@ export default function ArtifactsPanel({
                 </a>
                 <a
                   className="download-btn markdown-btn"
-                  href={`${API_BASE}/${id}/download`}
+                  href={getUrl(`/${id}/download`)}
                   download
                   style={{ display: 'inline-flex', alignItems: 'center' }}
                 >
@@ -421,7 +424,7 @@ export default function ArtifactsPanel({
                 </button>
                 <a
                   className="download-btn"
-                  href={`${API_BASE}/${id}/download`}
+                  href={getUrl(`/${id}/download`)}
                   download
                 >
                   Download
@@ -435,14 +438,14 @@ export default function ArtifactsPanel({
     }
 
     if (fmt === 'image') {
-      const downloadUrl = `${API_BASE}/${id}/download`
+      const downloadUrl = getUrl(`/${id}/download`)
       return (
         <div className="artifact-detail">
           <img
-            className="artifact-image-thumb"
-            src={downloadUrl}
-            alt={aTitle}
-            onClick={() => window.open(downloadUrl, '_blank')}
+             className="artifact-image-thumb"
+             src={downloadUrl}
+             alt={aTitle}
+             onClick={() => window.open(downloadUrl, '_blank')}
           />
           <div className="artifact-actions">
             <a className="download-btn" href={downloadUrl} download>Download</a>
@@ -484,7 +487,7 @@ export default function ArtifactsPanel({
             >
               Add to map
             </button>
-            <a className="download-btn" href={`${API_BASE}/${id}/download`} download>
+            <a className="download-btn" href={getUrl(`/${id}/download`)} download>
               Download
             </a>
           </div>

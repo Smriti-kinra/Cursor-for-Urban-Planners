@@ -1,4 +1,4 @@
-import { useState, useRef } from 'react'
+import { useState, useRef, useEffect } from 'react'
 import './DocumentView.css'
 import { IMAGE_EXTS, MIME_MAP, rasterizePdfPage } from '../lib/pdf-raster'
 
@@ -18,6 +18,7 @@ interface DocumentViewProps {
   showSidebar?: boolean
   sidebarWidth?: number
   onLeftResizeStart?: (e: React.MouseEvent) => void
+  workspacePath: string | null
 }
 
 interface OpenDocument {
@@ -41,6 +42,7 @@ export default function DocumentView({
   showSidebar = true,
   sidebarWidth = 260,
   onLeftResizeStart,
+  workspacePath,
 }: DocumentViewProps) {
   const [openDocs, setOpenDocs] = useState<OpenDocument[]>([])
   const [activeDocId, setActiveDocId] = useState<string | null>(null)
@@ -48,6 +50,61 @@ export default function DocumentView({
   const [pdfRasterError, setPdfRasterError] = useState<string | null>(null)
 
   const activeDoc = openDocs.find((d) => d.id === activeDocId) || null
+
+  const [indexedDocs, setIndexedDocs] = useState<Record<string, boolean>>({})
+  const [indexingDocId, setIndexingDocId] = useState<string | null>(null)
+  const [ragError, setRagError] = useState<string | null>(null)
+
+  const checkRagStatus = async (doc: OpenDocument) => {
+    if (!workspacePath) return
+    try {
+      const response = await fetch(
+        `http://localhost:8765/api/rag/status?file_path=${encodeURIComponent(
+          doc.filePath
+        )}&workspace=${encodeURIComponent(workspacePath)}`
+      )
+      if (response.ok) {
+        const data = await response.json()
+        setIndexedDocs((prev) => ({ ...prev, [doc.id]: data.indexed }))
+      }
+    } catch (e) {
+      console.error('Failed to fetch RAG status:', e)
+    }
+  }
+
+  const indexDocument = async (doc: OpenDocument) => {
+    if (!workspacePath) return
+    setIndexingDocId(doc.id)
+    setRagError(null)
+    try {
+      const apiKey = await window.electronAPI.getAPIKey()
+      const response = await fetch(`http://localhost:8765/api/rag/index`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          file_path: doc.filePath,
+          workspace: workspacePath,
+          api_key: apiKey
+        })
+      })
+      if (response.ok) {
+        setIndexedDocs((prev) => ({ ...prev, [doc.id]: true }))
+      } else {
+        const errData = await response.json()
+        setRagError(errData.detail || 'Failed to index document.')
+      }
+    } catch (e: any) {
+      setRagError(e.message || 'Indexing failed.')
+    } finally {
+      setIndexingDocId(null)
+    }
+  }
+
+  useEffect(() => {
+    if (activeDoc) {
+      checkRagStatus(activeDoc)
+    }
+  }, [activeDocId, workspacePath])
 
   const draggedDocIdRef = useRef<string | null>(null)
   const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
@@ -337,6 +394,34 @@ export default function DocumentView({
               ))
             )}
           </div>
+
+          {/* AI Active Page Preview section at the bottom of the sidebar */}
+          {activeDoc && (
+            <div className="doc-sidebar-ai-preview" style={{ padding: '12px', borderTop: '1px solid var(--border, #3a3f58)', background: 'var(--bg-secondary, #141521)', flexShrink: 0 }}>
+              <div style={{ fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary, #b3b9d1)', marginBottom: '8px', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                <span style={{ display: 'inline-block', width: '6px', height: '6px', borderRadius: '50%', backgroundColor: 'var(--accent, #3b82f6)' }}></span>
+                AI Active Page Preview
+              </div>
+              {activeDoc.documentImage ? (
+                <div style={{ position: 'relative', border: '1px solid var(--border, #3a3f58)', borderRadius: '4px', overflow: 'hidden', backgroundColor: '#000000', display: 'flex', justifyContent: 'center', alignItems: 'center', height: '140px' }}>
+                  <img
+                    src={`data:${activeDoc.documentImage.mimeType};base64,${activeDoc.documentImage.base64}`}
+                    alt="AI Preview"
+                    style={{ maxWidth: '100%', maxHeight: '100%', objectFit: 'contain' }}
+                  />
+                  {activeDoc.isPdf && (
+                    <div style={{ position: 'absolute', bottom: '6px', right: '6px', background: 'rgba(0,0,0,0.75)', color: '#ffffff', fontSize: '9px', padding: '2px 6px', borderRadius: '3px', fontWeight: 600 }}>
+                      Page {activeDoc.pdfPage} of {activeDoc.pdfTotalPages}
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div style={{ fontSize: '11px', color: 'var(--text-muted, #7e84a3)', textAlign: 'center', padding: '16px', border: '1px dashed var(--border, #3a3f58)', borderRadius: '4px' }}>
+                  No preview generated
+                </div>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -396,6 +481,44 @@ export default function DocumentView({
               )}
               {loading && <span className="doc-loading-inline">Rendering…</span>}
               {pdfRasterError && <span className="doc-loading-inline doc-error">{pdfRasterError}</span>}
+
+              {/* RAG Indexing Widget */}
+              <span className="doc-rag-widget" style={{ marginLeft: 'auto', display: 'flex', alignItems: 'center', gap: '8px', marginRight: '8px' }}>
+                {indexedDocs[activeDoc.id] ? (
+                  <span style={{ color: '#10b981', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '4px', fontWeight: 600 }}>
+                    <span style={{ width: '6px', height: '6px', borderRadius: '50%', backgroundColor: '#10b981' }}></span>
+                    Indexed for AI Chat
+                  </span>
+                ) : indexingDocId === activeDoc.id ? (
+                  <span style={{ color: '#eab308', fontSize: '11px', display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
+                    <svg className="rag-spinner" style={{ width: '12px', height: '12px' }} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="3">
+                      <circle cx="12" cy="12" r="10" stroke="var(--border)" strokeDasharray="32"></circle>
+                    </svg>
+                    Indexing document...
+                  </span>
+                ) : (
+                  <button
+                    onClick={() => indexDocument(activeDoc)}
+                    style={{
+                      background: 'var(--accent, #3b82f6)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: 600
+                    }}
+                  >
+                    Index Document for AI Chat
+                  </button>
+                )}
+                {ragError && (
+                  <span style={{ color: '#ef4444', fontSize: '11px' }} title={ragError}>
+                    ⚠ Ingestion failed
+                  </span>
+                )}
+              </span>
             </div>
 
             <div className="doc-content">

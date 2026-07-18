@@ -264,6 +264,12 @@ const headingComponents = {
   h6: ({ children, ...props }: any) => <h6 id={getSlug(children)} {...props}>{children}</h6>,
 }
 
+interface ClarifyingQuestion {
+  question: string
+  options: string[]
+  is_multi_select: boolean
+}
+
 export default function ChatPanel({
   conversations,
   activeConversation,
@@ -316,6 +322,12 @@ export default function ChatPanel({
   const [googleKeyError, setGoogleKeyError] = useState<string | null>(null)
   const [googleKeySuccess, setGoogleKeySuccess] = useState(false)
 
+  // GEE Service Account Key State
+  const [geeKey, setGeeKey] = useState('')
+  const [isSavingGeeKey, setIsSavingGeeKey] = useState(false)
+  const [geeKeyError, setGeeKeyError] = useState<string | null>(null)
+  const [geeKeySuccess, setGeeKeySuccess] = useState(false)
+
   // Deep research state
   const [researchPhase, setResearchPhase] = useState<ResearchPhase>('idle')
   const [researchSteps, setResearchSteps] = useState<string[]>([])
@@ -325,6 +337,10 @@ export default function ChatPanel({
   const [researchReasoning, setResearchReasoning] = useState('')
   const reportMdRef = useRef('')
   const headerContainerRef = useRef<HTMLDivElement>(null)
+
+  // Interactive Clarifying Questions state
+  const [activeQuestion, setActiveQuestion] = useState<ClarifyingQuestion | null>(null)
+  const [selectedOptions, setSelectedOptions] = useState<string[]>([])
   const historyBtnRef = useRef<HTMLButtonElement>(null)
   const historyListRef = useRef<HTMLDivElement>(null)
 
@@ -397,6 +413,14 @@ export default function ChatPanel({
       })
       .catch((err) => {
         console.error('Failed to load Google Maps API key:', err)
+      })
+
+    window.electronAPI.getGEEKey()
+      .then((key) => {
+        setGeeKey(key || '')
+      })
+      .catch((err) => {
+        console.error('Failed to load GEE credentials:', err)
       })
   }, [])
 
@@ -595,6 +619,13 @@ export default function ChatPanel({
         ])
       }
       setToolStatus(null)
+    } else if (data.type === 'ask_question') {
+      setActiveQuestion({
+        question: data.question || '',
+        options: (data.options as string[]) || [],
+        is_multi_select: !!data.is_multi_select
+      })
+      setSelectedOptions([])
     } else if (data.type === 'end') {
       setIsStreaming(false)
       setToolStatus(null)
@@ -624,6 +655,7 @@ export default function ChatPanel({
         setIsStreaming(false)
         setToolStatus(null)
         inFlightRef.current = null
+        setActiveQuestion(null)
       })
     })
   }, [handleWsMessage])
@@ -656,6 +688,7 @@ export default function ChatPanel({
     setIsStreaming(false)
     setToolStatus(null)
     inFlightRef.current = null
+    setActiveQuestion(null)
   }, [onMessagesChange])
 
   const downloadResearchMd = useCallback((md: string) => {
@@ -820,6 +853,7 @@ export default function ChatPanel({
     setResearchExpanded(false)
     setResearchReasoning('')
     reportMdRef.current = ''
+    setActiveQuestion(null)
   }, [activeConversation?.id])
 
   /** Convert raw API error strings/objects into a short, friendly sentence. */
@@ -919,6 +953,107 @@ export default function ChatPanel({
     }
   }
 
+  const saveGeeKey = async (keyToSave: string): Promise<boolean> => {
+    setIsSavingGeeKey(true)
+    setGeeKeyError(null)
+    try {
+      // 1. Validate structure first if not empty
+      if (keyToSave.trim()) {
+        try {
+          const parsed = JSON.parse(keyToSave)
+          if (!parsed || parsed.type !== 'service_account') {
+            throw new Error("JSON must have type: 'service_account'")
+          }
+        } catch (e: any) {
+          setGeeKeyError(`Invalid GEE Service Account JSON: ${e.message}`)
+          setIsSavingGeeKey(false)
+          return false
+        }
+      }
+
+      // 2. Save locally encrypted in main process
+      const ok = await window.electronAPI.setGEEKey(keyToSave)
+      if (ok) {
+        setGeeKey(keyToSave)
+        
+        // 3. Sync to Python backend process dynamically
+        const workspacePath = mapContext.workspace
+        const wsParam = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''
+        const response = await fetch(`http://localhost:8765/api/gee/credentials${wsParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials: keyToSave }),
+        })
+        
+        if (response.ok) {
+          setIsSavingGeeKey(false)
+          setGeeKeySuccess(true)
+          setTimeout(() => setGeeKeySuccess(false), 2000)
+          return true
+        } else {
+          const errData = await response.json()
+          setGeeKeyError(errData.detail || 'Failed to initialize GEE on the backend with these credentials.')
+        }
+      } else {
+        setGeeKeyError('Failed to save key securely to system keychain.')
+      }
+    } catch (err: any) {
+      setGeeKeyError(err.message || 'Failed to save key.')
+    }
+    setIsSavingGeeKey(false)
+    return false
+  }
+
+  const clearGeeKey = async () => {
+    setGeeKeyError(null)
+    try {
+      const ok = await window.electronAPI.setGEEKey('')
+      if (ok) {
+        setGeeKey('')
+        const workspacePath = mapContext.workspace
+        const wsParam = workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''
+        await fetch(`http://localhost:8765/api/gee/credentials${wsParam}`, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ credentials: '' }),
+        })
+      }
+    } catch (err: any) {
+      console.error('Failed to clear GEE credentials:', err)
+    }
+  }
+
+  const importGeeJsonFile = async () => {
+    setGeeKeyError(null)
+    try {
+      const chosen = await window.electronAPI.openFile({
+        filters: [{ name: 'JSON credentials', extensions: ['json'] }]
+      })
+      if (!chosen) return
+      
+      const fileContent = await window.electronAPI.readFile(chosen)
+      if (fileContent) {
+        // Validate JSON
+        try {
+          const parsed = JSON.parse(fileContent)
+          if (parsed && parsed.type === 'service_account') {
+            const formatted = JSON.stringify(parsed, null, 2)
+            setGeeKey(formatted)
+            // Force textarea update
+            const el = document.getElementById('gee-key-input-element') as HTMLTextAreaElement
+            if (el) el.value = formatted
+          } else {
+            setGeeKeyError("Selected file is not a valid Google Service Account (missing type='service_account')")
+          }
+        } catch {
+          setGeeKeyError('Selected file is not a valid JSON file.')
+        }
+      }
+    } catch (err: any) {
+      setGeeKeyError('Failed to import JSON file.')
+    }
+  }
+
   const removeAttachment = (index: number) => {
     setAttachments((prev) => prev.filter((_, i) => i !== index))
   }
@@ -988,6 +1123,7 @@ export default function ChatPanel({
   const handleDrop = async (e: React.DragEvent) => {
     e.preventDefault()
     e.stopPropagation()
+    if (activeQuestion) return
 
     const files = e.dataTransfer.files
     if (!files || files.length === 0) return
@@ -1162,6 +1298,34 @@ export default function ChatPanel({
     el.style.height = Math.min(el.scrollHeight, 150) + 'px'
   }
 
+  const handleSelectOption = (option: string) => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'question_response',
+        response: option
+      }))
+    }
+    setActiveQuestion(null)
+  }
+
+  const handleToggleOption = (option: string) => {
+    setSelectedOptions(prev =>
+      prev.includes(option)
+        ? prev.filter(o => o !== option)
+        : [...prev, option]
+    )
+  }
+
+  const handleSubmitMultiSelect = () => {
+    if (wsRef.current?.readyState === WebSocket.OPEN) {
+      wsRef.current.send(JSON.stringify({
+        type: 'question_response',
+        response: selectedOptions
+      }))
+    }
+    setActiveQuestion(null)
+  }
+
   const handleNewChat = () => {
     wsRef.current?.close()
     wsRef.current = null
@@ -1169,6 +1333,7 @@ export default function ChatPanel({
     setSuggestions(pickSuggestions(3))
     onCreateConversation()
     setShowHistory(false)
+    setActiveQuestion(null)
   }
 
   const handleModelChange = async (modelId: string) => {
@@ -1399,6 +1564,89 @@ export default function ChatPanel({
                   </div>
                 )}
               </div>
+
+              {/* Google Earth Engine Credentials Section */}
+              <div className="setting-field-group" style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '12px' }}>
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '6px' }}>
+                  <label htmlFor="gee-key-input-element" className="setting-field-label" style={{ margin: 0 }}>
+                    Google Earth Engine Service Account Credentials (Optional)
+                  </label>
+                  <button
+                    className="import-json-btn"
+                    onClick={importGeeJsonFile}
+                    style={{
+                      background: 'var(--accent, #3b82f6)',
+                      color: '#ffffff',
+                      border: 'none',
+                      borderRadius: '4px',
+                      padding: '3px 8px',
+                      fontSize: '11px',
+                      cursor: 'pointer',
+                      fontWeight: 600,
+                      display: 'inline-flex',
+                      alignItems: 'center',
+                      gap: '4px'
+                    }}
+                  >
+                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5">
+                      <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path>
+                      <polyline points="17 8 12 3 7 8"></polyline>
+                      <line x1="12" y1="3" x2="12" y2="15"></line>
+                    </svg>
+                    Import JSON File
+                  </button>
+                </div>
+                <div className="gee-key-input-container" style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <textarea
+                    key={geeKey}
+                    id="gee-key-input-element"
+                    className="api-key-input-field"
+                    defaultValue={geeKey}
+                    placeholder='{ "type": "service_account", ... }'
+                    disabled={isSavingGeeKey}
+                    style={{
+                      width: '100%',
+                      height: '80px',
+                      fontFamily: 'monospace',
+                      fontSize: '11px',
+                      resize: 'vertical',
+                      backgroundColor: 'var(--bg-card, #1d1e2c)',
+                      border: '1px solid var(--border, #3a3f58)',
+                      borderRadius: '4px',
+                      padding: '8px',
+                      color: 'var(--text-primary, #ffffff)'
+                    }}
+                  />
+                  <div style={{ display: 'flex', gap: '8px' }}>
+                    <button
+                      className={`api-key-save-btn ${geeKeySuccess ? 'success' : ''}`}
+                      onClick={() => {
+                        const el = document.getElementById('gee-key-input-element') as HTMLTextAreaElement
+                        if (el) saveGeeKey(el.value)
+                      }}
+                      disabled={isSavingGeeKey}
+                      style={{ flex: 1 }}
+                    >
+                      {isSavingGeeKey ? 'Verifying & Saving...' : geeKeySuccess ? 'Saved! ✓' : 'Save GEE Credentials'}
+                    </button>
+                    {geeKey && (
+                      <button
+                        className="api-key-clear-btn"
+                        onClick={clearGeeKey}
+                        disabled={isSavingGeeKey}
+                      >
+                        Clear
+                      </button>
+                    )}
+                  </div>
+                </div>
+                {geeKeyError && (
+                  <div className="api-key-error-msg" style={{ marginTop: '6px' }}>
+                    <span className="api-key-error-icon">⚠</span>
+                    <span>{geeKeyError}</span>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </div>
@@ -1601,6 +1849,55 @@ export default function ChatPanel({
             </div>
           )
         })}
+
+        {activeQuestion && (
+          <div className="chat-question-lockbox">
+            <div className="chat-question-header">
+              <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" style={{ marginRight: '4px' }}>
+                <circle cx="12" cy="12" r="10" />
+                <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
+                <line x1="12" y1="17" x2="12.01" y2="17" />
+              </svg>
+              Clarifying Question
+            </div>
+            <p className="chat-question-text">{activeQuestion.question}</p>
+            
+            {activeQuestion.is_multi_select ? (
+              <div className="chat-question-checkboxes">
+                {activeQuestion.options.map((opt, idx) => (
+                  <label key={idx} className="chat-question-checkbox-label">
+                    <input
+                      type="checkbox"
+                      className="chat-question-checkbox"
+                      checked={selectedOptions.includes(opt)}
+                      onChange={() => handleToggleOption(opt)}
+                    />
+                    {opt}
+                  </label>
+                ))}
+                <button
+                  className="chat-question-submit-btn"
+                  onClick={handleSubmitMultiSelect}
+                  disabled={selectedOptions.length === 0}
+                >
+                  Submit Answer
+                </button>
+              </div>
+            ) : (
+              <div className="chat-question-buttons">
+                {activeQuestion.options.map((opt, idx) => (
+                  <button
+                    key={idx}
+                    className="chat-question-opt-btn"
+                    onClick={() => handleSelectOption(opt)}
+                  >
+                    {opt}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
+        )}
         {/* Tool status + streaming dots are hidden while a research run is active on the screen */}
         {toolStatus && messages[messages.length - 1]?.research?.phase !== 'running' && (
           <div className="chat-tool-status">
@@ -1673,7 +1970,7 @@ export default function ChatPanel({
             type="button"
             className="chat-attach-btn"
             onClick={handleAttachClick}
-            disabled={!apiKey.trim()}
+            disabled={!apiKey.trim() || !!activeQuestion}
             title="Attach image or PDF"
           >
             <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1690,11 +1987,13 @@ export default function ChatPanel({
             placeholder={
               !apiKey.trim()
                 ? 'Please configure your OpenAI API Key above to start...'
+                : activeQuestion
+                ? 'Please answer the clarifying question to continue...'
                 : activeConversation
                 ? 'Ask anything about your project...'
                 : 'Start a new conversation...'
             }
-            disabled={!apiKey.trim()}
+            disabled={!apiKey.trim() || !!activeQuestion}
             rows={1}
           />
           {isStreaming ? (
@@ -1711,7 +2010,7 @@ export default function ChatPanel({
             <button
               className="chat-send-btn"
               onClick={sendMessage}
-              disabled={!input.trim() && attachments.length === 0}
+              disabled={(!input.trim() && attachments.length === 0) || !!activeQuestion}
               title="Send (Enter)"
             >
               <svg width="16" height="16" viewBox="0 0 16 16" fill="none">

@@ -56,6 +56,9 @@ export interface LayerStyleSpec {
   // shared
   opacity?: number
   label?: LabelSpec
+  fillColor?: string
+  strokeColor?: string
+  lineWidth?: number
 }
 
 export interface MapViewState {

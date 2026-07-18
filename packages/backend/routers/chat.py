@@ -12,6 +12,7 @@ agentic loop:
 import asyncio
 import contextvars
 import json
+import logging
 import os
 import sys
 from pathlib import Path
@@ -19,6 +20,8 @@ from pathlib import Path
 from fastapi import APIRouter, WebSocket, WebSocketDisconnect
 from pydantic import BaseModel
 from openai import AsyncOpenAI
+
+logger = logging.getLogger(__name__)
 
 # Make sure backend package is importable
 _BACKEND_DIR = Path(__file__).parent.parent
@@ -634,6 +637,7 @@ async def _run_deep_research(
         accumulated = ""           # report text assembled from output_text deltas
         seen_queries: set[str] = set()
         search_count = 0
+        annotations_list = []      # accumulated streaming citations
         last_heartbeat = asyncio.get_event_loop().time()
 
         stop_event = _get_stop_event()
@@ -709,6 +713,33 @@ async def _run_deep_research(
                     }))
                     last_heartbeat = asyncio.get_event_loop().time()
 
+            # Intercept streaming annotations / web citations
+            elif event_type and event_type.startswith("response.output_text.annotation"):
+                annotation = getattr(event, "annotation", None)
+                if annotation:
+                    url = None
+                    title = None
+                    try:
+                        url = getattr(annotation, "url", None)
+                        title = getattr(annotation, "title", None)
+                        if not url and hasattr(annotation, "url_citation"):
+                            uc = getattr(annotation, "url_citation", None)
+                            if uc:
+                                url = getattr(uc, "url", None)
+                                title = getattr(uc, "title", None)
+                    except Exception:
+                        pass
+                    if not url and isinstance(annotation, dict):
+                        url = annotation.get("url")
+                        title = annotation.get("title")
+                        if not url and "url_citation" in annotation:
+                            uc = annotation["url_citation"]
+                            if isinstance(uc, dict):
+                                url = uc.get("url")
+                                title = uc.get("title")
+                    if url and url not in [a["url"] for a in annotations_list]:
+                        annotations_list.append({"url": url, "title": title or url})
+
             # Final text for a content part — capture annotations (citations)
             # and the authoritative full text.
             elif event_type == "response.output_text.done":
@@ -716,16 +747,36 @@ async def _run_deep_research(
                 if text:
                     accumulated = text
                 got_text = got_text or bool(text)
-                annotations = []
+                
+                # Also pull any final annotations out of this done event
                 for item in getattr(event, "annotations", None) or []:
-                    url = getattr(item, "url", None)
-                    title = getattr(item, "title", None)
-                    if url:
-                        annotations.append({"url": url, "title": title or url})
+                    url = None
+                    title = None
+                    try:
+                        url = getattr(item, "url", None)
+                        title = getattr(item, "title", None)
+                        if not url and hasattr(item, "url_citation"):
+                            uc = getattr(item, "url_citation", None)
+                            if uc:
+                                url = getattr(uc, "url", None)
+                                title = getattr(uc, "title", None)
+                    except Exception:
+                        pass
+                    if not url and isinstance(item, dict):
+                        url = item.get("url")
+                        title = item.get("title")
+                        if not url and "url_citation" in item:
+                            uc = item["url_citation"]
+                            if isinstance(uc, dict):
+                                url = uc.get("url")
+                                title = uc.get("title")
+                    if url and url not in [a["url"] for a in annotations_list]:
+                        annotations_list.append({"url": url, "title": title or url})
+
                 await ws.send_text(json.dumps({
                     "type": "research_report",
                     "markdown": accumulated,
-                    "citations": annotations,
+                    "citations": annotations_list,
                 }))
                 last_heartbeat = asyncio.get_event_loop().time()
 
@@ -735,7 +786,7 @@ async def _run_deep_research(
             await ws.send_text(json.dumps({
                 "type": "research_report",
                 "markdown": accumulated,
-                "citations": [],
+                "citations": annotations_list,
             }))
 
         if not got_text:
@@ -1012,13 +1063,12 @@ async def _execute_tool(
         if name in srv.tool_names:
             if _is_cancelled():
                 return json.dumps({"status": "cancelled"})
-            print(f"DEBUG: execute_tool name={name!r} args={args}")
+            logger.debug(f"execute_tool name={name!r} args={args}")
             try:
                 result = await srv.execute(name, {**args, "_map_context": map_context, "_ws": ws, "_active_image": active_image, "_client": client})
 
             except Exception as exc:
-                import traceback
-                traceback.print_exc()
+                logger.exception(f"Tool '{name}' failed with internal error")
                 result = {"status": "error", "error": f"Tool '{name}' failed with internal error: {str(exc)}"}
 
 
@@ -1087,6 +1137,7 @@ async def _execute_tool(
                             artifact_type="report",
                             format="markdown",
                             content=report_md,
+                            workspace=map_context.get("workspace") if map_context else None,
                         )
                         if not await _send_action_if_allowed(ws, "refresh_artifacts", {}):
                             return json.dumps({"status": "cancelled"})
@@ -1601,6 +1652,25 @@ async def chat_websocket(websocket: WebSocket):
 
             is_document_mode = (image_data is not None) or has_attached_image
             system = DOCUMENT_SYSTEM_PROMPT if is_document_mode else SYSTEM_PROMPT
+
+            # Retrieve relevant text segments from RAG index if present
+            workspace = map_context.get("workspace") if map_context else None
+            if workspace and user_content:
+                from routers.rag import query_rag_index_async
+                try:
+                    matched_chunks = await query_rag_index_async(
+                        query=user_content,
+                        api_key=api_key.strip(),
+                        workspace=workspace
+                    )
+                    if matched_chunks:
+                        context_str = "\n\n[CONTEXT FROM WORKSPACE DOCUMENTS]\n"
+                        for chunk in matched_chunks:
+                            context_str += f"From document '{chunk['docName']}' (Page {chunk['page']}):\n\"\"\"\n{chunk['text']}\n\"\"\"\n---\n"
+                        system += context_str
+                except Exception as e:
+                    print(f"[RAG] Document search error: {e}")
+
             if map_context:
                 system += f"\n\nCurrent map state:\n{json.dumps(map_context, indent=2)}"
             tools = _TOOLS

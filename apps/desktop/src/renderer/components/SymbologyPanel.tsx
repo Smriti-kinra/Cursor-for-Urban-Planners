@@ -309,7 +309,7 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
 
     // 2. Adjust specification accordingly depending on active styling mode
     if (spec.mode === 'simple') {
-      emit({ ...spec })
+      emit({ ...spec, fillColor: color, strokeColor: color })
     } else if (spec.mode === 'categorized') {
       emit(applyBaseColorToCategorized(color, spec))
     } else if (spec.mode === 'graduated') {
@@ -447,6 +447,46 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
           </label>
         </div>
       </div>
+
+      {spec.label?.enabled && (
+        <div className="sym-label-details" style={{ marginTop: '4px', marginBottom: '8px', padding: '8px', background: 'var(--bg-hover, #2e3047)', borderRadius: '6px', display: 'flex', flexDirection: 'column', gap: '8px', border: '1px solid var(--border, #3a3f58)' }}>
+          <div className="sym-row" style={{ margin: 0, padding: 0, height: 'auto', border: 'none' }}>
+            <label className="sym-label" style={{ fontSize: '11px' }}>Text Size</label>
+            <input
+              type="range"
+              min="8"
+              max="24"
+              step="1"
+              value={spec.label.size ?? 12}
+              onChange={(e) => setLabel({ size: parseInt(e.target.value) })}
+              style={{ flex: 1, height: '4px', cursor: 'pointer' }}
+            />
+            <span style={{ minWidth: '24px', textAlign: 'right', fontSize: '11px', color: 'var(--text-primary)' }}>
+              {spec.label.size ?? 12}px
+            </span>
+          </div>
+          <div className="sym-row" style={{ margin: 0, padding: 0, height: 'auto', border: 'none', justifyContent: 'flex-start', gap: '16px' }}>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Text Color</label>
+              <input
+                type="color"
+                value={spec.label.color ?? '#1f2937'}
+                onChange={(e) => setLabel({ color: e.target.value })}
+                style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+              />
+            </div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+              <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Halo Color</label>
+              <input
+                type="color"
+                value={spec.label.haloColor ?? '#ffffff'}
+                onChange={(e) => setLabel({ haloColor: e.target.value })}
+                style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+              />
+            </div>
+          </div>
+        </div>
+      )}
 
       {/* Mode Selector */}
       <div className="sym-row">
@@ -597,7 +637,66 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
           </div>
         </>
       )}
+      {/* Opacity & Stroke Controls (Vector Styling) */}
+      <div className="sym-section-title" style={{ marginTop: '12px', borderTop: '1px solid var(--border)', paddingTop: '8px' }}>Styling Options</div>
+      
+      {/* Opacity slider */}
+      <div className="sym-row">
+        <label className="sym-label">Opacity</label>
+        <input
+          type="range"
+          min="0"
+          max="1"
+          step="0.05"
+          value={spec.opacity ?? layer.opacity ?? 0.8}
+          onChange={(e) => emit({ ...spec, opacity: parseFloat(e.target.value) })}
+          style={{ flex: 1 }}
+        />
+        <span style={{ minWidth: '32px', textAlign: 'right', fontSize: '11px' }}>
+          {Math.round((spec.opacity ?? layer.opacity ?? 0.8) * 100)}%
+        </span>
+      </div>
 
+      {/* Stroke Width slider */}
+      <div className="sym-row">
+        <label className="sym-label">Stroke Width</label>
+        <input
+          type="range"
+          min="0"
+          max="10"
+          step="0.5"
+          value={spec.lineWidth ?? layer.lineWidth ?? 2}
+          onChange={(e) => emit({ ...spec, lineWidth: parseFloat(e.target.value) })}
+          style={{ flex: 1 }}
+        />
+        <span style={{ minWidth: '32px', textAlign: 'right', fontSize: '11px' }}>
+          {spec.lineWidth ?? layer.lineWidth ?? 2}px
+        </span>
+      </div>
+
+      {/* Distinct Fill and Stroke Colors for Simple Mode */}
+      {spec.mode === 'simple' && (
+        <div className="sym-row" style={{ justifyContent: 'flex-start', gap: '16px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Fill Color</label>
+            <input
+              type="color"
+              value={spec.fillColor ?? layer.fillColor ?? layer.color ?? '#3b82f6'}
+              onChange={(e) => emit({ ...spec, fillColor: e.target.value })}
+              style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+            />
+          </div>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+            <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Stroke Color</label>
+            <input
+              type="color"
+              value={spec.strokeColor ?? layer.lineColor ?? layer.color ?? '#3b82f6'}
+              onChange={(e) => emit({ ...spec, strokeColor: e.target.value })}
+              style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
+            />
+          </div>
+        </div>
+      )}
       {/* Base Color & Preset Tint Swatches - ALWAYS VISIBLE in 1 single row */}
       <div className="sym-base-color-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div className="sym-preset-row" style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap' }}>

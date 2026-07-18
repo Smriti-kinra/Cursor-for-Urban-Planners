@@ -2,7 +2,10 @@ from __future__ import annotations
 import os
 import json
 import math
+import logging
 from pathlib import Path
+
+logger = logging.getLogger(__name__)
 from llm.base import ToolDeclaration
 from mcp_servers.osm_server import _overpass_post, OverpassError, _sanitize_osm_token
 
@@ -882,9 +885,9 @@ class NetworkServer:
         boundary_layer_name = args.get("boundary_layer_name", "").strip()
         shapely_shape = None
 
-        print(f"DEBUG: fetch_street_network boundary_layer_name={boundary_layer_name!r}")
+        logger.debug(f"fetch_street_network boundary_layer_name={boundary_layer_name!r}")
         if isinstance(map_context, dict):
-            print(f"DEBUG: map_context layers={[l.get('name') for l in map_context.get('layers', []) if isinstance(l, dict)]}")
+            logger.debug(f"map_context layers={[l.get('name') for l in map_context.get('layers', []) if isinstance(l, dict)]}")
 
         if boundary_layer_name and isinstance(map_context, dict):
 
@@ -911,7 +914,7 @@ class NetworkServer:
                             if isinstance(file_data, dict):
                                 features_list = file_data.get("features", [])
                     except Exception as e:
-                        print(f"DEBUG: Failed to read local file path {file_path}: {e}")
+                        logger.debug(f"Failed to read local file path {file_path}: {e}")
                 
                 # 2. Fall back to raw feature list if present in match["data"]
                 if not features_list and match.get("data"):
@@ -970,9 +973,9 @@ class NetworkServer:
                                 shapely_shape = shapely_shape.buffer(0)
                             except Exception:
                                 pass
-                    print(f"DEBUG: Successfully resolved and repaired shapely_shape for '{boundary_layer_name}' with {len(polygons)} parts.")
+                    logger.debug(f"Successfully resolved and repaired shapely_shape for '{boundary_layer_name}' with {len(polygons)} parts.")
                 else:
-                    print(f"WARNING: Could not extract any valid shapes for '{boundary_layer_name}'!")
+                    logger.warning(f"Could not extract any valid shapes for '{boundary_layer_name}'!")
 
 
         bounds = map_context.get("bounds") if isinstance(map_context, dict) else None
@@ -1140,7 +1143,7 @@ out skel qt;
                                         }
                                     })
                         except Exception as exc:
-                            print(f"WARNING: Clipping failed for way {el.get('id')}: {exc}")
+                            logger.warning(f"Clipping failed for way {el.get('id')}: {exc}")
 
                     else:
                         features.append({

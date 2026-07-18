@@ -75,8 +75,10 @@ async def compare_scenarios(body: CompareRequest):
     return result
 
 
+from fastapi import Query
+
 @router.post("/save-artifact")
-async def save_scenario_artifact(body: dict):
+async def save_scenario_artifact(body: dict, workspace: str | None = Query(None)):
     """Save a generated scenario report as a markdown artifact."""
     from tools.artifact_store import save_artifact
     title = body.get("title", "Planning Scenario Report")
@@ -88,5 +90,6 @@ async def save_scenario_artifact(body: dict):
         artifact_type="report",
         format="markdown",
         content=content,
+        workspace=workspace,
     )
     return result

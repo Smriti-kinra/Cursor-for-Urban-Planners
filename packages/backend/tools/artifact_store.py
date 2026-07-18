@@ -6,11 +6,18 @@ import os
 from pathlib import Path
 from typing import Optional
 
-from database import DB_PATH, get_connection
+from database import get_connection
 
 _BACKEND_DIR = Path(__file__).parent.parent  # packages/backend/
 ARTIFACTS_DIR = _BACKEND_DIR / "artifacts_store"
 ARTIFACTS_DIR.mkdir(exist_ok=True)
+
+def get_artifacts_dir(workspace: str | None = None) -> Path:
+    if workspace:
+        ws_dir = Path(workspace) / ".cursor-urban" / "artifacts_store"
+        ws_dir.mkdir(parents=True, exist_ok=True)
+        return ws_dir
+    return ARTIFACTS_DIR
 
 ALLOWED_FORMATS = {"markdown", "table", "image", "geojson"}
 
@@ -73,6 +80,7 @@ def save_artifact(
     file_bytes: Optional[bytes] = None,
     file_ext: Optional[str] = None,
     meta: Optional[dict] = None,
+    workspace: Optional[str] = None,
 ) -> dict:
     """Create an artifact row + optional file. Returns the full row as a dict."""
     if format not in ALLOWED_FORMATS:
@@ -146,7 +154,7 @@ def save_artifact(
     # --- Insert row first to get auto-increment id ---
     meta_json = json.dumps(final_meta) if final_meta is not None else None
 
-    conn = get_connection()
+    conn = get_connection(workspace)
     try:
         cursor = conn.execute(
             "INSERT INTO artifacts (title, content, artifact_type, format, meta) "
@@ -190,7 +198,7 @@ def save_artifact(
             meta_json = json.dumps(image_meta)
 
             filename = f"{artifact_id}.{ext}"
-            file_path_full = ARTIFACTS_DIR / filename
+            file_path_full = get_artifacts_dir(workspace) / filename
             try:
                 file_path_full.write_bytes(file_bytes)
             except OSError:
@@ -213,9 +221,9 @@ def save_artifact(
         conn.close()
 
 
-def read_artifact(artifact_id: int) -> Optional[dict]:
+def read_artifact(artifact_id: int, workspace: Optional[str] = None) -> Optional[dict]:
     """Return full artifact row (including resolved payload), or None if not found."""
-    conn = get_connection()
+    conn = get_connection(workspace)
     try:
         row = conn.execute(
             "SELECT * FROM artifacts WHERE id = ?", (artifact_id,)
@@ -227,9 +235,9 @@ def read_artifact(artifact_id: int) -> Optional[dict]:
         conn.close()
 
 
-def delete_artifact(artifact_id: int) -> None:
+def delete_artifact(artifact_id: int, workspace: Optional[str] = None) -> None:
     """Delete artifact row and its file (if any)."""
-    conn = get_connection()
+    conn = get_connection(workspace)
     try:
         row = conn.execute(
             "SELECT file_path FROM artifacts WHERE id = ?", (artifact_id,)
@@ -239,7 +247,8 @@ def delete_artifact(artifact_id: int) -> None:
 
         file_path = row["file_path"]
         if file_path:
-            full_path = _BACKEND_DIR / file_path
+            filename = Path(file_path).name
+            full_path = get_artifacts_dir(workspace) / filename
             try:
                 full_path.unlink(missing_ok=True)
             except Exception:

@@ -61,11 +61,11 @@ function dataDrivenColor(
 }
 
 function fillColorExpression(layer: GeoJSONLayer): ColorExpr {
-  return dataDrivenColor(layer.styleSpec, 'fillColor', layer.fillColor || layer.color)
+  return dataDrivenColor(layer.styleSpec, 'fillColor', layer.styleSpec?.fillColor ?? layer.fillColor ?? layer.color)
 }
 
 function lineColorExpression(layer: GeoJSONLayer): ColorExpr {
-  return dataDrivenColor(layer.styleSpec, 'strokeColor', layer.lineColor || layer.color)
+  return dataDrivenColor(layer.styleSpec, 'strokeColor', layer.styleSpec?.strokeColor ?? layer.lineColor ?? layer.color)
 }
 
 function fillOpacityValue(layer: GeoJSONLayer): number {
@@ -477,7 +477,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           ],
           paint: {
             'line-color': lineColorExpression(layer),
-            'line-width': 2,
+            'line-width': layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2,
+            'line-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -493,7 +494,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           ],
           paint: {
             'line-color': lineColorExpression(layer),
-            'line-width': ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+            'line-width': ['coalesce', ['get', 'lineWidth'], layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+            'line-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
             ...(layer.lineDasharray ? { 'line-dasharray': layer.lineDasharray } : {}),
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -515,8 +517,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           paint: {
             'circle-color': fillColorExpression(layer),
             'circle-radius': 6,
-            'circle-stroke-color': '#ffffff',
-            'circle-stroke-width': 1.5,
+            'circle-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
+            'circle-stroke-color': lineColorExpression(layer),
+            'circle-stroke-width': layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 1.5,
+            'circle-stroke-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -614,12 +618,15 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
           if (map.getLayer(`${layer.id}-outline`)) {
             map.setPaintProperty(`${layer.id}-outline`, 'line-color', lineColorExpression(layer))
+            map.setPaintProperty(`${layer.id}-outline`, 'line-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-outline`, 'line-width', layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2)
           }
           if (map.getLayer(`${layer.id}-line`)) {
             map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
+            map.setPaintProperty(`${layer.id}-line`, 'line-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
             map.setPaintProperty(
               `${layer.id}-line`, 'line-width',
-              ['coalesce', ['get', 'lineWidth'], layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
+              ['coalesce', ['get', 'lineWidth'], layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
             )
             if (layer.lineDasharray) {
               map.setPaintProperty(`${layer.id}-line`, 'line-dasharray', layer.lineDasharray)
@@ -627,6 +634,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
           if (map.getLayer(`${layer.id}-circle`)) {
             map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-color', lineColorExpression(layer))
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-width', layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 1.5)
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
           }
           // Labels: re-apply field/size/color and visibility (gated by enabled +
           // feature cap, AND the layer's own visibility).

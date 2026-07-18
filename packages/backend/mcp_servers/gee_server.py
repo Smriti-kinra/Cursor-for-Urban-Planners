@@ -37,6 +37,13 @@ _EE_READY: bool | None = None
 _EE_ERROR: str | None = None
 
 
+def reset_gee_init() -> None:
+    """Reset Earth Engine initialization flags to force re-auth on next check."""
+    global _EE_READY, _EE_ERROR
+    _EE_READY = None
+    _EE_ERROR = None
+
+
 def _find_gee_creds(workspace: str | None = None) -> str | None:
     """Locate service account credentials in priority order."""
     # 1. Env var (JSON string or path)
@@ -44,17 +51,29 @@ def _find_gee_creds(workspace: str | None = None) -> str | None:
     if env:
         return env
 
+    # 2. Workspace-specific hidden file
+    if workspace:
+        ws_file = Path(workspace) / ".cursor-urban" / "ee-service-account.json"
+        if ws_file.exists():
+            return str(ws_file)
+
     search_roots: list[Path] = []
 
-    # 2. Workspace root supplied by the caller (from chat WebSocket payload)
+    # 3. Workspace root supplied by the caller (from chat WebSocket payload)
     if workspace:
         search_roots.append(Path(workspace))
 
-    # 3. CWD
+    # 4. CWD
     search_roots.append(Path.cwd())
 
-    # 4. Walk up from this file: mcp_servers/ → backend/ → packages/ → repo root
+    # 5. Project dev mode config file in .tmp
     here = Path(__file__).resolve()
+    repo_root = here.parent.parent.parent.parent
+    dev_path = repo_root / ".tmp" / "gee-credentials.json"
+    if dev_path.exists():
+        return str(dev_path)
+
+    # 6. Walk up from this file: mcp_servers/ → backend/ → packages/ → repo root
     for parent in [here.parent, here.parent.parent, here.parent.parent.parent,
                    here.parent.parent.parent.parent]:
         if parent not in search_roots:
@@ -69,7 +88,7 @@ def _find_gee_creds(workspace: str | None = None) -> str | None:
         # Any *.json that has type: service_account
         for p in sorted(root.glob("*.json")):
             try:
-                data = json.loads(p.read_text())
+                data = json.loads(p.read_text(encoding="utf-8"))
                 if data.get("type") == "service_account":
                     return str(p)
             except Exception:
@@ -320,6 +339,12 @@ class GEEServer:
         ]
 
     async def execute(self, tool_name: str, args: dict) -> dict:
+        # Resolve workspace from map context if not explicitly provided
+        if not args.get("_workspace") and args.get("_map_context"):
+            map_context = args.get("_map_context")
+            if isinstance(map_context, dict) and map_context.get("workspace"):
+                args["_workspace"] = map_context.get("workspace")
+
         if tool_name == "add_gee_layer":
             return await self._add_gee_layer(args)
         if tool_name == "get_population_layer":

@@ -6,7 +6,7 @@
         "hooks": [
           {
             "type": "command",
-            "command": "'/Users/smriti/Documents/GitHub/Cursor-for-Urban-Planners/.codex/hooks/typecheck.sh'",
+            "command": "$CODEX_PROJECT_DIR/.codex/hooks/typecheck.sh",
             "timeout": 30
           }
         ]

@@ -19,12 +19,15 @@ case "$FILE" in
   *) exit 0 ;;
 esac
 
-# Need a project root to cd into
-if [ -z "${CLAUDE_PROJECT_DIR:-}" ] || [ ! -d "$CLAUDE_PROJECT_DIR/apps/desktop" ]; then
+# Resolve the project root dynamically relative to this script's folder
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+PROJECT_ROOT="$(cd "$SCRIPT_DIR/../.." && pwd)"
+
+if [ ! -d "$PROJECT_ROOT/apps/desktop" ]; then
   exit 0
 fi
 
-cd "$CLAUDE_PROJECT_DIR/apps/desktop" || exit 0
+cd "$PROJECT_ROOT/apps/desktop" || exit 0
 
 OUTPUT=$(pnpm exec tsc --build --noEmit 2>&1)
 EXIT=$?

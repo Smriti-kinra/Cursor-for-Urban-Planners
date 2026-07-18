@@ -105,7 +105,6 @@ In dev, `apps/desktop/src/main/index.ts:startBackend` is a no-op — uvicorn run
 ## Known debt and gaps
 
 - **No tests.** Anywhere. The agent loop, OSM ring-merge, and area math are entirely untested.
-- **DocumentView PDF mode is display-only** — PDFs render in an iframe but cannot be sent to OpenAI vision (no PDF→image conversion).
 
 ## How to work in this repo with Codex
 

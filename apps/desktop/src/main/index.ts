@@ -128,6 +128,56 @@ function encryptAndSaveGoogleMapsKey(key: string): boolean {
   }
 }
 
+// Google Earth Engine Credentials persistence with safeStorage encryption
+const GEE_KEY_CONFIG_PATH = path.join(
+  isDev ? path.resolve(process.cwd(), '.tmp') : app.getPath('userData'),
+  'gee-credentials.json'
+)
+
+function readAndDecryptGEEKey(): string {
+  try {
+    if (!fs.existsSync(GEE_KEY_CONFIG_PATH)) return ''
+    const config = JSON.parse(fs.readFileSync(GEE_KEY_CONFIG_PATH, 'utf-8'))
+    if (!config.key) return ''
+    if (config.encrypted && safeStorage.isEncryptionAvailable()) {
+      const encryptedBuffer = Buffer.from(config.key, 'hex')
+      return safeStorage.decryptString(encryptedBuffer)
+    } else if (!config.encrypted) {
+      return Buffer.from(config.key, 'base64').toString('utf-8')
+    }
+    return ''
+  } catch (err) {
+    console.error('Failed to read/decrypt GEE key:', err)
+    return ''
+  }
+}
+
+function encryptAndSaveGEEKey(key: string): boolean {
+  try {
+    if (!key || !key.trim()) {
+      if (fs.existsSync(GEE_KEY_CONFIG_PATH)) {
+        fs.unlinkSync(GEE_KEY_CONFIG_PATH)
+      }
+      return true
+    }
+
+    let storedValue: string
+    const useEncryption = safeStorage.isEncryptionAvailable()
+    if (useEncryption) {
+      const encryptedBuffer = safeStorage.encryptString(key.trim())
+      storedValue = encryptedBuffer.toString('hex')
+    } else {
+      storedValue = Buffer.from(key.trim()).toString('base64')
+    }
+    fs.mkdirSync(path.dirname(GEE_KEY_CONFIG_PATH), { recursive: true })
+    fs.writeFileSync(GEE_KEY_CONFIG_PATH, JSON.stringify({ key: storedValue, encrypted: useEncryption }))
+    return true
+  } catch (err) {
+    console.error('Failed to encrypt/save GEE key:', err)
+    return false
+  }
+}
+
 interface ModelConfig {
   id: string
   name: string
@@ -177,7 +227,14 @@ function startBackend(): void {
   const backendBinary = process.platform === 'win32' ? 'backend.exe' : 'backend'
   const backendPath = path.join(process.resourcesPath, 'backend', backendBinary)
 
+  const env = { ...process.env }
+  const geeCreds = readAndDecryptGEEKey()
+  if (geeCreds) {
+    env['GOOGLE_EARTH_ENGINE_CREDS'] = geeCreds
+  }
+
   backendProcess = spawn(backendPath, ['--port', String(BACKEND_PORT)], {
+    env,
     stdio: ['ignore', 'pipe', 'pipe']
   })
 
@@ -215,6 +272,8 @@ ipcMain.handle('get-api-key', () => readAndDecryptKey())
 ipcMain.handle('set-api-key', (_e, key: string) => encryptAndSaveKey(key))
 ipcMain.handle('get-google-maps-key', () => readAndDecryptGoogleMapsKey())
 ipcMain.handle('set-google-maps-key', (_e, key: string) => encryptAndSaveGoogleMapsKey(key))
+ipcMain.handle('get-gee-key', () => readAndDecryptGEEKey())
+ipcMain.handle('set-gee-key', (_e, key: string) => encryptAndSaveGEEKey(key))
 
 // Open file dialog (for document mode)
 ipcMain.handle('open-file', async (_e, opts: { filters?: { name: string; extensions: string[] }[] }) => {
