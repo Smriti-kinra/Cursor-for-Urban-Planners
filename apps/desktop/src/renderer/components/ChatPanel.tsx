@@ -856,6 +856,17 @@ export default function ChatPanel({
     setActiveQuestion(null)
   }, [activeConversation?.id])
 
+  useEffect(() => {
+    if (wsRef.current) {
+      const ws = wsRef.current
+      if (ws.readyState === WebSocket.OPEN || ws.readyState === WebSocket.CONNECTING) {
+        ws.close()
+      }
+      wsRef.current = null
+    }
+    historySentRef.current = false
+  }, [mapContext.workspace, activeConversation?.id])
+
   /** Convert raw API error strings/objects into a short, friendly sentence. */
   const friendlyKeyError = (raw: string): string => {
     // OpenAI returns something like: "Error code: 401 - {'error': {'message': '...', 'code': 'invalid_api_key'}}"
@@ -1432,6 +1443,18 @@ export default function ChatPanel({
                   <div className="api-key-status info">
                     <span className="api-key-indicator gray">●</span>
                     <span className="api-key-label">Google Maps Key inactive (OSM fallback)</span>
+                  </div>
+                )}
+
+                {geeKey ? (
+                  <div className="api-key-status success">
+                    <span className="api-key-indicator green">●</span>
+                    <span className="api-key-label">GEE Credentials active</span>
+                  </div>
+                ) : (
+                  <div className="api-key-status info">
+                    <span className="api-key-indicator gray">●</span>
+                    <span className="api-key-label">GEE Credentials inactive</span>
                   </div>
                 )}
               </div>

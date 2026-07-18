@@ -1,11 +1,16 @@
 import { useEffect, useMemo, useState, useRef } from 'react'
-import { GeoJSONLayer, LayerStyleSpec } from '../types'
+import type { Feature } from 'geojson'
+import { GeoJSONLayer, LayerStyleSpec, SelectedFeatureEntry } from '../types'
 import SymbologyPanel from './SymbologyPanel'
 import AttributeTable from './AttributeTable'
 import './LayerPanel.css'
 
 interface LayerPanelProps {
   layers: GeoJSONLayer[]
+  selectedLayerIds: Set<string>
+  onSelectedLayerIdsChange: React.Dispatch<React.SetStateAction<Set<string>>>
+  selectedFeatures?: SelectedFeatureEntry[]
+  onSelectFeature?: (entry: SelectedFeatureEntry | null, shiftKey: boolean) => void
   onToggle: (id: string) => void
   onRemove: (id: string) => void
   onZoomTo: (id: string) => void
@@ -47,6 +52,10 @@ export type TreeNode = TreeGroupNode | TreeLayerNode
 
 export default function LayerPanel({
   layers,
+  selectedLayerIds,
+  onSelectedLayerIdsChange,
+  selectedFeatures,
+  onSelectFeature,
   onToggle,
   onRemove,
   onZoomTo,
@@ -70,7 +79,6 @@ export default function LayerPanel({
   const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(() => new Set())
   const [menu, setMenu] = useState<{ id: string; type: 'layer' | 'group'; x: number; y: number; selectedIds: Set<string> } | null>(null)
   const [editingGroupId, setEditingGroupId] = useState<string | null>(null)
-  const [selectedLayerIds, setSelectedLayerIds] = useState<Set<string>>(new Set())
   const panelRef = useRef<HTMLDivElement>(null)
 
   // drag-and-drop state
@@ -83,12 +91,12 @@ export default function LayerPanel({
   useEffect(() => {
     const handleOutsideMouseDown = (e: MouseEvent) => {
       if (panelRef.current && !panelRef.current.contains(e.target as Node)) {
-        setSelectedLayerIds(new Set())
+        onSelectedLayerIdsChange(new Set())
       }
     }
     document.addEventListener('mousedown', handleOutsideMouseDown)
     return () => document.removeEventListener('mousedown', handleOutsideMouseDown)
-  }, [])
+  }, [onSelectedLayerIdsChange])
 
   // Clear style popup when clicking outside the swatch or the popup itself
   useEffect(() => {
@@ -267,7 +275,7 @@ export default function LayerPanel({
   // Context Menu triggers
   const handleContextMenu = (layerId: string, e: React.MouseEvent) => {
     e.preventDefault()
-    setSelectedLayerIds((prev) => {
+    onSelectedLayerIdsChange((prev) => {
       const next = new Set(prev)
       next.add(layerId)
       setMenu({ id: layerId, type: 'layer', x: e.clientX, y: e.clientY, selectedIds: next })
@@ -366,7 +374,7 @@ export default function LayerPanel({
 
   // Selection handler — Cmd/Ctrl or Shift for multi-select, plain click = single select (toggle if already sole)
   const handleSelect = (layerId: string, e: React.MouseEvent) => {
-    setSelectedLayerIds((prev) => {
+    onSelectedLayerIdsChange((prev) => {
       const next = new Set(prev)
       if (e.ctrlKey || e.metaKey) {
         if (next.has(layerId)) next.delete(layerId)
@@ -456,7 +464,7 @@ export default function LayerPanel({
             if (target.closest('button') || target.closest('input')) {
               return
             }
-            setSelectedLayerIds((prev) => {
+            onSelectedLayerIdsChange((prev) => {
               const next = new Set(prev)
               const groupLayerIds = childLayers.map((l) => l.id)
               const allSelected = groupLayerIds.every((id) => next.has(id))
@@ -554,7 +562,7 @@ export default function LayerPanel({
             onClick={(e) => {
               e.stopPropagation()
               childLayers.forEach((l) => onRemove?.(l.id))
-              setSelectedLayerIds(new Set())
+              onSelectedLayerIdsChange(new Set())
             }}
             title="Remove group and layers"
             style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center' }}
@@ -597,7 +605,7 @@ export default function LayerPanel({
         }
       }}
       onClick={(e) => {
-        if (e.target === e.currentTarget) setSelectedLayerIds(new Set())
+        if (e.target === e.currentTarget) onSelectedLayerIdsChange(new Set())
       }}
     >
       {tree.map((node) => renderNode(node))}
@@ -629,7 +637,7 @@ export default function LayerPanel({
                 onClick={() => {
                   onUngroupGroup?.(menuGroupNode!.id)
                   setMenu(null)
-                  setSelectedLayerIds(new Set())
+                  onSelectedLayerIdsChange(new Set())
                 }}
               >
                 Ungroup all layers
@@ -651,7 +659,7 @@ export default function LayerPanel({
                 onClick={() => {
                   childLayers.forEach((l) => onRemove?.(l.id))
                   setMenu(null)
-                  setSelectedLayerIds(new Set())
+                  onSelectedLayerIdsChange(new Set())
                 }}
               >
                 Delete group & layers
@@ -687,7 +695,7 @@ export default function LayerPanel({
                     onClick={() => {
                       onGroupMulti?.(Array.from(menuSelectedIds))
                       setMenu(null)
-                      setSelectedLayerIds(new Set())
+                      onSelectedLayerIdsChange(new Set())
                     }}
                   >
                     Group these layers
@@ -700,7 +708,7 @@ export default function LayerPanel({
                         onClick={() => {
                           selectedInGroup.forEach((id) => onUngroup?.(id))
                           setMenu(null)
-                          setSelectedLayerIds(new Set())
+                          onSelectedLayerIdsChange(new Set())
                         }}
                       >
                         {selectedInGroup.length === menuSelectedIds.size
@@ -763,7 +771,7 @@ export default function LayerPanel({
                     onClick={() => {
                       onRemove(menuLayer.id)
                       setMenu(null)
-                      setSelectedLayerIds(new Set())
+                      onSelectedLayerIdsChange(new Set())
                     }}
                   >
                     Delete Layer
@@ -1034,6 +1042,8 @@ function LayerItemRow({
             layer={layer}
             onChange={onAttributesChange}
             onClose={() => onAttributes?.(layer.id)}
+            selectedFeatures={selectedFeatures || []}
+            onSelectFeature={onSelectFeature || (() => {})}
           />
         </div>
       )}

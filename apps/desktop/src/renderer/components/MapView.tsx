@@ -4,17 +4,144 @@ import type { DataDrivenPropertyValueSpecification, ExpressionSpecification } fr
 import 'maplibre-gl/dist/maplibre-gl.css'
 import * as turf from '@turf/turf'
 import type { Feature, FeatureCollection, Geometry } from 'geojson'
-import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS } from '../types'
+import { GeoJSONLayer, MapViewState, MapAction, BASEMAPS, SelectedFeatureEntry } from '../types'
 import './MapView.css'
 
 interface NominatimSearchResult {
   display_name: string
   lat: string
   lon: string
+  hasStreetView?: boolean
 }
 
 export type MapViewHandle = {
   getCanvas: () => HTMLCanvasElement | null
+}
+
+// Helper to check if a polygon/multipolygon geometry intersects the viewport bounds
+function doesPolygonIntersectViewport(geom: any, bounds: { west: number; south: number; east: number; north: number }): boolean {
+  // 1. Bounding box check
+  const bbox = turf.bbox(geom);
+  if (bbox[2] < bounds.west || bbox[0] > bounds.east || bbox[3] < bounds.south || bbox[1] > bounds.north) {
+    return false;
+  }
+
+  // 2. Center check (if viewport is inside a huge polygon)
+  const centerPt = turf.point([(bounds.west + bounds.east) / 2, (bounds.south + bounds.north) / 2]);
+  try {
+    if (turf.booleanPointInPolygon(centerPt, geom)) {
+      return true;
+    }
+  } catch {
+    // ignore
+  }
+
+  // 3. Coordinate check
+  const coords = geom.type === 'Polygon' ? geom.coordinates : geom.type === 'MultiPolygon' ? geom.coordinates.flat(1) : [];
+  for (const ring of coords) {
+    for (const pt of ring) {
+      if (pt[0] >= bounds.west && pt[0] <= bounds.east && pt[1] >= bounds.south && pt[1] <= bounds.north) {
+        return true;
+      }
+    }
+  }
+
+  // 4. Fallback intersection check
+  try {
+    const viewportPoly = turf.bboxPolygon([bounds.west, bounds.south, bounds.east, bounds.north]);
+    const intersection = turf.intersect(turf.featureCollection([turf.feature(geom), viewportPoly]));
+    if (intersection) return true;
+  } catch {
+    // ignore
+  }
+
+  return false;
+}
+
+// Helper to find the best real-world coordinate [lng, lat] for off-screen indicator targets
+function getTargetPointForGeometry(geom: Geometry, mapCenter: [number, number]): [number, number] | null {
+  const centerPoint = turf.point(mapCenter);
+
+  if (geom.type === 'Point') {
+    return geom.coordinates as [number, number];
+  }
+
+  if (geom.type === 'MultiPoint') {
+    let closestCoord: [number, number] | null = null;
+    let minDist = Infinity;
+    for (const coord of geom.coordinates) {
+      const dist = turf.distance(turf.point(coord), centerPoint);
+      if (dist < minDist) {
+        minDist = dist;
+        closestCoord = coord as [number, number];
+      }
+    }
+    return closestCoord;
+  }
+
+  if (geom.type === 'LineString') {
+    try {
+      const nearest = turf.nearestPointOnLine(geom as any, centerPoint);
+      return nearest.geometry.coordinates as [number, number];
+    } catch {
+      const centroid = turf.centroid(geom as any);
+      return centroid.geometry.coordinates as [number, number];
+    }
+  }
+
+  if (geom.type === 'MultiLineString') {
+    try {
+      let closestPoint: [number, number] | null = null;
+      let minDist = Infinity;
+      for (const coords of geom.coordinates) {
+        const line = turf.lineString(coords);
+        const nearest = turf.nearestPointOnLine(line, centerPoint);
+        const dist = turf.distance(nearest, centerPoint);
+        if (dist < minDist) {
+          minDist = dist;
+          closestPoint = nearest.geometry.coordinates as [number, number];
+        }
+      }
+      return closestPoint;
+    } catch {
+      const centroid = turf.centroid(geom as any);
+      return centroid.geometry.coordinates as [number, number];
+    }
+  }
+
+  if (geom.type === 'Polygon') {
+    try {
+      const boundaryLine = turf.lineString(geom.coordinates[0]);
+      const nearest = turf.nearestPointOnLine(boundaryLine, centerPoint);
+      return nearest.geometry.coordinates as [number, number];
+    } catch {
+      const centroid = turf.centroid(geom as any);
+      return centroid.geometry.coordinates as [number, number];
+    }
+  }
+
+  if (geom.type === 'MultiPolygon') {
+    try {
+      let largestPolyCoords = geom.coordinates[0];
+      let maxArea = -1;
+      for (const polyCoords of geom.coordinates) {
+        const poly = turf.polygon(polyCoords);
+        const area = turf.area(poly);
+        if (area > maxArea) {
+          maxArea = area;
+          largestPolyCoords = polyCoords;
+        }
+      }
+      const largestPoly = turf.polygon(largestPolyCoords);
+      const centroid = turf.centroid(largestPoly);
+      return centroid.geometry.coordinates as [number, number];
+    } catch {
+      const centroid = turf.centroid(geom as any);
+      return centroid.geometry.coordinates as [number, number];
+    }
+  }
+
+  return null;
 }
 
 // Labels are the most expensive layer type. Above this feature count we skip
@@ -133,6 +260,7 @@ function popupHtmlForProps(props: Record<string, unknown> | null): string {
 
 interface MapViewProps {
   layers: GeoJSONLayer[]
+  selectedLayerIds?: Set<string>
   basemap: string
   initialState: MapViewState
   mapActions: MapAction[]
@@ -164,6 +292,8 @@ interface MapViewProps {
   onRedo?: () => void
   canUndo?: boolean
   canRedo?: boolean
+  selectedFeatures?: SelectedFeatureEntry[]
+  onSelectFeature?: (entry: SelectedFeatureEntry | null, shiftKey: boolean) => void
 }
 
 type DrawMode = 'point' | 'line' | 'polygon' | null
@@ -171,6 +301,7 @@ type DrawMode = 'point' | 'line' | 'polygon' | null
 const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   {
     layers,
+    selectedLayerIds = new Set(),
     basemap,
     initialState,
     mapActions,
@@ -196,11 +327,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     onRedo,
     canUndo = false,
     canRedo = false,
+    selectedFeatures = [],
+    onSelectFeature,
   },
   ref,
 ) {
   const containerRef = useRef<HTMLDivElement>(null)
   const [zoomTooLow, setZoomTooLow] = useState(false)
+  // Each off-screen indicator: position on edge + angle + the entry it refers to
+  type IndicatorPos = { x: number; y: number; angle: number; entry: SelectedFeatureEntry }
+  const [indicatorPositions, setIndicatorPositions] = useState<IndicatorPos[]>([])
   const mapRef = useRef<maplibregl.Map | null>(null)
   const onBoundsChangeRef = useRef(onBoundsChange)
   onBoundsChangeRef.current = onBoundsChange
@@ -347,6 +483,62 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           'line-opacity': 0.75
         }
       })
+      map.addSource('selected-feature-highlight', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      map.addLayer({
+        id: 'selected-feature-highlight-fill',
+        type: 'fill',
+        source: 'selected-feature-highlight',
+        filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+        paint: {
+          'fill-color': '#f59e0b',
+          'fill-opacity': 0.15,
+        },
+      })
+      map.addLayer({
+        id: 'selected-feature-highlight-line',
+        type: 'line',
+        source: 'selected-feature-highlight',
+        filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+        paint: {
+          'line-color': '#f59e0b',
+          'line-width': 4.0,
+          'line-opacity': 0.85,
+        },
+      })
+      map.addLayer({
+        id: 'selected-feature-highlight-circle',
+        type: 'circle',
+        source: 'selected-feature-highlight',
+        filter: ['any', ['==', ['geometry-type'], 'Point'], ['==', ['geometry-type'], 'MultiPoint']],
+        paint: {
+          'circle-radius': 8,
+          'circle-color': '#f59e0b',
+          'circle-stroke-color': '#ffffff',
+          'circle-stroke-width': 2,
+          'circle-opacity': 0.9,
+        },
+      })
+      // ── Edge-glow source: selected polygons that intersect the viewport ──
+      // Opacity is driven by a requestAnimationFrame loop — paint starts at 0.
+      map.addSource('selected-feature-edge-glow', {
+        type: 'geojson',
+        data: { type: 'FeatureCollection', features: [] },
+      })
+      map.addLayer({
+        id: 'selected-feature-edge-glow-line',
+        type: 'line',
+        source: 'selected-feature-edge-glow',
+        filter: ['any', ['==', ['geometry-type'], 'Polygon'], ['==', ['geometry-type'], 'MultiPolygon']],
+        paint: {
+          'line-color': '#f59e0b',
+          'line-width': 5,
+          'line-opacity': 0,  // animated by rAF
+          'line-blur': 1,
+        },
+      })
       setMapReady(true)
     })
 
@@ -379,6 +571,9 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
     for (const layer of layers) {
       const fillOpacity = layer.opacity ?? 0.3
+      const hasSelection = selectedLayerIds && selectedLayerIds.size > 0
+      const isSelected = !hasSelection || selectedLayerIds.has(layer.id)
+      const opacityMultiplier = isSelected ? 1.0 : 0.35
 
       if (!map.getSource(layer.id)) {
         if (layer.wmsSpec) {
@@ -396,6 +591,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             type: 'raster',
             source: layer.id,
             layout: { visibility: layer.visible ? 'visible' : 'none' },
+            paint: { 'raster-opacity': (layer.opacity ?? 1.0) * opacityMultiplier },
           })
           ownLayerIds.current.add(layer.id)
         } else if (layer.geeSpec) {
@@ -410,6 +606,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             type: 'raster',
             source: layer.id,
             layout: { visibility: layer.visible ? 'visible' : 'none' },
+            paint: { 'raster-opacity': (layer.opacity ?? 1.0) * opacityMultiplier },
           })
           ownLayerIds.current.add(layer.id)
         } else if (layer.rasterOverlaySpec) {
@@ -439,7 +636,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               type: 'raster',
               source: layer.id,
               layout: { visibility: layer.visible ? 'visible' : 'none' },
-              paint: { 'raster-opacity': layer.opacity ?? 0.8 },
+              paint: { 'raster-opacity': (layer.opacity ?? 0.8) * opacityMultiplier },
             })
             ownLayerIds.current.add(layer.id)
           } else {
@@ -461,7 +658,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           ],
           paint: {
             'fill-color': fillColorExpression(layer),
-            'fill-opacity': ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
+            'fill-opacity': ['*', ['coalesce', ['get', 'fillOpacity'], fillOpacity], opacityMultiplier] as DataDrivenPropertyValueSpecification<number>,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -478,7 +675,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           paint: {
             'line-color': lineColorExpression(layer),
             'line-width': layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2,
-            'line-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
+            'line-opacity': (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -495,7 +692,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           paint: {
             'line-color': lineColorExpression(layer),
             'line-width': ['coalesce', ['get', 'lineWidth'], layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
-            'line-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
+            'line-opacity': (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier,
             ...(layer.lineDasharray ? { 'line-dasharray': layer.lineDasharray } : {}),
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
@@ -517,10 +714,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           paint: {
             'circle-color': fillColorExpression(layer),
             'circle-radius': 6,
-            'circle-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
+            'circle-opacity': (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier,
             'circle-stroke-color': lineColorExpression(layer),
             'circle-stroke-width': layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 1.5,
-            'circle-stroke-opacity': layer.styleSpec?.opacity ?? layer.opacity ?? 0.8,
+            'circle-stroke-opacity': (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier,
           },
           layout: { visibility: layer.visible ? 'visible' : 'none' },
         })
@@ -549,6 +746,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             'text-color': labelSpec?.color ?? '#1f2937',
             'text-halo-color': labelSpec?.haloColor ?? '#ffffff',
             'text-halo-width': 1.2,
+            'text-opacity': opacityMultiplier,
           },
         })
 
@@ -567,13 +765,13 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           const vis = layer.visible ? 'visible' : 'none'
           if (map.getLayer(`${layer.id}-raster`)) {
             map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
-            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 1.0)
+            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', (layer.opacity ?? 1.0) * opacityMultiplier)
           }
         } else if (layer.rasterOverlaySpec) {
           const vis = layer.visible ? 'visible' : 'none'
           if (map.getLayer(`${layer.id}-raster`)) {
             map.setLayoutProperty(`${layer.id}-raster`, 'visibility', vis)
-            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-raster`, 'raster-opacity', (layer.opacity ?? 0.8) * opacityMultiplier)
           }
           const src = map.getSource(layer.id) as maplibregl.ImageSource
           if (src && src.setCoordinates && layer.rasterOverlaySpec.corners) {
@@ -613,17 +811,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             map.setPaintProperty(`${layer.id}-fill`, 'fill-color', fillColorExpression(layer))
             map.setPaintProperty(
               `${layer.id}-fill`, 'fill-opacity',
-              ['coalesce', ['get', 'fillOpacity'], fillOpacity] as DataDrivenPropertyValueSpecification<number>,
+              ['*', ['coalesce', ['get', 'fillOpacity'], fillOpacity], opacityMultiplier] as DataDrivenPropertyValueSpecification<number>,
             )
           }
           if (map.getLayer(`${layer.id}-outline`)) {
             map.setPaintProperty(`${layer.id}-outline`, 'line-color', lineColorExpression(layer))
-            map.setPaintProperty(`${layer.id}-outline`, 'line-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-outline`, 'line-opacity', (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier)
             map.setPaintProperty(`${layer.id}-outline`, 'line-width', layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2)
           }
           if (map.getLayer(`${layer.id}-line`)) {
             map.setPaintProperty(`${layer.id}-line`, 'line-color', lineColorExpression(layer))
-            map.setPaintProperty(`${layer.id}-line`, 'line-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-line`, 'line-opacity', (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier)
             map.setPaintProperty(
               `${layer.id}-line`, 'line-width',
               ['coalesce', ['get', 'lineWidth'], layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 2] as DataDrivenPropertyValueSpecification<number>,
@@ -634,10 +832,10 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           }
           if (map.getLayer(`${layer.id}-circle`)) {
             map.setPaintProperty(`${layer.id}-circle`, 'circle-color', fillColorExpression(layer))
-            map.setPaintProperty(`${layer.id}-circle`, 'circle-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-opacity', (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier)
             map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-color', lineColorExpression(layer))
             map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-width', layer.styleSpec?.lineWidth ?? layer.lineWidth ?? 1.5)
-            map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-opacity', layer.styleSpec?.opacity ?? layer.opacity ?? 0.8)
+            map.setPaintProperty(`${layer.id}-circle`, 'circle-stroke-opacity', (layer.styleSpec?.opacity ?? layer.opacity ?? 0.8) * opacityMultiplier)
           }
           // Labels: re-apply field/size/color and visibility (gated by enabled +
           // feature cap, AND the layer's own visibility).
@@ -652,6 +850,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             )
             map.setPaintProperty(`${layer.id}-label`, 'text-color', labelSpec?.color ?? '#1f2937')
             map.setPaintProperty(`${layer.id}-label`, 'text-halo-color', labelSpec?.haloColor ?? '#ffffff')
+            map.setPaintProperty(`${layer.id}-label`, 'text-opacity', opacityMultiplier)
           }
         }
       }
@@ -684,7 +883,205 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         }
       }
     }
-  }, [layers, mapReady])
+  }, [layers, mapReady, selectedLayerIds])
+
+  // ── Sync selected feature highlight source ──
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    const source = map.getSource('selected-feature-highlight') as maplibregl.GeoJSONSource
+    if (!source) return
+
+    source.setData({
+      type: 'FeatureCollection',
+      features: selectedFeatures.map((e) => e.feature),
+    })
+  }, [selectedFeatures, mapReady])
+
+  // ── Calculate and monitor off-screen indicators (one per selected feature) ──
+  //
+  // For polygons that *intersect* the viewport we skip the badge and instead
+  // drive a pulsing amber edge-glow via requestAnimationFrame (see rAF effect).
+  const updateOffScreenIndicators = useCallback(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) {
+      setIndicatorPositions([])
+      return
+    }
+    if (!selectedFeatures.length) {
+      setIndicatorPositions([])
+      return
+    }
+
+    const bounds = map.getBounds()
+    const canvas = map.getCanvas()
+    const width = canvas.clientWidth
+    const height = canvas.clientHeight
+    const mapCenter = [map.getCenter().lng, map.getCenter().lat] as [number, number]
+    const centerScreen = map.project(new maplibregl.LngLat(mapCenter[0], mapCenter[1]))
+    const padding = 24
+
+    const nextPositions: Array<{ x: number; y: number; angle: number; entry: SelectedFeatureEntry }> = []
+
+    for (const entry of selectedFeatures) {
+      const geom = entry.feature.geometry
+      if (!geom) continue
+
+      // Polygon/MultiPolygon that intersects viewport → no badge (edge glow instead)
+      if (geom.type === 'Polygon' || geom.type === 'MultiPolygon') {
+        const b = {
+          west: bounds.getWest(),
+          south: bounds.getSouth(),
+          east: bounds.getEast(),
+          north: bounds.getNorth(),
+        }
+        if (doesPolygonIntersectViewport(geom, b)) continue
+      }
+
+      const targetLngLat = getTargetPointForGeometry(geom, mapCenter)
+      if (!targetLngLat) continue
+
+      const isInsideViewport = bounds.contains(new maplibregl.LngLat(targetLngLat[0], targetLngLat[1]))
+      if (isInsideViewport) continue
+
+      const targetScreen = map.project(new maplibregl.LngLat(targetLngLat[0], targetLngLat[1]))
+
+      const cx = centerScreen.x
+      const cy = centerScreen.y
+      const tx = targetScreen.x
+      const ty = targetScreen.y
+      const dx = tx - cx
+      const dy = ty - cy
+
+      if (dx === 0 && dy === 0) continue
+
+      // Find intersection of center→target ray with padded viewport boundary
+      let t = 1.0
+
+      if (tx < padding) {
+        const tl = (padding - cx) / (tx - cx)
+        if (tl > 0 && tl < t) t = tl
+      } else if (tx > width - padding) {
+        const tr = (width - padding - cx) / (tx - cx)
+        if (tr > 0 && tr < t) t = tr
+      }
+      if (ty < padding) {
+        const tt = (padding - cy) / (ty - cy)
+        if (tt > 0 && tt < t) t = tt
+      } else if (ty > height - padding) {
+        const tb = (height - padding - cy) / (ty - cy)
+        if (tb > 0 && tb < t) t = tb
+      }
+
+      if (t < 1.0) {
+        nextPositions.push({
+          x: cx + t * (tx - cx),
+          y: cy + t * (ty - cy),
+          angle: Math.atan2(dy, dx),
+          entry,
+        })
+      }
+    }
+
+    setIndicatorPositions(nextPositions)
+  }, [mapReady, selectedFeatures])
+
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    updateOffScreenIndicators()
+
+    map.on('move', updateOffScreenIndicators)
+    map.on('zoom', updateOffScreenIndicators)
+    map.on('resize', updateOffScreenIndicators)
+
+    return () => {
+      map.off('move', updateOffScreenIndicators)
+      map.off('zoom', updateOffScreenIndicators)
+      map.off('resize', updateOffScreenIndicators)
+    }
+  }, [mapReady, selectedFeatures, updateOffScreenIndicators])
+
+  // ── Edge-glow pulse rAF for intersecting-viewport polygons ──
+  //
+  // Polygons that are partially visible get a pulsing amber outline instead of
+  // a badge. We drive the opacity via requestAnimationFrame because MapLibre
+  // paint properties must be set imperatively.
+  useEffect(() => {
+    const map = mapRef.current
+    if (!map || !mapReady) return
+
+    // Find the intersecting polygons
+    const bounds = map.getBounds()
+    const b = {
+      west: bounds.getWest(),
+      south: bounds.getSouth(),
+      east: bounds.getEast(),
+      north: bounds.getNorth(),
+    }
+    const intersecting = selectedFeatures.filter((e) => {
+      const g = e.feature.geometry
+      return (g.type === 'Polygon' || g.type === 'MultiPolygon') && doesPolygonIntersectViewport(g, b)
+    })
+
+    // Update the glow source
+    const glowSource = map.getSource('selected-feature-edge-glow') as maplibregl.GeoJSONSource | undefined
+    if (glowSource) {
+      glowSource.setData({
+        type: 'FeatureCollection',
+        features: intersecting.map((e) => e.feature),
+      })
+    }
+
+    if (!intersecting.length) return
+
+    let rafId = 0
+    const startTime = performance.now()
+    const animate = (now: number) => {
+      const t = (now - startTime) / 1000  // seconds
+      // Oscillate between 0.35 and 0.9
+      const opacity = 0.35 + 0.55 * (0.5 + 0.5 * Math.sin(t * Math.PI * 1.5))
+      try {
+        if (map.getLayer('selected-feature-edge-glow-line')) {
+          map.setPaintProperty('selected-feature-edge-glow-line', 'line-opacity', opacity)
+        }
+      } catch { /* map may have been removed */ }
+      rafId = requestAnimationFrame(animate)
+    }
+    rafId = requestAnimationFrame(animate)
+
+    return () => cancelAnimationFrame(rafId)
+  }, [mapReady, selectedFeatures])
+
+  const handleIndicatorClick = (entry: SelectedFeatureEntry) => {
+    const map = mapRef.current
+    if (!map || !entry?.feature?.geometry) return
+
+    const geom = entry.feature.geometry
+    if (geom.type === 'Point') {
+      map.flyTo({
+        center: geom.coordinates as [number, number],
+        zoom: Math.max(map.getZoom(), 15),
+        duration: 1500,
+      })
+    } else {
+      try {
+        const bbox = turf.bbox(geom) as [number, number, number, number]
+        if (bbox.every((v) => isFinite(v))) {
+          map.fitBounds(bbox, { padding: 80, maxZoom: 16, duration: 1500 })
+        }
+      } catch {
+        const centroid = turf.centroid(geom as any)
+        map.flyTo({
+          center: centroid.geometry.coordinates as [number, number],
+          zoom: Math.max(map.getZoom(), 15),
+          duration: 1500,
+        })
+      }
+    }
+  }
 
   // ── Basemap switching ──
 
@@ -1371,6 +1768,36 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             if (map.getLayer(`${hlId}${suffix}`)) map.removeLayer(`${hlId}${suffix}`)
           }
           if (map.getSource(hlId)) map.removeSource(hlId)
+
+          // Plain/Shift click: select or toggle feature for off-screen indicator
+          const ids = renderLayerIds()
+          if (ids.length) {
+            const feats = map.queryRenderedFeatures(e.point, { layers: ids })
+            if (feats.length > 0) {
+              const feat = feats[0]
+              // Find which layer this feature belongs to
+              const matchingLayer = layersRef.current.find((l) => {
+                for (const suffix of ['-fill', '-outline', '-line', '-circle']) {
+                  if (feat.layer?.id === `${l.id}${suffix}`) return true
+                }
+                return false
+              })
+              if (matchingLayer) {
+                const fullFeature = {
+                  type: 'Feature' as const,
+                  geometry: JSON.parse(JSON.stringify(feat.geometry)) as Geometry,
+                  properties: { ...(feat.properties || {}) },
+                }
+                onSelectFeature?.({ feature: fullFeature, layerId: matchingLayer.id }, e.originalEvent.shiftKey)
+              } else {
+                onSelectFeature?.(null, false)
+              }
+            } else {
+              onSelectFeature?.(null, false)
+            }
+          } else {
+            onSelectFeature?.(null, false)
+          }
         }
         return
       }
@@ -1473,6 +1900,17 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
     return () => window.removeEventListener('keydown', onKey)
   }, [drawMode, finishDraw, cancelDraw, handleDrawUndo])
 
+  // Keyboard: Escape clears feature selection (when not in draw mode)
+  useEffect(() => {
+    const onKey = (e: KeyboardEvent) => {
+      if (e.key === 'Escape' && !drawModeRef.current) {
+        onSelectFeature?.(null, false)
+      }
+    }
+    window.addEventListener('keydown', onKey)
+    return () => window.removeEventListener('keydown', onKey)
+  }, [onSelectFeature])
+
   // ── Geocoding search ──
 
   const handleSearch = async () => {
@@ -1497,7 +1935,26 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           lat: String(r.lat),
           lon: String(r.lon),
         }))
-      setSearchResults(results)
+
+      // Check Street View availability (radius=150m) concurrently for each result
+      const resultsWithSv = await Promise.all(
+        results.map(async (r) => {
+          try {
+            const metaResp = await fetch(
+              `http://localhost:8765/api/streetview/meta?lat=${parseFloat(r.lat)}&lng=${parseFloat(r.lon)}&radius=150`
+            )
+            if (metaResp.ok) {
+              const meta = await metaResp.json()
+              return { ...r, hasStreetView: !!meta.found }
+            }
+          } catch (e) {
+            console.error('Failed to fetch street view metadata:', e)
+          }
+          return { ...r, hasStreetView: false }
+        })
+      )
+
+      setSearchResults(resultsWithSv)
     } catch {
       setSearchResults([])
     }
@@ -1517,6 +1974,37 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   return (
     <div className={`map-view ${isMiniMap ? 'is-mini-map' : ''}`}>
       <div ref={containerRef} className="map-container" />
+
+      {/* ── Off-screen Feature Indicators (one per off-screen selected feature) ── */}
+      {!isMiniMap && indicatorPositions.map((ind, idx) => {
+        const { feature } = ind.entry
+        const label =
+          feature.properties?.label ||
+          feature.properties?.name ||
+          feature.properties?.title ||
+          feature.geometry?.type ||
+          'Feature'
+        return (
+          <button
+            key={idx}
+            className="offscreen-indicator-badge"
+            style={{ left: ind.x, top: ind.y }}
+            onClick={() => handleIndicatorClick(ind.entry)}
+            title={`Click to fly to: ${label}`}
+          >
+            <span
+              className="offscreen-indicator-arrow"
+              style={{ transform: `rotate(${ind.angle}rad)` }}
+            >
+              <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#f59e0b" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round">
+                <line x1="5" y1="12" x2="19" y2="12" />
+                <polyline points="12 5 19 12 12 19" />
+              </svg>
+            </span>
+            <span className="offscreen-indicator-text">{label}</span>
+          </button>
+        )
+      })}
 
       {/* ── Toolbar ── */}
       <div className="map-toolbar">
@@ -1618,7 +2106,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
 
       {/* ── Draw helper bar ── */}
       {drawMode && (
-        <div className="draw-bar">
+        <div className={`draw-bar ${showSearch ? 'has-search' : ''}`}>
           <span className="draw-icon" style={{ display: 'inline-flex', alignItems: 'center', justifyContent: 'center', opacity: 0.85 }}>
             {drawMode === 'point' ? (
               <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -1636,9 +2124,16 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
             )}
           </span>
           <span className="draw-hint">
-            {drawMode === 'point'
-              ? 'Click the map to place a point.'
-              : `Click to add vertices (${drawCount}). Double-click or Enter to finish, Esc to cancel.`}
+            {drawMode === 'point' ? (
+              'Click the map to place a point.'
+            ) : (
+              <>
+                <div>Click to add vertices ({drawCount}).</div>
+                <div style={{ opacity: 0.7, fontSize: '11px' }}>
+                  Double-click or Enter to finish, Esc to cancel.
+                </div>
+              </>
+            )}
           </span>
           {drawMode !== 'point' && (
             <button
@@ -1674,16 +2169,18 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               {searchResults.map((r, i) => (
                 <div key={i} className="search-result" onClick={() => flyToResult(r)}>
                   <span>{r.display_name}</span>
-                  <button
-                    className="search-result-action"
-                    onClick={(e) => {
-                      e.stopPropagation()
-                      onOpenStreetViewRef.current?.(parseFloat(r.lon), parseFloat(r.lat))
-                      flyToResult(r)
-                    }}
-                  >
-                    Street View
-                  </button>
+                  {r.hasStreetView && (
+                    <button
+                      className="search-result-action"
+                      onClick={(e) => {
+                        e.stopPropagation()
+                        onOpenStreetViewRef.current?.(parseFloat(r.lon), parseFloat(r.lat))
+                        flyToResult(r)
+                      }}
+                    >
+                      Street View
+                    </button>
+                  )}
                 </div>
               ))}
             </div>

@@ -34,6 +34,7 @@ import {
   BoundaryGeometry,
   LayerGeometryData,
   LayerStyleSpec,
+  SelectedFeatureEntry,
 } from './types'
 import {
   computeBreaks,
@@ -156,6 +157,33 @@ function App() {
   const [convertingFile, setConvertingFile] = useState<string | null>(null)
   const [convertError, setConvertError] = useState<string | null>(null)
   const [fileTreeRevision, setFileTreeRevision] = useState(0)
+  const [selectedLayerIds, setSelectedLayerIds] = useState<Set<string>>(new Set())
+  const [selectedFeatures, setSelectedFeatures] = useState<SelectedFeatureEntry[]>([])
+
+  // Multi-select handler. Shift+click toggles; plain click replaces.
+  const handleSelectFeature = useCallback(
+    (entry: SelectedFeatureEntry | null, shiftKey: boolean) => {
+      if (!entry) {
+        // null = clear all (plain click on empty map or Escape)
+        setSelectedFeatures([])
+        return
+      }
+      if (!shiftKey) {
+        setSelectedFeatures([entry])
+        return
+      }
+      // Shift+click: toggle by geometry identity
+      setSelectedFeatures((prev) => {
+        const idx = prev.findIndex(
+          (e) =>
+            e.layerId === entry.layerId &&
+            JSON.stringify(e.feature.geometry) === JSON.stringify(entry.feature.geometry),
+        )
+        return idx === -1 ? [...prev, entry] : prev.filter((_, i) => i !== idx)
+      })
+    },
+    [],
+  )
 
 
   const [layers, setLayers] = useState<GeoJSONLayer[]>([])
@@ -375,6 +403,8 @@ function App() {
     setConvertingFile(null)
     setConvertError(null)
     setLayers([])
+    setSelectedLayerIds(new Set())
+    setSelectedFeatures([])
     setMapViewState({ center: [76.7794, 30.7333], zoom: 13, bearing: 0, pitch: 0 })
     setBasemap('street')
     setConversations([])
@@ -382,10 +412,21 @@ function App() {
     setMapActions([])
     setStreetViewTarget(null)
     setRoadInspectionTarget(null)
+    setStreetViewActive(false)
+    setStreetViewLocation(null)
+    setStreetViewBearing(0)
+    setStreetViewDetail(false)
+    setStreetViewLayout('split')
     setInjectedMessage(null)
     setBookmarks([])
     setMapBounds(null)
     setArtifactsRevision(0)
+    setScenarios([])
+    setActiveScenarioId(null)
+    setDocumentImage(null)
+    setPastHistory([])
+    setFutureHistory([])
+    lastStateRef.current = { layers: [], bookmarks: [] }
   }, [])
 
   // ── Split screen row dragging handle ──
@@ -440,6 +481,7 @@ function App() {
         }
         try { await saveProjectRef.current(true) } catch { /* non-fatal */ }
       }
+      resetWorkspaceState()
       setWorkspacePath(selected)
       window.electronAPI.setLastWorkspace(selected).catch(() => {})
     }
@@ -2060,6 +2102,7 @@ function App() {
   const handleRightClickStreetView = useCallback((lng: number, lat: number) => {
     setStreetViewTarget({ lng, lat })
     setStreetViewActive(true)
+    setStreetViewDetail(true)
   }, [])
 
   const handleInspectRoad = useCallback((feature: Feature) => {
@@ -2357,9 +2400,10 @@ function App() {
     isLoadingRef.current = true
     setBookmarks([])
     try {
-      const content = await window.electronAPI.readFile(`${workspacePath}/project.json`)
       if (!content) {
         setLayers([])
+        setSelectedLayerIds(new Set())
+        setSelectedFeatures([])
         setConversations([])
         setActiveConversationId(null)
         setBookmarks([])
@@ -2369,6 +2413,8 @@ function App() {
         return
       }
       const data: ProjectData = JSON.parse(content)
+      setSelectedLayerIds(new Set())
+      setSelectedFeatures([])
       if (data.mapState) {
         setMapViewState(data.mapState)
         setMapActions([{ type: 'set_view', payload: data.mapState }])
@@ -2502,9 +2548,13 @@ function App() {
           }
         }
         setLayers(loadedLayers)
+        setSelectedLayerIds(new Set())
+        setSelectedFeatures([])
         colorIndexRef.current = loadedLayers.length
       } else {
         setLayers([])
+        setSelectedLayerIds(new Set())
+        setSelectedFeatures([])
       }
     } catch (e) {
       console.error('Failed to load project:', e)
@@ -2731,6 +2781,10 @@ function App() {
             <>
               <LayerPanel
                 layers={layers}
+                selectedLayerIds={selectedLayerIds}
+                onSelectedLayerIdsChange={setSelectedLayerIds}
+                selectedFeatures={selectedFeatures}
+                onSelectFeature={handleSelectFeature}
                 onToggle={toggleLayer}
                 onRemove={removeLayer}
                 onZoomTo={zoomToLayer}
@@ -2921,6 +2975,9 @@ function App() {
                 <MapView
                   ref={mapViewRef}
                   layers={layers}
+                  selectedLayerIds={selectedLayerIds}
+                  selectedFeatures={selectedFeatures}
+                  onSelectFeature={handleSelectFeature}
                   basemap={basemap}
                   initialState={mapViewState}
                   mapActions={mapActions}

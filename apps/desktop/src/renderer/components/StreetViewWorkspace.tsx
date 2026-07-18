@@ -203,6 +203,24 @@ export default function StreetViewWorkspace({
     })
     viewerRef.current = viewer
 
+    // Event delegation: Intercept click events in the capturing phase on the stable host container.
+    // This bypasses any internal stopPropagation / preventDefault calls inside Pannellum's control layers.
+    const handleHostClick = (e: MouseEvent) => {
+      const el = e.target as HTMLElement | null
+      const compass = el?.closest('.pnlm-compass')
+      if (compass) {
+        e.stopPropagation()
+        e.preventDefault()
+        if (!viewerRef.current) return
+        let targetYaw = -(meta?.heading || 0)
+        while (targetYaw > 180) targetYaw -= 360
+        while (targetYaw < -180) targetYaw += 360
+        // Smoothly rotate the panorama to point true North
+        viewerRef.current.setYaw(targetYaw, true)
+      }
+    }
+    host.addEventListener('click', handleHostClick, true)
+
     const onViewerChange = () => {
       if (cancelled || !viewerRef.current) return
       const yaw = (viewer as any).getYaw()
@@ -218,6 +236,7 @@ export default function StreetViewWorkspace({
     return () => {
       cancelled = true
       clearTimeout(timer)
+      host.removeEventListener('click', handleHostClick, true)
       try { viewer.destroy() } catch { /* ignore pannellum teardown noise */ }
       viewerRef.current = null
     }

@@ -172,6 +172,15 @@ export default function ArtifactsPanel({
   }, [fetchArtifacts])
 
   useEffect(() => {
+    if (!workspacePath) {
+      setArtifacts([])
+      setSelectedId(null)
+      setFullArtifact(null)
+      setEditingContent(false)
+    }
+  }, [workspacePath])
+
+  useEffect(() => {
     if (revision !== undefined && revision > 0) fetchArtifacts()
   }, [revision, fetchArtifacts])
 

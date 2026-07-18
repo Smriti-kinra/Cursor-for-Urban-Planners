@@ -106,6 +106,14 @@ export default function DocumentView({
     }
   }, [activeDocId, workspacePath])
 
+  useEffect(() => {
+    if (!workspacePath) {
+      setOpenDocs([])
+      setActiveDocId(null)
+      onImageChange(null)
+    }
+  }, [workspacePath, onImageChange])
+
   const draggedDocIdRef = useRef<string | null>(null)
   const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
   const [dropDocPosition, setDropDocPosition] = useState<'before' | 'after' | null>(null)

@@ -1,5 +1,8 @@
 import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from 'geojson'
 
+/** A single entry in the multi-select feature selection. */
+export type SelectedFeatureEntry = { layerId: string; feature: Feature }
+
 export interface GeoJSONLayer {
   id: string
   name: string

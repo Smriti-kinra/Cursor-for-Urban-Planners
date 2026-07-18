@@ -1,12 +1,14 @@
 import { useMemo, useState } from 'react'
 import type { Feature, FeatureCollection } from 'geojson'
-import { GeoJSONLayer } from '../types'
+import { GeoJSONLayer, SelectedFeatureEntry } from '../types'
 import './AttributeTable.css'
 
 interface AttributeTableProps {
   layer: GeoJSONLayer
   onChange: (layerId: string, data: FeatureCollection) => void
   onClose: () => void
+  selectedFeatures: SelectedFeatureEntry[]
+  onSelectFeature: (entry: SelectedFeatureEntry | null, shiftKey: boolean) => void
 }
 
 // Properties that drive rendering/labels — editable, but we surface them; the
@@ -23,7 +25,13 @@ function columnsOf(features: Feature[]): string[] {
   return [...cols]
 }
 
-export default function AttributeTable({ layer, onChange, onClose }: AttributeTableProps) {
+export default function AttributeTable({
+  layer,
+  onChange,
+  onClose,
+  selectedFeatures,
+  onSelectFeature,
+}: AttributeTableProps) {
   const features = useMemo(() => layer.data?.features || [], [layer.data])
   const columns = useMemo(() => columnsOf(features), [features])
   const [newCol, setNewCol] = useState('')
@@ -110,32 +118,50 @@ export default function AttributeTable({ layer, onChange, onClose }: AttributeTa
             </tr>
           </thead>
           <tbody>
-            {features.map((f, rowIdx) => (
-              <tr key={rowIdx}>
-                <td className="attr-rownum">{rowIdx + 1}</td>
-                {columns.map((c) => (
-                  <td key={c}>
-                    <input
-                      className="attr-cell"
-                      value={String(f.properties?.[c] ?? '')}
-                      onChange={(e) => setCell(rowIdx, c, e.target.value)}
-                    />
+            {features.map((f, rowIdx) => {
+              const isSelected = selectedFeatures.some(
+                (e) =>
+                  e.layerId === layer.id &&
+                  (e.feature.id === f.id ||
+                    (e.feature.properties?.name && e.feature.properties.name === f.properties?.name) ||
+                    JSON.stringify(e.feature.geometry) === JSON.stringify(f.geometry)),
+              )
+
+              return (
+                <tr
+                  key={rowIdx}
+                  className={`attr-row-tr ${isSelected ? 'selected' : ''}`}
+                  onClick={(e) => {
+                    const target = e.target as HTMLElement
+                    if (target.closest('button') || target.closest('input')) return
+                    onSelectFeature({ feature: f, layerId: layer.id }, e.shiftKey)
+                  }}
+                >
+                  <td className="attr-rownum">{rowIdx + 1}</td>
+                  {columns.map((c) => (
+                    <td key={c}>
+                      <input
+                        className="attr-cell"
+                        value={String(f.properties?.[c] ?? '')}
+                        onChange={(e) => setCell(rowIdx, c, e.target.value)}
+                      />
+                    </td>
+                  ))}
+                  <td>
+                    <button
+                      className="attr-rowdel"
+                      onClick={() => deleteRow(rowIdx)}
+                      title="Delete feature"
+                    >
+                      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
+                        <polyline points="3 6 5 6 21 6"></polyline>
+                        <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+                      </svg>
+                    </button>
                   </td>
-                ))}
-                <td>
-                  <button
-                    className="attr-rowdel"
-                    onClick={() => deleteRow(rowIdx)}
-                    title="Delete feature"
-                  >
-                    <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                      <polyline points="3 6 5 6 21 6"></polyline>
-                      <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
-                    </svg>
-                  </button>
-                </td>
-              </tr>
-            ))}
+                </tr>
+              )
+            })}
           </tbody>
         </table>
       </div>

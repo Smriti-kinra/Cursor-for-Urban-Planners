@@ -283,3 +283,22 @@
   background: rgba(239, 68, 68, 0.15);
   color: #ef4444;
 }
+
+/* ── Selection Row Styling ── */
+.attr-row-tr {
+  cursor: pointer;
+}
+
+.attr-row-tr.selected {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+
+.attr-row-tr.selected td {
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border-right: 1px solid rgba(245, 158, 11, 0.3) !important;
+}
+
+.attr-row-tr.selected .attr-rownum {
+  background-color: rgba(245, 158, 11, 0.25) !important;
+  color: #f59e0b !important;
+}
