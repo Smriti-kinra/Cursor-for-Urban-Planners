@@ -43,6 +43,8 @@ from mcp_servers.network_server import NetworkServer
 from mcp_servers.gtfs_server import GTFSServer
 from mcp_servers.od_server import ODServer
 from mcp_servers.scenario_server import ScenarioServer
+from mcp_servers.its_server import ITSServer
+from mcp_servers.emissions_server import EmissionsServer
 from tools.utility import UtilityServer
 from tools.config import get_model as _get_model
 from tools.google import google_maps_key_var
@@ -97,6 +99,8 @@ _servers = {
     "gtfs": GTFSServer(),
     "od": ODServer(),
     "scenario": ScenarioServer(),
+    "its": ITSServer(),
+    "emissions": EmissionsServer(),
     "utility": UtilityServer(db_path=DB_PATH),
 }
 
@@ -158,7 +162,7 @@ SYSTEM_PROMPT = (
     "gis_spatial_join (tag points with the polygon they fall in)\n"
     "- Bookmarks: save_bookmark, go_to_bookmark, export_region_clip\n"
     "- Zoning: analyze_zones, detect_zone_overlaps\n"
-    "- Demographics: get_demographics\n"
+    "- Demographics & Employment: get_demographics (estimate population), project_population (forecast population growth), get_employment_density (estimate baseline jobs using custom TAZ grids or local multi-source proxy), project_employment (forecast future job growth and land demand area in hectares)\n"
     "- Artifacts: create_artifact (format: markdown/table/geojson), list_artifacts, get_artifact, extract_attribute_table\n"
     "  extract_attribute_table extracts layer or shapefile properties/columns into a tabular artifact.\n"
     "  Re-adding geometry: call get_artifact to retrieve a geojson artifact's content, then pass it to add_geojson.\n"
@@ -167,16 +171,21 @@ SYSTEM_PROMPT = (
     "- Street Network (NetworkX): fetch_street_network (automatically pull connected roads within current map bounds or coordinates to the workspace), "
     "analyze_street_network (topology metrics & bottleneck centrality on a road layer/file), "
     "find_shortest_path (Dijkstra routing between coordinates on a road layer/file), "
+    "find_freight_route (optimal truck route avoiding residential streets and respecting weight/height restrictions), "
     "route_multi_stop (continuous multi-waypoint route along the road network). "
     "Always prefer passing `geojson_path` instead of passing the huge raw `geojson` object to avoid token and WebSocket payload constraints.\n"
+    "- ITS & Parking: optimize_traffic_signal (Webster's Method traffic light timing optimizer), "
+    "analyze_parking_requirements (zoning parking ECS demand calculator matched against OSM-mapped supply).\n"
     "- GTFS Transit: import_gtfs_feed (download & parse a GTFS ZIP — loads stops + route lines on the map), "
     "analyze_gtfs_service (compute service stats: route counts, trip frequencies, highest-frequency corridors).\n"
     "- OD Matrix: import_od_matrix (import CSV-based Origin-Destination matrix from a URL), "
+    "generate_gravity_od_matrix (auto-generate trip productions/attractions from zone population & jobs and distribute them via doubly-constrained Furness/IPFP gravity decay model), "
+    "calculate_mode_choice (split travel demand across car, two-wheeler, transit, and active travel modes using a multinomial logit model based on time/cost utilities), "
     "visualize_od_flows (render desire lines on the map weighted by trip volume; supports min_trips filter and top_n).\n"
     "- Planning Scenarios: generate_planning_scenarios (generate structured Baseline/Compact/TOD/Green scenario alternatives "
     "for a study area context; returns a markdown report with comparison table — always save the result to an artifact), "
-    "compare_scenarios (score and rank 2+ named scenarios across sustainability/cost/equity/mobility criteria; "
-    "returns a ranked table and recommended scenario).\n"
+    "compare_scenarios (score and rank 2+ named scenarios across criteria; integrates tailpipe emissions and ambient PM2.5 box model), "
+    "estimate_scenario_emissions (calculate tailpipe CO2, PM2.5, NOx, CO emissions and estimate ambient PM2.5 concentrations using Gifford-Hanna box model).\n"
     "- Google Land Classification (GEE): get_land_cover (fetch Dynamic World or ESA WorldCover LULC layer "
     "for a given year — shows water/trees/grass/crops/built/bare classes), "
     "analyze_lulc_change (compare two years of Dynamic World to detect built-up expansion, deforestation, "

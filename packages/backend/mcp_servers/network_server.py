@@ -164,6 +164,128 @@ def _build_networkx_graph(geojson_data: dict) -> any:
     return G
 
 
+def _build_freight_graph(geojson_data: dict, truck_weight: float | None, truck_height: float | None, avoid_residential: bool) -> any:
+    """Build a networkx MultiDiGraph optimized for freight vehicles."""
+    import networkx as nx
+    G = nx.MultiDiGraph()
+    
+    if isinstance(geojson_data, dict) and "restrictions" in geojson_data:
+        G.graph["restrictions"] = geojson_data["restrictions"]
+    
+    features = []
+    if not geojson_data:
+        return G
+    if geojson_data.get("type") == "FeatureCollection":
+        features = geojson_data.get("features", [])
+    elif geojson_data.get("type") == "Feature":
+        features = [geojson_data]
+    else:
+        features = [{"type": "Feature", "geometry": geojson_data, "properties": {}}]
+        
+    for feat in features:
+        geom = feat.get("geometry")
+        if not geom:
+            continue
+        g_type = geom.get("type")
+        props = feat.get("properties") or {}
+        
+        # 1. Construction filter
+        highway = str(props.get("highway", "")).lower()
+        if highway in ("construction", "proposed"):
+            continue
+            
+        # 2. Freight access & vehicle restrictions
+        # If road has maxweight or maxheight tags, evaluate them
+        maxweight = props.get("maxweight")
+        if maxweight and truck_weight is not None:
+            try:
+                # Parse numeric weight (tonnes). E.g. '12t' or '12' or '12.5'
+                val_str = "".join([c for c in str(maxweight) if c.isdigit() or c == "."])
+                if val_str and float(val_str) < truck_weight:
+                    continue # Blocked due to weight limit
+            except Exception:
+                pass
+                
+        maxheight = props.get("maxheight")
+        if maxheight and truck_height is not None:
+            try:
+                # Parse height. E.g. '3.8 m' or '3.8'
+                val_str = "".join([c for c in str(maxheight) if c.isdigit() or c == "."])
+                if val_str and float(val_str) < truck_height:
+                    continue # Blocked due to height limit
+            except Exception:
+                pass
+                
+        # Access tags
+        hgv = str(props.get("hgv", "")).lower()
+        goods = str(props.get("goods", "")).lower()
+        motor_vehicle = str(props.get("motor_vehicle", "")).lower()
+        access = str(props.get("access", "")).lower()
+        
+        if hgv in ("no", "private") or goods in ("no", "private") or motor_vehicle in ("no", "private") or access in ("no", "private"):
+            continue # Blocked for heavy goods / trucks
+            
+        coords_list = []
+        if g_type == "LineString":
+            coords_list = [geom.get("coordinates", [])]
+        elif g_type == "MultiLineString":
+            coords_list = geom.get("coordinates", [])
+            
+        z_level = _get_z_level(props)
+        oneway_status = _is_oneway(props)
+        
+        for coords in coords_list:
+            L = len(coords)
+            if L < 2:
+                continue
+                
+            for idx in range(L - 1):
+                u_lng, u_lat = coords[idx][0], coords[idx][1]
+                u_z = 0 if (idx == 0) else z_level
+                u = (u_lng, u_lat, u_z)
+                
+                v_lng, v_lat = coords[idx+1][0], coords[idx+1][1]
+                v_z = 0 if (idx+1 == L - 1) else z_level
+                v = (v_lng, v_lat, v_z)
+                
+                length = haversine_distance((u_lng, u_lat), (v_lng, v_lat))
+                
+                # Dynamic cost weight calculation
+                multiplier = 1.0
+                
+                # Check for residential/minor roads penalty
+                if avoid_residential:
+                    if highway in ("residential", "living_street", "service", "pedestrian", "footway", "steps", "path"):
+                        multiplier *= 10.0
+                    elif highway in ("unclassified", "tertiary"):
+                        multiplier *= 3.0
+                        
+                # Standard penalties
+                service = str(props.get("service", "")).lower()
+                if service in ("parking_aisle", "driveway"):
+                    multiplier *= 5.0
+                
+                weight = length * multiplier
+                
+                edge_props = {
+                    "length": length,
+                    "weight": weight,
+                    "highway": highway or "residential",
+                    "properties": props
+                }
+                
+                if oneway_status == "no":
+                    G.add_edge(u, v, **edge_props)
+                    G.add_edge(v, u, **edge_props)
+                elif oneway_status == "yes":
+                    G.add_edge(u, v, **edge_props)
+                elif oneway_status == "reverse":
+                    G.add_edge(v, u, **edge_props)
+                    
+    return G
+
+
+
 def simplify_graph_topology(G: nx.MultiDiGraph) -> nx.MultiDiGraph:
     """Simplify the graph topology by consolidating degree-2 pseudo-nodes in a single pass."""
     import networkx as nx
@@ -293,6 +415,7 @@ class NetworkServer:
     tool_names = {
         "analyze_street_network",
         "find_shortest_path",
+        "find_freight_route",
         "route_multi_stop",
         "fetch_street_network",
         "assign_traffic_flows"
@@ -358,6 +481,53 @@ class NetworkServer:
                         "title": {
                             "type": "string",
                             "description": "Optional: Title for the map layer (e.g. 'Shortest Route')."
+                        }
+                    },
+                    "required": ["start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
+                }
+            ),
+            ToolDeclaration(
+                name="find_freight_route",
+                description=(
+                    "Calculate the optimal route for freight vehicles/trucks, respecting weight, height, and width constraints "
+                    "and penalizing minor/residential streets by 10x to favor primary truck corridors. "
+                    "Saves the resulting route as a LineString GeoJSON in the workspace and displays it on the map."
+                ),
+                parameters={
+                    "type": "object",
+                    "properties": {
+                        "geojson": {
+                            "type": "object",
+                            "description": "GeoJSON FeatureCollection containing LineString road lines. Optional if geojson_path is provided."
+                        },
+                        "geojson_path": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to a saved road network GeoJSON file in the workspace."
+                        },
+                        "start_lat": {"type": "number", "description": "Latitude coordinate of the starting point."},
+                        "start_lng": {"type": "number", "description": "Longitude coordinate of the starting point."},
+                        "end_lat": {"type": "number", "description": "Latitude coordinate of the ending point."},
+                        "end_lng": {"type": "number", "description": "Longitude coordinate of the ending point."},
+                        "workspace": {
+                            "type": "string",
+                            "description": "Absolute path to the active workspace folder."
+                        },
+                        "truck_weight_tonnes": {
+                            "type": "number",
+                            "description": "Optional: Truck gross weight in tonnes. Blocks links where maxweight is exceeded."
+                        },
+                        "truck_height_meters": {
+                            "type": "number",
+                            "description": "Optional: Truck clearance height in meters. Blocks links where maxheight is exceeded."
+                        },
+                        "avoid_residential": {
+                            "type": "boolean",
+                            "default": True,
+                            "description": "Whether to apply a 10x cost penalty to minor and residential streets to stay on commercial/freight highways."
+                        },
+                        "title": {
+                            "type": "string",
+                            "description": "Optional: Title for the map layer (e.g. 'Freight Route')."
                         }
                     },
                     "required": ["start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
@@ -489,6 +659,8 @@ class NetworkServer:
             return await self._analyze_street_network(args)
         if tool_name == "find_shortest_path":
             return await self._find_shortest_path(args)
+        if tool_name == "find_freight_route":
+            return await self._find_freight_route(args)
         if tool_name == "route_multi_stop":
             return await self._route_multi_stop(args)
         if tool_name == "fetch_street_network":
@@ -733,6 +905,128 @@ class NetworkServer:
             return {"error": "No topological path exists between the start and end coordinates."}
         except Exception as e:
             return {"error": f"Shortest path calculation failed: {str(e)}"}
+
+    async def _find_freight_route(self, args: dict) -> dict:
+        geojson_path = args.get("geojson_path", "").strip()
+        geojson = args.get("geojson")
+        start_lat = float(args.get("start_lat", 0))
+        start_lng = float(args.get("start_lng", 0))
+        end_lat = float(args.get("end_lat", 0))
+        end_lng = float(args.get("end_lng", 0))
+        workspace = _resolve_workspace(args.get("workspace", ""))
+        title = args.get("title", "").strip() or "Freight Route"
+        truck_weight = args.get("truck_weight_tonnes")
+        truck_height = args.get("truck_height_meters")
+        avoid_res = bool(args.get("avoid_residential", True))
+        ws = args.get("_ws")
+
+        if truck_weight is not None:
+            truck_weight = float(truck_weight)
+        if truck_height is not None:
+            truck_height = float(truck_height)
+
+        if geojson_path:
+            try:
+                with open(geojson_path) as f:
+                    geojson = json.load(f)
+            except Exception as e:
+                return {"error": f"Failed to load GeoJSON from path '{geojson_path}': {str(e)}"}
+
+        if not geojson:
+            return {"error": "Either 'geojson' or 'geojson_path' must be provided."}
+        if not workspace:
+            return {"error": "workspace is required to save route outputs"}
+
+        try:
+            import networkx as nx
+        except ImportError:
+            return {"error": "networkx library is not installed on the system."}
+
+        try:
+            G = _build_freight_graph(geojson, truck_weight, truck_height, avoid_res)
+            if not G.nodes:
+                return {"error": "GeoJSON contains no valid LineString coordinates after applying freight filters."}
+
+            components = list(nx.weakly_connected_components(G))
+            if components:
+                largest_cc = max(components, key=len)
+                nodes_to_search = largest_cc
+            else:
+                nodes_to_search = G.nodes
+
+            start_coord = (start_lng, start_lat)
+            end_coord = (end_lng, end_lat)
+            
+            closest_start = None
+            closest_end = None
+            min_d_start = float("inf")
+            min_d_end = float("inf")
+            
+            for node in nodes_to_search:
+                d_start = haversine_distance((node[0], node[1]), start_coord)
+                if d_start < min_d_start:
+                    min_d_start = d_start
+                    closest_start = node
+                    
+                d_end = haversine_distance((node[0], node[1]), end_coord)
+                if d_end < min_d_end:
+                    min_d_end = d_end
+                    closest_end = node
+
+            if not closest_start or not closest_end:
+                return {"error": "Could not identify start or end node projections on the largest connected network component."}
+
+            path, path_length = _find_shortest_path_with_restrictions(G, closest_start, closest_end)
+
+            coords = [[n[0], n[1]] for n in path]
+            route_geojson = {
+                "type": "FeatureCollection",
+                "features": [{
+                    "type": "Feature",
+                    "geometry": {
+                        "type": "LineString",
+                        "coordinates": coords
+                    },
+                    "properties": {
+                        "name": title,
+                        "length_meters": round(path_length, 1),
+                        "estimated_travel_time_mins": round((path_length / 8.3) / 60.0, 1),  # assuming 30 km/h for trucks
+                        "truck_weight_tonnes": truck_weight,
+                        "truck_height_meters": truck_height
+                    }
+                }]
+            }
+
+            filename = "freight_route.geojson"
+            target_path = Path(workspace) / filename
+            with open(target_path, "w") as f:
+                json.dump(route_geojson, f, indent=2)
+
+            if ws:
+                await ws.send_text(json.dumps({
+                    "type": "action",
+                    "action": "add_geojson_file",
+                    "payload": {
+                        "path": str(target_path),
+                        "name": title
+                    }
+                }))
+
+            return {
+                "status": "success",
+                "route_stats": {
+                    "total_distance_meters": round(path_length, 1),
+                    "estimated_travel_time_mins": round((path_length / 8.3) / 60.0, 1),
+                    "closest_start_offset_meters": round(min_d_start, 1),
+                    "closest_end_offset_meters": round(min_d_end, 1)
+                },
+                "output_layer": str(target_path)
+            }
+
+        except nx.NetworkXNoPath:
+            return {"error": "No topological path exists between the start and end coordinates after applying freight filters."}
+        except Exception as e:
+            return {"error": f"Freight routing calculation failed: {str(e)}"}
 
     async def _route_multi_stop(self, args: dict) -> dict:
         geojson_path = args.get("geojson_path", "").strip()

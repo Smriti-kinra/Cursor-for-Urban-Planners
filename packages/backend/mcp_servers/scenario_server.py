@@ -4,6 +4,8 @@ import math
 import asyncio
 from pathlib import Path
 from llm.base import ToolDeclaration
+from mcp_servers.demographics_server import DemographicsServer
+from mcp_servers.emissions_server import EmissionsServer
 
 
 class ScenarioServer:
@@ -22,10 +24,9 @@ class ScenarioServer:
                     "Fetch real geospatial baseline metrics for a study area that anchor "
                     "the scenario comparison scores. Pulls road density from OSM, transit "
                     "coverage from GTFS stop data (via Overpass), green space ratio from OSM "
-                    "landuse tags, walkability from footway density, and population density "
-                    "from a rough census estimate. Returns a baseline_metrics dict to pass "
-                    "to compare_scenarios. Always call this BEFORE compare_scenarios when a "
-                    "bounding box or place name is available."
+                    "landuse tags, walkability from footway density, population density from WorldPop, "
+                    "and employment density from the proxy model or custom workspace file. "
+                    "Returns a baseline_metrics dict to pass to compare_scenarios."
                 ),
                 parameters={
                     "type": "object",
@@ -49,6 +50,10 @@ class ScenarioServer:
                                 "walkability, population_density."
                             ),
                         },
+                        "workspace": {
+                            "type": "string",
+                            "description": "Optional: Absolute path to the active workspace folder to check for custom grid files."
+                        }
                     },
                     "required": ["bbox"],
                 },
@@ -160,6 +165,7 @@ class ScenarioServer:
 
         toggles = args.get("metric_toggles") or {}
         want = lambda k: toggles.get(k, True)
+        workspace = args.get("workspace", "").strip()
 
         # Area in km²
         lat_mid = (s + n) / 2
@@ -263,6 +269,44 @@ out geom;
                 errors.append(f"walkability: {exc}")
                 results["walkability_km_per_km2"] = None
 
+        async def fetch_demographics_and_jobs():
+            demog = DemographicsServer()
+            c_lat = (s + n) / 2
+            c_lng = (w + e) / 2
+            w_m = area_km2 ** 0.5 * 1000
+            radius_meters = max(500, min(10000, int(w_m / 2)))
+
+            # Fetch Population Density
+            if want("population_density"):
+                try:
+                    demog_res = await demog.execute("get_demographics", {
+                        "lat": c_lat,
+                        "lng": c_lng,
+                        "radius_meters": radius_meters
+                    })
+                    pop = demog_res.get("population") or 0
+                    results["population_count"] = pop
+                    results["population_density_ha"] = round(pop / (area_km2 * 100.0), 2) if area_km2 > 0 else 0.0
+                except Exception as exc:
+                    errors.append(f"population_density: {exc}")
+                    results["population_density_ha"] = None
+
+            # Fetch Employment Density
+            try:
+                emp_res = await demog.execute("get_employment_density", {
+                    "lat": c_lat,
+                    "lng": c_lng,
+                    "radius_meters": radius_meters,
+                    "workspace": workspace
+                })
+                jobs = emp_res.get("total_jobs") or 0
+                results["employment_count"] = jobs
+                results["employment_density_jobs_per_km2"] = round(jobs / area_km2, 2) if area_km2 > 0 else 0.0
+                results["employment_breakdown"] = emp_res.get("breakdown") or {}
+            except Exception as exc:
+                errors.append(f"employment_density: {exc}")
+                results["employment_density_jobs_per_km2"] = None
+
         tasks = []
         if want("road_density"):
             tasks.append(fetch_road_density())
@@ -272,6 +316,7 @@ out geom;
             tasks.append(fetch_green_space())
         if want("walkability"):
             tasks.append(fetch_walkability())
+        tasks.append(fetch_demographics_and_jobs())
 
         await asyncio.gather(*tasks)
 
@@ -279,7 +324,7 @@ out geom;
         results["data_source"] = "OpenStreetMap via Overpass API"
         results["bbox"] = bbox
         results["note"] = (
-            "These are real values measured from OpenStreetMap. "
+            "These are real values measured from OpenStreetMap and WorldPop/Geospatial Proxy. "
             "Use this dict as baseline_metrics in compare_scenarios for data-anchored scoring."
         )
         return {"status": "success", "baseline_metrics": results}
@@ -475,35 +520,35 @@ out geom;
         # Values > 1 = improvement, < 1 = degradation, 1 = no change
         MULTIPLIERS: dict[str, dict[str, dict[str, float]]] = {
             "baseline": {
-                "Sustainability":      {"road_density": 0.5, "green_space": 1.0, "transit": 0.4, "walk": 0.5},
+                "Sustainability":      {"road_density": 0.5, "green_space": 1.0, "transit": 0.4, "walk": 0.5, "population": 0.3},
                 "Infrastructure Cost": {"road_density": 0.3, "transit": 0.2, "green_space": 0.2, "walk": 0.1},
-                "Mobility":            {"road_density": 0.8, "transit": 0.3, "walk": 0.4},
-                "Equity":              {"transit": 0.4, "green_space": 0.5},
-                "Economic Growth":     {"road_density": 0.6, "transit": 0.3},
+                "Mobility":            {"road_density": 0.8, "transit": 0.3, "walk": 0.4, "employment": 0.2},
+                "Equity":              {"transit": 0.4, "green_space": 0.5, "population": 0.2},
+                "Economic Growth":     {"road_density": 0.6, "transit": 0.3, "employment": 0.5},
                 "Resilience":          {"green_space": 0.6, "walk": 0.5},
             },
             "compact": {
-                "Sustainability":      {"road_density": 0.7, "green_space": 0.6, "transit": 0.7, "walk": 0.8},
+                "Sustainability":      {"road_density": 0.7, "green_space": 0.6, "transit": 0.7, "walk": 0.8, "population": 0.8},
                 "Infrastructure Cost": {"road_density": 0.4, "transit": 0.5, "green_space": 0.1, "walk": 0.2},
-                "Mobility":            {"road_density": 0.6, "transit": 0.7, "walk": 0.8},
-                "Equity":              {"transit": 0.6, "green_space": 0.4},
-                "Economic Growth":     {"road_density": 0.5, "transit": 0.6},
+                "Mobility":            {"road_density": 0.6, "transit": 0.7, "walk": 0.8, "employment": 0.8},
+                "Equity":              {"transit": 0.6, "green_space": 0.4, "population": 0.5},
+                "Economic Growth":     {"road_density": 0.5, "transit": 0.6, "employment": 0.9},
                 "Resilience":          {"green_space": 0.5, "walk": 0.7},
             },
             "transit": {
-                "Sustainability":      {"road_density": 0.3, "green_space": 0.5, "transit": 1.2, "walk": 0.9},
+                "Sustainability":      {"road_density": 0.3, "green_space": 0.5, "transit": 1.2, "walk": 0.9, "population": 0.9},
                 "Infrastructure Cost": {"road_density": 0.2, "transit": 1.0, "green_space": 0.1, "walk": 0.2},
-                "Mobility":            {"road_density": 0.4, "transit": 1.2, "walk": 0.8},
-                "Equity":              {"transit": 0.8, "green_space": 0.3},
-                "Economic Growth":     {"road_density": 0.4, "transit": 1.0},
+                "Mobility":            {"road_density": 0.4, "transit": 1.2, "walk": 0.8, "employment": 0.9},
+                "Equity":              {"transit": 0.8, "green_space": 0.3, "population": 0.6},
+                "Economic Growth":     {"road_density": 0.4, "transit": 1.0, "employment": 0.8},
                 "Resilience":          {"green_space": 0.4, "walk": 0.8},
             },
             "green": {
-                "Sustainability":      {"road_density": 0.2, "green_space": 1.5, "transit": 0.5, "walk": 1.1},
+                "Sustainability":      {"road_density": 0.2, "green_space": 1.5, "transit": 0.5, "walk": 1.1, "population": 0.4},
                 "Infrastructure Cost": {"road_density": 0.1, "transit": 0.3, "green_space": 0.4, "walk": 0.3},
-                "Mobility":            {"road_density": 0.3, "transit": 0.5, "walk": 1.1},
-                "Equity":              {"transit": 0.5, "green_space": 0.9},
-                "Economic Growth":     {"road_density": 0.3, "transit": 0.4},
+                "Mobility":            {"road_density": 0.3, "transit": 0.5, "walk": 1.1, "employment": 0.3},
+                "Equity":              {"transit": 0.5, "green_space": 0.9, "population": 0.8},
+                "Economic Growth":     {"road_density": 0.3, "transit": 0.4, "employment": 0.4},
                 "Resilience":          {"green_space": 1.2, "walk": 1.0},
             },
         }
@@ -519,10 +564,41 @@ out geom;
             "transit":      normalise(baseline.get("transit_coverage_pct"), 0, 100),
             "green_space":  normalise(baseline.get("green_space_pct"), 0, 50),
             "walk":         normalise(baseline.get("walkability_km_per_km2"), 0, 20),
+            "population":   normalise(baseline.get("population_density_ha"), 0, 300),
+            "employment":   normalise(baseline.get("employment_density_jobs_per_km2"), 0, 5000),
         }
         has_real_data = any(v is not None for v in real.values())
 
         scoring_method = "real_data" if has_real_data else "llm_estimated"
+
+        # Estimate tailpipe emissions for each scenario and incorporate into scoring
+        em_server = EmissionsServer()
+        emissions_scenarios = []
+        for sc in scenarios:
+            name_sc = sc.get("name", "Unknown")
+            emissions_scenarios.append({
+                "name": name_sc,
+                "daily_trips": sc.get("daily_trips"),
+                "avg_trip_length_km": sc.get("avg_trip_length_km"),
+                "mode_share": sc.get("mode_share"),
+                "fuel_mix": sc.get("fuel_mix")
+            })
+            
+        u = float(args.get("wind_speed_m_s", 3.0))
+        H = float(args.get("mixing_height_m", 500.0))
+        W = float(args.get("study_area_width_m", 2000.0))
+        em_res = await em_server._estimate_scenario_emissions({
+            "scenarios": emissions_scenarios,
+            "emission_standard": args.get("emission_standard", "arai_bs6"),
+            "wind_speed_m_s": u,
+            "mixing_height_m": H,
+            "study_area_width_m": W
+        })
+        
+        em_map = {}
+        if em_res.get("status") == "success":
+            for em_item in em_res.get("results", []):
+                em_map[em_item["name"]] = em_item
 
         results = []
         for sc in scenarios:
@@ -568,6 +644,21 @@ out geom;
                     band = qualitative_bands.get(key, {c: 5 for c in criteria})
                     scores[criterion] = band.get(criterion, 5)
 
+            # Blend tailpipe emissions scoring into Sustainability criteria if present
+            if "Sustainability" in scores and name in em_map:
+                co2_vals = [item["co2_kg"] for item in em_map.values()]
+                pm_vals = [item["pm25_kg"] for item in em_map.values()]
+                max_co2 = max(co2_vals) if co2_vals else 1.0
+                max_pm = max(pm_vals) if pm_vals else 1.0
+                
+                sc_em = em_map[name]
+                co2_score = 5.0 * (1.0 - (sc_em["co2_kg"] / max_co2)) if max_co2 > 0 else 5.0
+                pm_score = 5.0 * (1.0 - (sc_em["pm25_kg"] / max_pm)) if max_pm > 0 else 5.0
+                emissions_score = co2_score + pm_score
+                
+                spatial_sus = scores["Sustainability"]
+                scores["Sustainability"] = round(0.5 * spatial_sus + 0.5 * emissions_score, 1)
+
             total = round(sum(scores.values()), 1)
             results.append({"name": name, "description": sc.get("description", ""), "scores": scores, "total_score": total})
 
@@ -589,6 +680,17 @@ out geom;
 
         table = "\n".join([header, separator] + rows)
         table += f"\n\n> {disclaimer}"
+
+        # Append environmental emissions profile table if calculated
+        if em_res.get("status") == "success":
+            table += "\n\n### Environmental & Emissions Performance (Daily Tailpipe Profile)\n"
+            table += "| Scenario | CO₂ (kg/day) | PM₂.₅ (kg/day) | NOx (kg/day) | Ambient PM₂.₅ Increment |\n"
+            table += "| :--- | :---: | :---: | :---: | :---: |\n"
+            for sc_name in [r["name"] for r in results]:
+                if sc_name in em_map:
+                    item = em_map[sc_name]
+                    table += f"| {sc_name} | {item['co2_kg']:,.1f} | {item['pm25_kg']:.4f} | {item['nox_kg']:.3f} | **{item['delta_pm25_ug_m3']:.3f} μg/m³** |\n"
+            table += f"\n> *Note: Ambient PM₂.₅ increments calculated using the Gifford-Hanna Box Model with wind speed {u} m/s and mixing height {H} m.*"
 
         return {
             "status": "success",
