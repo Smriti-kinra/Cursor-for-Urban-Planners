@@ -75,8 +75,10 @@ The chat panel on the right is the main control surface:
 | **GIS overlay & relational** | `gis_intersection`, `gis_difference`, `gis_clip`, `gis_dissolve`, `gis_nearest`, `gis_spatial_join` |
 | **Zoning** | `analyze_zones`, `detect_zone_overlaps` |
 | **Demographics** | `get_demographics` (WorldPop population around coordinates, OSM fallback), `project_population` |
-| **Street Network & Routing** | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `route_multi_stop`, `assign_traffic_flows` |
-| **Origin-Destination (OD) Flows** | `import_od_matrix`, `visualize_od_flows` |
+| **Street Network & Routing** | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `find_freight_route`, `route_multi_stop`, `assign_traffic_flows` |
+| **Origin-Destination (OD) Flows** | `import_od_matrix`, `generate_gravity_od_matrix`, `calculate_mode_choice`, `visualize_od_flows` |
+| **ITS & Parking** | `optimize_traffic_signal`, `analyze_parking_requirements` |
+| **Emissions & AQI** | `estimate_scenario_emissions` |
 | **Google Earth Engine (GEE)** | `get_gee_layer`, `get_population_layer`, `get_dem_layer`, `get_land_cover`, `analyze_lulc_change`, `get_ndvi_layer` |
 | **DataMeet & Public Datasets** | `browse_datameet_catalog`, `import_datameet_boundary`, `import_public_dataset` |
 | **GTFS Transit** | `import_gtfs_feed`, `analyze_gtfs_service` |

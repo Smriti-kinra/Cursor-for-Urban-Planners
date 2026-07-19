@@ -45,7 +45,7 @@ class FooServer:
     async def execute(self, tool_name: str, args: dict) -> dict: ...
 ```
 
-Servers in use: `osm_server.py`, `gis_server.py`, `weather_server.py`, `zoning_server.py`, `demographics_server.py`, plus `tools/utility.py` (the shared `UtilityServer` for `web_search`, `geocode`, `measure_*`, `create_artifact`). They are instantiated once in `routers/chat.py:_servers` and their tools are flattened into the OpenAI function-tool list by `_build_tools()`.
+Servers in use: `osm_server.py`, `gis_server.py`, `weather_server.py`, `zoning_server.py`, `demographics_server.py`, `overture_server.py`, `google_places_server.py`, `google_environment_server.py`, `network_server.py`, `its_server.py`, `emissions_server.py`, `od_server.py`, `gee_server.py`, `datameet_server.py`, `gtfs_server.py`, `wms_server.py`, `scenario_server.py`, plus `tools/utility.py` (the shared `UtilityServer` for `web_search`, `geocode`, `measure_*`, `create_artifact`, `georeference_active_document`, `digitize_image_features`). They are instantiated once in `routers/chat.py:_servers` and their tools are flattened into the OpenAI function-tool list by `_build_tools()`.
 
 ## The action contract
 

@@ -310,8 +310,10 @@ Servers live in `routers/chat.py:_servers` and their declarations are flattened 
 | `OvertureServer` | `overture_server.py` | `overture_places_search`, `overture_buildings_search` (DuckDB over public S3 parquet) |
 | `GooglePlacesServer` | `google_places_server.py` | `places_autocomplete`, `place_details`, `nearby_places`, `nearby_places_in_polygon`, `places_density` |
 | `GoogleEnvironmentServer` | `google_environment_server.py` | `get_elevation`, `get_air_quality_google`, `get_solar_building` |
-| `NetworkServer` | `network_server.py` | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `route_multi_stop`, `assign_traffic_flows` |
-| `ODServer` | `od_server.py` | `import_od_matrix`, `visualize_od_flows` |
+| `NetworkServer` | `network_server.py` | `fetch_street_network`, `analyze_street_network`, `find_shortest_path`, `find_freight_route`, `route_multi_stop`, `assign_traffic_flows` |
+| `ODServer` | `od_server.py` | `import_od_matrix`, `generate_gravity_od_matrix`, `calculate_mode_choice`, `visualize_od_flows` |
+| `ITSServer` | `its_server.py` | `optimize_traffic_signal`, `analyze_parking_requirements` |
+| `EmissionsServer` | `emissions_server.py` | `estimate_scenario_emissions` |
 | `GEEServer` | `gee_server.py` | `get_gee_layer`, `get_population_layer`, `get_dem_layer`, `get_land_cover`, `analyze_lulc_change`, `get_ndvi_layer`, `add_gee_layer` |
 | `DataMeetServer` | `datameet_server.py` | `browse_datameet_catalog`, `import_datameet_boundary`, `import_public_dataset` |
 | `GTFSServer` | `gtfs_server.py` | `import_gtfs_feed`, `analyze_gtfs_service` |
