@@ -126,11 +126,20 @@ function routeLabelCoordinate(coordinates: number[][], distanceKm?: number): num
   return coordinates[Math.floor(coordinates.length / 2)]
 }
 
-async function fetchOsrmRoute(start: number[], end: number[]) {
-  const coords = `${start[0]},${start[1]};${end[0]},${end[1]}`
+/** Fetch a routed path through one or more waypoints via OSRM.
+ * Accepts any number of [lng, lat] waypoints (minimum 2).
+ * For multi-waypoint routes, segments are resolved independently and
+ * stitched together so the final coordinates form one continuous line.
+ */
+async function fetchOsrmRoute(waypoints: number[][]) {
+  if (waypoints.length < 2) throw new Error('Need at least 2 waypoints')
+
+  // Build coordinate string: "lng1,lat1;lng2,lat2;..."
+  const coordStr = waypoints.map((p) => `${p[0]},${p[1]}`).join(';')
   const url =
-    `https://router.project-osrm.org/route/v1/car/${coords}` +
+    `https://router.project-osrm.org/route/v1/car/${coordStr}` +
     '?overview=full&geometries=geojson&steps=false'
+
   const resp = await fetch(url)
   if (!resp.ok) throw new Error(`OSRM route failed: ${resp.status}`)
   const data = await resp.json()
@@ -1457,10 +1466,8 @@ function App() {
   // attribute editor so they can tag it (e.g. set zone_code) before styling.
   const handleDrawComplete = useCallback(
     (type: 'point' | 'line' | 'polygon', coordinates: number[][]) => {
-      if (type === 'line' && coordinates.length === 2) {
-        const [start, end] = coordinates
-        const directKm = turf.length(turf.lineString([start, end]), { units: 'kilometers' })
-        const directLabel = `Direct: ${formatDistance(directKm)}`
+      // ── Line drawing: always route via OSRM through all waypoints ──
+      if (type === 'line' && coordinates.length >= 2) {
         const labelStyle: LayerStyleSpec = {
           mode: 'simple',
           label: {
@@ -1475,37 +1482,16 @@ function App() {
 
         userShapeCounterRef.current += 1
         const measureNo = userShapeCounterRef.current
+
+        // Compute the straight-line distance across all segments for an
+        // immediate provisional layer shown while OSRM is loading.
+        const straightKm = turf.length(turf.lineString(coordinates), { units: 'kilometers' })
+        const straightLabel = `Straight: ${formatDistance(straightKm)}`
         const directLayerId = `layer-${genId()}`
-        const directName = `Direct Distance ${measureNo}`
-        const directFeatures: Feature[] = [
-          {
-            type: 'Feature',
-            geometry: { type: 'LineString', coordinates: [start, end] },
-            properties: {
-              name: directName,
-              source: 'user_measure',
-              kind: 'direct_distance',
-              distance_km: Number(directKm.toFixed(4)),
-              distance: directLabel,
-            },
-          },
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: start },
-            properties: { name: 'Start', source: 'user_measure', role: 'endpoint' },
-          },
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: end },
-            properties: { name: 'End', source: 'user_measure', role: 'endpoint' },
-          },
-          {
-            type: 'Feature',
-            geometry: { type: 'Point', coordinates: routeLabelCoordinate([start, end], directKm) },
-            properties: { label: directLabel, source: 'user_measure', role: 'label' },
-          },
-        ]
-        const directLayer: GeoJSONLayer = {
+        const directName = `Route ${measureNo} (routing…)`
+
+        // Provisional straight-line layer — replaced once OSRM responds.
+        const provisionalLayer: GeoJSONLayer = {
           id: directLayerId,
           name: directName,
           filePath: '',
@@ -1514,20 +1500,46 @@ function App() {
           lineColor: '#2563eb',
           lineWidth: 2.5,
           lineDasharray: [2, 2],
-          data: { type: 'FeatureCollection', features: directFeatures },
+          data: {
+            type: 'FeatureCollection',
+            features: [
+              {
+                type: 'Feature',
+                geometry: { type: 'LineString', coordinates },
+                properties: {
+                  name: directName,
+                  source: 'user_draw',
+                  kind: 'routed_line',
+                  distance: straightLabel,
+                },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: coordinates[0] },
+                properties: { name: 'Start', source: 'user_draw', role: 'endpoint' },
+              },
+              {
+                type: 'Feature',
+                geometry: { type: 'Point', coordinates: coordinates[coordinates.length - 1] },
+                properties: { name: 'End', source: 'user_draw', role: 'endpoint' },
+              },
+            ],
+          },
           styleSpec: labelStyle,
         }
 
-        setLayers((prev) => [...prev, directLayer])
+        setLayers((prev) => [...prev, provisionalLayer])
         setActiveLeftTab('layers')
         setAttrLayerId(null)
 
-        void fetchOsrmRoute(start, end)
+        // Now fetch the multi-waypoint OSRM route and replace the provisional layer.
+        void fetchOsrmRoute(coordinates)
           .then((route) => {
-            const routeLabel = `Route: ${formatDistance(route.distanceKm)}`
-            const routeName = `Route Distance ${measureNo}`
-            const routeLayer: GeoJSONLayer = {
-              id: `layer-${genId()}`,
+            const routeLabel = `Route: ${formatDistance(route.distanceKm)} · ${route.durationMinutes >= 60 ? `${(route.durationMinutes / 60).toFixed(1)} hr` : `${Math.round(route.durationMinutes)} min`}`
+            const routeName = `Route ${measureNo}`
+            const midCoord = routeLabelCoordinate(route.coordinates, route.distanceKm)
+            const routedLayer: GeoJSONLayer = {
+              id: directLayerId, // same id — this replaces the provisional layer
               name: routeName,
               filePath: '',
               visible: true,
@@ -1542,8 +1554,8 @@ function App() {
                     geometry: { type: 'LineString', coordinates: route.coordinates },
                     properties: {
                       name: routeName,
-                      source: 'user_measure',
-                      kind: 'route_distance',
+                      source: 'user_draw',
+                      kind: 'routed_line',
                       distance_km: Number(route.distanceKm.toFixed(4)),
                       duration_minutes: Number(route.durationMinutes.toFixed(1)),
                       distance: routeLabel,
@@ -1551,11 +1563,18 @@ function App() {
                   },
                   {
                     type: 'Feature',
-                    geometry: {
-                      type: 'Point',
-                      coordinates: routeLabelCoordinate(route.coordinates, route.distanceKm),
-                    },
-                    properties: { label: routeLabel, source: 'user_measure', role: 'label' },
+                    geometry: { type: 'Point', coordinates: coordinates[0] },
+                    properties: { name: 'Start', source: 'user_draw', role: 'endpoint' },
+                  },
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: coordinates[coordinates.length - 1] },
+                    properties: { name: 'End', source: 'user_draw', role: 'endpoint' },
+                  },
+                  {
+                    type: 'Feature',
+                    geometry: { type: 'Point', coordinates: midCoord },
+                    properties: { label: routeLabel, source: 'user_draw', role: 'label' },
                   },
                 ],
               },
@@ -1564,10 +1583,38 @@ function App() {
                 label: { ...labelStyle.label!, color: '#7f1d1d' },
               },
             }
-            setLayers((prev) => [...prev, routeLayer])
+            // Replace the provisional layer in-place so the layer panel entry
+            // stays at the same position and doesn't flicker.
+            setLayers((prev) => prev.map((l) => (l.id === directLayerId ? routedLayer : l)))
           })
           .catch((err) => {
-            console.warn('Route lookup failed', err)
+            // OSRM unavailable or no drivable path — keep the provisional
+            // straight-line layer but rename it to reflect the failure.
+            console.warn('OSRM route lookup failed, keeping straight line:', err)
+            setLayers((prev) =>
+              prev.map((l) =>
+                l.id === directLayerId
+                  ? {
+                      ...l,
+                      name: `Route ${measureNo} (straight)`,
+                      data: {
+                        ...l.data!,
+                        features: l.data!.features.map((f) =>
+                          f.properties?.kind === 'routed_line'
+                            ? {
+                                ...f,
+                                properties: {
+                                  ...f.properties,
+                                  distance: straightLabel,
+                                },
+                              }
+                            : f,
+                        ),
+                      },
+                    }
+                  : l,
+              ),
+            )
           })
         return
       }
