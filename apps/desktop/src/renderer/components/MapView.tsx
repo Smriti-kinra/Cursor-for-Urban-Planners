@@ -16,6 +16,7 @@ interface NominatimSearchResult {
 
 export type MapViewHandle = {
   getCanvas: () => HTMLCanvasElement | null
+  resize: () => void
 }
 
 // Helper to check if a polygon/multipolygon geometry intersects the viewport bounds
@@ -750,13 +751,15 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           },
         })
 
-        try {
-          const bbox = turf.bbox(layer.data) as [number, number, number, number]
-          if (bbox.every((v) => isFinite(v))) {
-            map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
+        if (layer.data?.features?.[0]?.properties?.source !== 'user_draw') {
+          try {
+            const bbox = turf.bbox(layer.data) as [number, number, number, number]
+            if (bbox.every((v) => isFinite(v))) {
+              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000, bearing: map.getBearing(), pitch: map.getPitch() })
+            }
+          } catch {
+            /* ignore invalid bbox */
           }
-        } catch {
-          /* ignore invalid bbox */
         }
       }
       } else {
@@ -1065,12 +1068,14 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
         center: geom.coordinates as [number, number],
         zoom: Math.max(map.getZoom(), 15),
         duration: 1500,
+        bearing: map.getBearing(),
+        pitch: map.getPitch(),
       })
     } else {
       try {
         const bbox = turf.bbox(geom) as [number, number, number, number]
         if (bbox.every((v) => isFinite(v))) {
-          map.fitBounds(bbox, { padding: 80, maxZoom: 16, duration: 1500 })
+          map.fitBounds(bbox, { padding: 80, maxZoom: 16, duration: 1500, bearing: map.getBearing(), pitch: map.getPitch() })
         }
       } catch {
         const centroid = turf.centroid(geom as any)
@@ -1078,6 +1083,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           center: centroid.geometry.coordinates as [number, number],
           zoom: Math.max(map.getZoom(), 15),
           duration: 1500,
+          bearing: map.getBearing(),
+          pitch: map.getPitch(),
         })
       }
     }
@@ -1261,6 +1268,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               center: [lng, lat],
               zoom: zoom || 15,
               duration: 2000,
+              bearing: map.getBearing(),
+              pitch: map.getPitch(),
             })
           } else {
             console.error('Invalid coordinates for fly_to:', payload)
@@ -1293,7 +1302,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                 [west, south],
                 [east, north],
               ],
-              { padding: 60, duration: 1500 },
+              { padding: 60, duration: 1500, bearing: map.getBearing(), pitch: map.getPitch() },
             )
           } else {
             console.error('Invalid bounds for fit_bounds:', payload)
@@ -1325,7 +1334,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
                   [Math.min(...lngs), Math.min(...lats)],
                   [Math.max(...lngs), Math.max(...lats)],
                 ],
-                { padding: 60, duration: 1500 },
+                { padding: 60, duration: 1500, bearing: map.getBearing(), pitch: map.getPitch() },
               )
             } else {
               console.error('Invalid corners for add_raster_overlay:', corners)
@@ -1338,8 +1347,8 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
           map.jumpTo({
             center: payload.center,
             zoom: payload.zoom,
-            bearing: payload.bearing || 0,
-            pitch: payload.pitch || 0,
+            bearing: payload.bearing !== undefined ? payload.bearing : map.getBearing(),
+            pitch: payload.pitch !== undefined ? payload.pitch : map.getPitch(),
           })
           break
 
@@ -1418,7 +1427,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
               features: filtered,
             }) as [number, number, number, number]
             if (bbox.every((v) => isFinite(v))) {
-              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000 })
+              map.fitBounds(bbox, { padding: 60, maxZoom: 16, duration: 1000, bearing: map.getBearing(), pitch: map.getPitch() })
             }
           } catch {
             /* ignore */
@@ -1598,7 +1607,7 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
       map.addLayer({
         id: '__draw__-line', type: 'line', source: DRAW_SRC,
         filter: ['any', ['==', ['geometry-type'], 'LineString'], ['==', ['geometry-type'], 'Polygon']],
-        paint: { 'line-color': '#2563eb', 'line-width': 2, 'line-dasharray': [2, 1] },
+        paint: { 'line-color': '#2563eb', 'line-width': 2.5 },
       })
       map.addLayer({
         id: '__draw__-vertex', type: 'circle', source: DRAW_SRC,
@@ -1961,10 +1970,14 @@ const MapView = forwardRef<MapViewHandle, MapViewProps>(function MapView(
   }
 
   const flyToResult = (result: NominatimSearchResult) => {
-    mapRef.current?.flyTo({
+    const map = mapRef.current
+    if (!map) return
+    map.flyTo({
       center: [parseFloat(result.lon), parseFloat(result.lat)],
       zoom: 15,
       duration: 2000,
+      bearing: map.getBearing(),
+      pitch: map.getPitch(),
     })
     setSearchResults([])
     setShowSearch(false)

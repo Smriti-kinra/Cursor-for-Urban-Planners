@@ -36,8 +36,8 @@ export type ClassificationMethod = 'equal-interval' | 'quantile'
 
 /** Text labels drawn on the map from a feature property. */
 export interface LabelSpec {
-  enabled: boolean
-  property: string
+  enabled?: boolean
+  property?: string
   size?: number       // px, default 12
   color?: string      // default '#1f2937'
   haloColor?: string  // default '#ffffff'

@@ -1723,7 +1723,7 @@ function App() {
         const directLayerId = `layer-${genId()}`
         const directName = `Route ${measureNo} (routing…)`
 
-        // Provisional straight-line layer — replaced once OSRM responds.
+        // Provisional solid-line layer — updated to snapped route once OSRM responds.
         const provisionalLayer: GeoJSONLayer = {
           id: directLayerId,
           name: directName,
@@ -1731,8 +1731,7 @@ function App() {
           visible: true,
           color: '#2563eb',
           lineColor: '#2563eb',
-          lineWidth: 2.5,
-          lineDasharray: [2, 2],
+          lineWidth: 3,
           data: {
             type: 'FeatureCollection',
             features: [
@@ -2351,7 +2350,7 @@ function App() {
                 dirtyLayerIdsRef.current.add(l.id)
                 return {
                   ...l,
-                  name: d.display_name,
+                  name: d.display_name || l.name,
                   data: {
                     type: 'FeatureCollection',
                     features: [{
@@ -3331,7 +3330,7 @@ function App() {
           <div style={{ display: appMode === 'artifacts' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Artifacts">
               <ArtifactsPanel
-                workspacePath={workspacePath}
+                workspacePath={workspacePath ?? undefined}
                 revision={artifactsRevision}
                 showSidebar={showArtifactsSidebar}
                 sidebarWidth={leftWidth}
