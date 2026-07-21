@@ -1,0 +1,137 @@
+.file-tree-wrap {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  overflow: hidden;
+}
+
+.file-tree-toolbar {
+  display: flex;
+  align-items: center;
+  padding: 4px 8px;
+  border-bottom: 1px solid var(--border);
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.file-tree-path {
+  flex: 1;
+  font-size: 11px;
+  color: var(--text-muted);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.file-tree-refresh {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 16px;
+  padding: 0 2px;
+  line-height: 1;
+  transition: color 0.15s;
+  flex-shrink: 0;
+}
+
+.file-tree-refresh:hover {
+  color: var(--text-primary);
+}
+
+.file-tree-actions {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.file-tree-import-btn {
+  background: var(--bg-hover, #2d2d3e);
+  border: 1px solid var(--border, #45475a);
+  color: var(--text-primary, #ffffff);
+  border-radius: 4px;
+  cursor: pointer;
+  font-size: 11px;
+  font-weight: 500;
+  padding: 2px 6px;
+  display: flex;
+  align-items: center;
+  gap: 3px;
+  transition: background 0.15s, border-color 0.15s;
+}
+
+.file-tree-import-btn:hover {
+  background: var(--input-bg, #1a1a26);
+  border-color: var(--accent, #89b4fa);
+}
+
+.file-formats-banner {
+  font-size: 10px;
+  color: var(--text-muted, #a6adc8);
+  opacity: 0.75;
+  padding: 6px 8px;
+  border-bottom: 1px solid var(--border, #2a2a2a);
+  background: rgba(0, 0, 0, 0.1);
+  line-height: 1.3;
+}
+
+.file-tree {
+  flex: 1;
+  overflow-y: auto;
+  padding: 4px 0;
+}
+
+.file-tree-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.file-tree-empty .hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.tree-item {
+  display: flex;
+  align-items: center;
+  padding: 3px 8px;
+  cursor: pointer;
+  font-size: 13px;
+  gap: 6px;
+  color: var(--text-primary);
+  transition: background 0.1s;
+}
+
+.tree-item:hover {
+  background: var(--bg-hover);
+}
+
+.tree-icon {
+  font-size: 10px;
+  width: 12px;
+  text-align: center;
+  color: var(--text-muted);
+}
+
+.tree-item.directory .tree-name {
+  font-weight: 500;
+}
+
+.tree-item.file .tree-name {
+  color: var(--text-secondary);
+}
+
+.tree-item.geojson .tree-name {
+  color: var(--accent);
+  font-weight: 500;
+}
+
+.tree-item.geojson .tree-icon {
+  color: var(--accent);
+}

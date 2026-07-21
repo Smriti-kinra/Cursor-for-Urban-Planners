@@ -1,0 +1,24 @@
+{
+  "name": "cursor-urban-planners",
+  "private": true,
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Smriti-kinra/Cursor-for-Urban-Planners.git"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["electron", "esbuild", "electron-winstaller"]
+  },
+  "scripts": {
+    "dev": "concurrently -k -n backend,desktop -c blue,green \"pnpm run dev:backend\" \"sleep 2 && pnpm run dev:desktop\"",
+    "dev:desktop": "pnpm --filter @cursor-urban/desktop dev",
+    "dev:backend": "cd packages/backend && source .buildenv/bin/activate && python -m uvicorn main:app --reload --port 8765",
+    "build": "pnpm --filter @cursor-urban/desktop build",
+    "build:backend": "node scripts/build-backend.js",
+    "package": "pnpm run build:backend && pnpm --filter @cursor-urban/desktop package",
+    "release:mac": "node scripts/delete-github-assets.js && pnpm run build:backend && pnpm --filter @cursor-urban/desktop release:mac",
+    "release:win": "node scripts/delete-github-assets.js && pnpm run build:backend && pnpm --filter @cursor-urban/desktop release:win"
+  },
+  "devDependencies": {
+    "concurrently": "^9.2.1"
+  }
+}

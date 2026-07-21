@@ -1,0 +1,416 @@
+.layer-panel {
+  flex: 1;
+  overflow-y: auto;
+  padding: 8px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.layer-panel-empty {
+  flex: 1;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: var(--text-muted);
+  font-size: 13px;
+  padding: 24px;
+  text-align: center;
+}
+
+.layer-panel-empty .hint {
+  font-size: 11px;
+  opacity: 0.6;
+}
+
+.layer-item {
+  display: flex;
+  align-items: center;
+  padding: 8px 12px;
+  gap: 8px;
+  border-radius: 6px;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+  margin-bottom: 4px;
+}
+
+.layer-item:hover {
+  background: var(--bg-hover);
+}
+
+.layer-item.grouped {
+  padding-left: 34px;
+}
+
+.layer-item.hidden {
+  opacity: 0.5;
+}
+
+.layer-group {
+  border-top: 1px solid color-mix(in srgb, var(--border, #2a2d3a) 60%, transparent);
+}
+
+.layer-group:first-child {
+  border-top: none;
+}
+
+.layer-group-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 8px 12px;
+  background: transparent;
+  border-radius: 6px;
+  margin-bottom: 4px;
+  border: 1px solid transparent;
+  transition: all 0.15s;
+}
+
+.layer-group-header:hover {
+  background: var(--bg-hover);
+}
+
+.layer-group-header.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent) !important;
+}
+
+.layer-group-header.hidden {
+  opacity: 0.62;
+}
+
+.layer-group-toggle {
+  width: 16px;
+  height: 16px;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1;
+  padding: 0;
+}
+
+.layer-group-name {
+  flex: 1;
+  min-width: 0;
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-visibility {
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-secondary);
+  opacity: 0.65;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
+}
+
+.layer-visibility:hover {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+.layer-color {
+  width: 12px;
+  height: 12px;
+  border-radius: 3.5px;
+  flex-shrink: 0;
+  border: 1px solid rgba(255, 255, 255, 0.1);
+  box-sizing: border-box;
+}
+
+.layer-color.clickable {
+  cursor: pointer;
+  transition: transform 0.15s cubic-bezier(0.2, 0.8, 0.2, 1), box-shadow 0.15s ease, border-color 0.15s ease;
+}
+
+.layer-color.clickable:hover {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2.5px var(--bg-hover, #252735), 0 0 0 4px var(--accent, #89b4fa);
+  border-color: rgba(255, 255, 255, 0.3);
+}
+
+.layer-color.active {
+  transform: scale(1.18);
+  box-shadow: 0 0 0 2.5px var(--bg-hover, #252735), 0 0 0 4px var(--accent, #89b4fa);
+  border-color: rgba(255, 255, 255, 0.4);
+}
+
+.layer-name {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-name-input,
+.layer-group-name-input {
+  flex: 1;
+  font-size: 13px;
+  color: var(--text-primary);
+  background: transparent;
+  border: 1px solid transparent;
+  border-radius: 4px;
+  padding: 2px 4px;
+  outline: none;
+  width: 0;
+  min-width: 0;
+  transition: border-color 0.15s, background 0.15s;
+}
+
+.layer-group-name-input {
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.layer-name-input:focus,
+.layer-name-input:hover,
+.layer-group-name-input:focus,
+.layer-group-name-input:hover {
+  border-color: var(--border, #45475a);
+  background: var(--input-bg, #1a1a26);
+}
+
+.layer-count {
+  font-size: 11px;
+  color: var(--text-muted);
+  font-variant-numeric: tabular-nums;
+}
+
+.layer-style {
+  background: none;
+  border: none;
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  color: var(--text-muted);
+  opacity: 0.5;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+  border-radius: 4px;
+}
+
+.layer-item:hover .layer-style {
+  opacity: 1;
+}
+
+.layer-style:hover,
+.layer-style.active {
+  opacity: 1;
+  background: var(--bg-hover);
+}
+
+.layer-zoom {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  border-radius: 4px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.layer-item:hover .layer-zoom {
+  opacity: 1;
+}
+
+.layer-zoom:hover {
+  background: var(--bg-hover);
+  opacity: 1;
+}
+
+.layer-remove {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  width: 22px;
+  height: 22px;
+  padding: 0;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  opacity: 0.5;
+  border-radius: 4px;
+  transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.layer-item:hover .layer-remove,
+.layer-group-header:hover .layer-remove {
+  opacity: 1;
+}
+
+.layer-remove:hover {
+  background: rgba(243, 139, 168, 0.12);
+  opacity: 1;
+}
+
+.layer-context-menu {
+  position: fixed;
+  z-index: 50;
+  min-width: 190px;
+  max-width: 260px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 6px;
+  background: var(--panel-bg, #181a22);
+  border: 1px solid var(--border, #343746);
+  border-radius: 6px;
+  box-shadow: 0 10px 28px rgba(0, 0, 0, 0.32);
+}
+
+.layer-context-title {
+  padding: 5px 8px 6px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0;
+}
+
+.layer-context-menu button {
+  width: 100%;
+  display: block;
+  padding: 7px 8px;
+  background: transparent;
+  border: none;
+  border-radius: 4px;
+  color: var(--text-primary);
+  cursor: pointer;
+  font-size: 12px;
+  line-height: 1.25;
+  text-align: left;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.layer-context-menu button:hover {
+  background: var(--bg-hover);
+}
+
+.layer-context-empty {
+  padding: 7px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.layer-context-divider {
+  height: 1px;
+  margin: 5px 2px;
+  background: var(--border, #343746);
+}
+
+/* ── Floating Absolute Popovers for Symbology / Attributes ── */
+.layer-popup-container {
+  position: absolute;
+  left: 6px;
+  background: var(--bg-surface, #11111b);
+  border: 1px solid var(--border, #313244);
+  border-radius: 8px;
+  box-shadow: 0 10px 32px rgba(0, 0, 0, 0.55);
+  z-index: 1000;
+  max-height: 450px;
+  overflow-y: auto;
+  padding: 10px 12px;
+}
+
+.layer-symbology-popup {
+  width: calc(100% - 12px);
+  box-sizing: border-box;
+}
+
+.layer-attributes-popup {
+  width: calc(100% - 12px);
+  box-sizing: border-box;
+}
+
+.popup-below {
+  top: 100%;
+  margin-top: 4px;
+}
+
+.popup-above {
+  bottom: 100%;
+  margin-bottom: 4px;
+}
+
+/* Prevent outer layer panel hidden clips */
+.layer-panel {
+  position: relative;
+  overflow-y: auto !important;
+  overflow-x: visible !important;
+}
+
+.layer-item {
+  overflow: visible !important;
+}
+
+.layer-group-header {
+  cursor: grab;
+}
+
+.layer-group-header.drag-over-inside {
+  background: color-mix(in srgb, var(--accent) 15%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 40%, transparent) !important;
+  border-radius: 6px;
+}
+
+.layer-group-children {
+  padding-left: 14px;
+  border-left: 1px dashed rgba(255, 255, 255, 0.08);
+  margin-left: 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+  margin-top: 4px;
+}
+
+.nested-layer-item {
+  width: 100%;
+}
+
+/* Drag and Drop & Selection Styles */
+.layer-item.selected {
+  background: color-mix(in srgb, var(--accent) 10%, transparent) !important;
+  border-color: color-mix(in srgb, var(--accent) 25%, transparent) !important;
+}
+
+.layer-item.drag-over-before,
+.layer-group-header.drag-over-before {
+  border-top: 2px solid var(--accent) !important;
+}
+
+.layer-item.drag-over-after,
+.layer-group-header.drag-over-after {
+  border-bottom: 2px solid var(--accent) !important;
+}

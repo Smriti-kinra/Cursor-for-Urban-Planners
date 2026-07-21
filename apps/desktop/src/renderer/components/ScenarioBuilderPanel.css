@@ -1,0 +1,523 @@
+/* ─────────────────────────────────────────────────────────────────────────────
+   ScenarioBuilderPanel.css  — AI Scenario Builder (top half of Scenarios tab)
+   ───────────────────────────────────────────────────────────────────────────── */
+
+.sb-panel {
+  display: flex;
+  flex-direction: column;
+  height: 100%;
+  overflow: hidden;
+  background: var(--bg-surface);
+  border-bottom: 2px solid var(--border);
+}
+
+/* ── Header ── */
+.sb-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  flex-shrink: 0;
+  background: linear-gradient(135deg, rgba(137,180,250,0.06) 0%, transparent 100%);
+}
+
+.sb-title {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-primary);
+  letter-spacing: 0.03em;
+  text-transform: uppercase;
+  display: flex;
+  align-items: center;
+  gap: 6px;
+}
+
+.sb-title::before {
+  content: '';
+  display: inline-block;
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--accent);
+  animation: pulse-dot 2.5s infinite;
+}
+
+/* ── Mode toggle (Generate / Compare) ── */
+.sb-mode-toggle {
+  display: flex;
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  overflow: hidden;
+}
+
+.sb-mode-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-weight: 600;
+  padding: 4px 10px;
+  cursor: pointer;
+  transition: all 0.15s;
+}
+
+.sb-mode-btn.active {
+  background: var(--accent);
+  color: var(--bg-surface);
+}
+
+/* ── Scrollable body ── */
+.sb-body {
+  flex: 1;
+  overflow-y: auto;
+  display: flex;
+  flex-direction: column;
+  gap: 0;
+  padding: 0;
+}
+
+/* ── Sections ── */
+.sb-section {
+  padding: 10px 12px;
+  border-bottom: 1px solid var(--border);
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sb-section-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  cursor: pointer;
+  user-select: none;
+}
+
+.sb-section-label,
+.sb-label {
+  font-size: 11px;
+  font-weight: 600;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sb-chevron {
+  font-size: 9px;
+  color: var(--text-muted);
+}
+
+/* ── Inputs ── */
+.sb-input,
+.sb-textarea,
+.sb-select {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--text-primary);
+  padding: 6px 9px;
+  border-radius: 6px;
+  font-size: 12px;
+  font-family: inherit;
+  outline: none;
+  resize: none;
+  width: 100%;
+  box-sizing: border-box;
+  transition: border-color 0.15s;
+}
+
+.sb-input:focus,
+.sb-textarea:focus,
+.sb-select:focus {
+  border-color: var(--accent);
+}
+
+/* ── Metric toggles ── */
+.sb-metric-toggles {
+  display: flex;
+  flex-direction: column;
+  gap: 5px;
+  padding: 4px 0;
+}
+
+.sb-toggle-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+
+.sb-toggle-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+/* ── Analyse button ── */
+.sb-analyze-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  background: rgba(137, 180, 250, 0.1);
+  border: 1px solid rgba(137, 180, 250, 0.35);
+  color: var(--accent);
+  padding: 7px 12px;
+  border-radius: 6px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.15s;
+}
+
+.sb-analyze-btn:hover:not(:disabled) {
+  background: rgba(137, 180, 250, 0.2);
+  border-color: var(--accent);
+}
+
+.sb-analyze-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Metrics card ── */
+.sb-metrics-card {
+  background: var(--bg-primary);
+  border: 1px solid rgba(137, 180, 250, 0.25);
+  border-radius: 7px;
+  padding: 8px 10px;
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.sb-metrics-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.sb-metrics-badge {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(137, 180, 250, 0.12);
+  border: 1px solid rgba(137, 180, 250, 0.3);
+  padding: 2px 7px;
+  border-radius: 4px;
+}
+
+.sb-metrics-area {
+  font-size: 10px;
+  color: var(--text-muted);
+}
+
+.sb-metrics-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 5px 10px;
+}
+
+.sb-metric-item {
+  display: flex;
+  flex-direction: column;
+  gap: 1px;
+}
+
+.sb-metric-label {
+  font-size: 9px;
+  color: var(--text-muted);
+  text-transform: uppercase;
+  letter-spacing: 0.04em;
+}
+
+.sb-metric-value {
+  font-size: 12px;
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.sb-metrics-warn {
+  font-size: 10px;
+  color: #f9a825;
+  margin-top: 2px;
+}
+
+/* ── Scenario types list ── */
+.sb-types-list {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sb-type-row {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  font-size: 11px;
+  color: var(--text-secondary);
+  cursor: pointer;
+  padding: 2px 0;
+}
+
+.sb-type-row.custom {
+  color: var(--accent);
+}
+
+.sb-type-row input[type="checkbox"] {
+  accent-color: var(--accent);
+}
+
+.sb-remove-type {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  padding: 0 2px;
+  font-size: 14px;
+  line-height: 1;
+  margin-left: auto;
+  transition: color 0.15s;
+}
+
+.sb-remove-type:hover {
+  color: var(--danger);
+}
+
+.sb-custom-type-row {
+  display: flex;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.sb-add-type-btn {
+  background: var(--bg-primary);
+  border: 1px solid var(--border);
+  color: var(--accent);
+  width: 28px;
+  height: 28px;
+  border-radius: 6px;
+  font-size: 16px;
+  cursor: pointer;
+  flex-shrink: 0;
+  transition: all 0.15s;
+}
+
+.sb-add-type-btn:hover {
+  background: rgba(137, 180, 250, 0.1);
+  border-color: var(--accent);
+}
+
+/* ── Generate / Compare button ── */
+.sb-generate-btn {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  gap: 7px;
+  background: var(--accent);
+  color: var(--bg-surface);
+  border: none;
+  padding: 9px 16px;
+  border-radius: 7px;
+  font-size: 12px;
+  font-weight: 700;
+  cursor: pointer;
+  margin: 10px 12px;
+  transition: background 0.15s, opacity 0.15s;
+  letter-spacing: 0.02em;
+}
+
+.sb-generate-btn:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.sb-generate-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+
+/* ── Result card ── */
+.sb-result-card {
+  margin: 0 12px 12px;
+  background: var(--bg-primary);
+  border: 1px solid rgba(137, 180, 250, 0.3);
+  border-radius: 8px;
+  padding: 10px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.sb-result-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.sb-result-badge {
+  font-size: 11px;
+  font-weight: 700;
+  color: var(--accent);
+  background: rgba(137, 180, 250, 0.1);
+  border: 1px solid rgba(137, 180, 250, 0.3);
+  padding: 3px 8px;
+  border-radius: 5px;
+}
+
+.sb-result-badge.recommended {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.1);
+  border-color: rgba(166, 227, 161, 0.3);
+}
+
+.sb-view-artifacts-btn {
+  background: none;
+  border: 1px solid var(--accent);
+  color: var(--accent);
+  padding: 3px 9px;
+  border-radius: 5px;
+  font-size: 11px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.15s;
+  white-space: nowrap;
+}
+
+.sb-view-artifacts-btn:hover {
+  background: rgba(137, 180, 250, 0.15);
+}
+
+.sb-saving-badge {
+  font-size: 10px;
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.sb-result-scenarios {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.sb-result-scenario-chip {
+  font-size: 10px;
+  font-weight: 600;
+  background: rgba(137, 180, 250, 0.08);
+  border: 1px solid rgba(137, 180, 250, 0.2);
+  color: var(--text-secondary);
+  padding: 2px 8px;
+  border-radius: 4px;
+}
+
+/* ── Disclaimer ── */
+.sb-disclaimer {
+  font-size: 10px;
+  color: #f9a825;
+  line-height: 1.4;
+  padding: 5px 8px;
+  background: rgba(249, 168, 37, 0.06);
+  border: 1px solid rgba(249, 168, 37, 0.2);
+  border-radius: 5px;
+}
+
+.sb-disclaimer.real-data {
+  color: #a6e3a1;
+  background: rgba(166, 227, 161, 0.06);
+  border-color: rgba(166, 227, 161, 0.2);
+}
+
+/* ── Error ── */
+.sb-error {
+  font-size: 11px;
+  color: var(--danger);
+  background: rgba(243, 139, 168, 0.1);
+  border: 1px solid rgba(243, 139, 168, 0.3);
+  padding: 6px 9px;
+  border-radius: 6px;
+  line-height: 1.4;
+}
+
+/* ── Spinner ── */
+.sb-spinner {
+  display: inline-block;
+  width: 11px;
+  height: 11px;
+  border: 2px solid rgba(255,255,255,0.3);
+  border-top-color: currentColor;
+  border-radius: 50%;
+  animation: sb-spin 0.7s linear infinite;
+}
+
+@keyframes sb-spin {
+  to { transform: rotate(360deg); }
+}
+
+/* ── Compare-specific ── */
+.sb-compare-row {
+  display: flex;
+  gap: 5px;
+  align-items: center;
+  margin-bottom: 5px;
+}
+
+.sb-add-scenario-btn {
+  background: none;
+  border: 1px dashed var(--border);
+  color: var(--text-muted);
+  padding: 5px 10px;
+  border-radius: 6px;
+  font-size: 11px;
+  cursor: pointer;
+  width: 100%;
+  transition: all 0.15s;
+  margin-top: 4px;
+}
+
+.sb-add-scenario-btn:hover {
+  border-color: var(--accent);
+  color: var(--accent);
+}
+
+.sb-criteria-grid {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 4px 10px;
+}
+
+/* ── Ranking ── */
+.sb-ranking {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.sb-ranking-row {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 3px 0;
+}
+
+.sb-ranking-row.top .sb-rank-num {
+  color: #a6e3a1;
+}
+
+.sb-rank-num {
+  font-size: 10px;
+  font-weight: 700;
+  color: var(--text-muted);
+  width: 20px;
+}
+
+.sb-rank-name {
+  font-size: 11px;
+  color: var(--text-secondary);
+}
+
+.sb-ranking-row.top .sb-rank-name {
+  color: var(--text-primary);
+  font-weight: 600;
+}

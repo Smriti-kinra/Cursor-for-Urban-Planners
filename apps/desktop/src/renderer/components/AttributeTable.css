@@ -1,0 +1,307 @@
+.attr-table {
+  font-size: 12px;
+  background: transparent;
+  display: flex;
+  flex-direction: column;
+  gap: 10px;
+}
+
+.layer-popup-container .attr-table {
+  border: none !important;
+  background: transparent !important;
+  padding: 0 !important;
+}
+
+.attr-header {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.attr-title-group {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+}
+
+.attr-title {
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text-primary);
+  letter-spacing: -0.01em;
+}
+
+.attr-close-btn {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+}
+
+.attr-close-btn:hover {
+  background: var(--bg-hover);
+  color: var(--text-primary);
+}
+
+.attr-header-addcol {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  flex: 1 1 auto;
+  min-width: 150px;
+  justify-content: flex-end;
+}
+
+.attr-header-input {
+  height: 26px !important;
+  padding: 4px 8px !important;
+  font-size: 11px !important;
+  background: var(--bg-secondary) !important;
+  border: 1px solid var(--border) !important;
+  border-radius: 6px !important;
+  color: var(--text-primary);
+  width: 100%;
+  transition: border-color 0.15s, box-shadow 0.15s;
+}
+
+.attr-header-input:focus {
+  outline: none;
+  border-color: var(--accent) !important;
+  box-shadow: 0 0 0 2px rgba(59, 130, 246, 0.25);
+}
+
+.attr-header-btn {
+  height: 26px !important;
+  padding: 0 10px !important;
+  font-size: 11px !important;
+  font-weight: 600 !important;
+  border-radius: 6px !important;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  background: var(--accent);
+  color: var(--bg-surface, #11111b);
+  border: none;
+  cursor: pointer;
+  transition: opacity 0.15s, background 0.15s;
+}
+
+.attr-header-btn:hover:not(:disabled) {
+  background: var(--accent-hover, var(--accent));
+  opacity: 0.9;
+}
+
+.attr-header-btn:disabled {
+  opacity: 0.4;
+  cursor: not-allowed;
+}
+
+.attr-empty {
+  color: var(--text-muted);
+  font-size: 12px;
+  padding: 16px 8px;
+  text-align: center;
+  background: var(--bg-secondary);
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  margin: 0;
+}
+
+/* ── Modern Table Container ── */
+.attr-scroll {
+  max-height: 280px;
+  overflow: auto;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--bg-surface);
+  box-shadow: inset 0 2px 8px rgba(0, 0, 0, 0.15);
+}
+
+/* Custom Scrollbar for attribute table container */
+.attr-scroll::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+.attr-scroll::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+.attr-scroll::-webkit-scrollbar-thumb {
+  background: var(--border);
+  border-radius: 4px;
+}
+
+.attr-scroll::-webkit-scrollbar-thumb:hover {
+  background: var(--text-muted);
+}
+
+.attr-table table {
+  border-collapse: separate;
+  border-spacing: 0;
+  width: 100%;
+}
+
+.attr-table th,
+.attr-table td {
+  border-bottom: 1px solid var(--border);
+  border-right: 1px solid var(--border);
+  padding: 0;
+}
+
+.attr-table th:last-child,
+.attr-table td:last-child {
+  border-right: none;
+}
+
+.attr-table tr:last-child td {
+  border-bottom: none;
+}
+
+/* Header Cells styling */
+.attr-table th {
+  background: var(--bg-secondary);
+  padding: 8px 10px;
+  font-size: 10px;
+  font-weight: 600;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+  color: var(--text-muted);
+  white-space: nowrap;
+  position: sticky;
+  top: 0;
+  z-index: 10;
+  box-shadow: inset 0 -1px 0 var(--border);
+  text-align: left;
+}
+
+.attr-colname {
+  margin-right: 6px;
+  vertical-align: middle;
+}
+
+/* Column Delete Button */
+.attr-coldel {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 4px;
+  border-radius: 4px;
+  transition: all 0.15s ease;
+  vertical-align: middle;
+}
+
+.attr-coldel:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* Row index styling */
+.attr-rownum {
+  color: var(--text-muted);
+  text-align: center !important;
+  font-weight: 500;
+  font-size: 11px;
+  width: 32px;
+  min-width: 32px;
+  font-variant-numeric: tabular-nums;
+  background: var(--bg-secondary);
+  user-select: none;
+  border-right: 1px solid var(--border) !important;
+}
+
+/* Row Alternating Color & Hover */
+.attr-table tbody tr {
+  background: var(--bg-surface);
+  transition: background-color 0.15s ease;
+}
+
+.attr-table tbody tr:nth-child(even) {
+  background: rgba(255, 255, 255, 0.015);
+}
+
+.attr-table tbody tr:hover {
+  background: var(--bg-hover) !important;
+}
+
+/* Cell Input styling */
+.attr-cell {
+  width: 100%;
+  box-sizing: border-box;
+  min-width: 90px;
+  background: transparent;
+  border: none;
+  color: var(--text-primary);
+  padding: 7px 10px;
+  font-size: 12px;
+  transition: all 0.15s ease;
+}
+
+.attr-cell:hover {
+  background: rgba(255, 255, 255, 0.02);
+}
+
+.attr-cell:focus {
+  outline: none;
+  background: var(--bg-input, #1a1a26);
+  box-shadow: inset 0 0 0 1px var(--accent);
+}
+
+/* Row Delete Button */
+.attr-rowdel-h {
+  width: 36px;
+  min-width: 36px;
+}
+
+.attr-table td:last-child {
+  text-align: center;
+}
+
+.attr-rowdel {
+  background: none;
+  border: none;
+  color: var(--text-muted);
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  padding: 6px;
+  border-radius: 6px;
+  transition: all 0.15s ease;
+}
+
+.attr-rowdel:hover {
+  background: rgba(239, 68, 68, 0.15);
+  color: #ef4444;
+}
+
+/* ── Selection Row Styling ── */
+.attr-row-tr {
+  cursor: pointer;
+}
+
+.attr-row-tr.selected {
+  background-color: rgba(245, 158, 11, 0.15) !important;
+}
+
+.attr-row-tr.selected td {
+  border-bottom: 1px solid rgba(245, 158, 11, 0.3) !important;
+  border-right: 1px solid rgba(245, 158, 11, 0.3) !important;
+}
+
+.attr-row-tr.selected .attr-rownum {
+  background-color: rgba(245, 158, 11, 0.25) !important;
+  color: #f59e0b !important;
+}

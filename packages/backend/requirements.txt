@@ -1,0 +1,32 @@
+fastapi>=0.110,<0.120
+uvicorn[standard]>=0.27,<0.40
+websockets>=12,<14
+pydantic>=2.5,<3
+python-dotenv>=1.0,<2
+openai>=1.50,<3
+duckduckgo-search>=6.0,<8
+httpx>=0.27,<0.29
+shapely>=2.0,<3
+pyproj>=3.6,<4
+# duckdb + its `spatial` extension power vector ingestion (tools/vector_convert.py:
+# shapefile/GPKG/KML/KMZ/GPX/CSV -> WGS84 GeoJSON). The extension is auto-downloaded
+# at runtime via `INSTALL spatial`; for the offline PyInstaller build it must be
+# pre-cached/bundled (see ~/.duckdb/extensions) or first import will need network.
+duckdb>=1.1,<2
+mcp>=1.0,<2
+Pillow>=10.0,<12
+python-multipart>=0.0.9,<1
+streetlevel>=0.10,<1
+python-docx>=1.1.0
+pypdf>=4.0.0
+numpy>=1.24.0
+pyinstaller>=6.0
+networkx>=3.0,<4
+earthengine-api>=0.1.400,<1
+# ── PDF / LaTeX export backends (cascade: pypandoc → xelatex → weasyprint) ──
+# pypandoc_binary bundles its own pandoc binary; no system install needed.
+pypandoc_binary
+# weasyprint: pure-Python HTML→PDF fallback (requires pango: brew install pango)
+weasyprint
+# markdown: used by the weasyprint fallback to convert .md → HTML
+markdown>=3.5,<4
