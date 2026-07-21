@@ -481,6 +481,18 @@ class NetworkServer:
                         "title": {
                             "type": "string",
                             "description": "Optional: Title for the map layer (e.g. 'Shortest Route')."
+                        },
+                        "start_label": {
+                            "type": "string",
+                            "description": "Optional: Name/label for the starting waypoint pin (e.g. 'ISBT Sector-43')."
+                        },
+                        "end_label": {
+                            "type": "string",
+                            "description": "Optional: Name/label for the destination waypoint pin (e.g. 'ISBT Zirakpur')."
+                        },
+                        "color": {
+                            "type": "string",
+                            "description": "Optional: Hex color code for the route line (e.g. '#8a3324')."
                         }
                     },
                     "required": ["start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
@@ -528,6 +540,18 @@ class NetworkServer:
                         "title": {
                             "type": "string",
                             "description": "Optional: Title for the map layer (e.g. 'Freight Route')."
+                        },
+                        "start_label": {
+                            "type": "string",
+                            "description": "Optional: Name/label for the starting waypoint pin (e.g. 'ISBT Sector-43')."
+                        },
+                        "end_label": {
+                            "type": "string",
+                            "description": "Optional: Name/label for the destination waypoint pin (e.g. 'ISBT Zirakpur')."
+                        },
+                        "color": {
+                            "type": "string",
+                            "description": "Optional: Hex color code for the route line (e.g. '#8a3324')."
                         }
                     },
                     "required": ["start_lat", "start_lng", "end_lat", "end_lng", "workspace"]
@@ -572,6 +596,10 @@ class NetworkServer:
                         "title": {
                             "type": "string",
                             "description": "Name for the output route layer."
+                        },
+                        "color": {
+                            "type": "string",
+                            "description": "Optional: Hex color code for the route line (e.g. '#8a3324')."
                         }
                     },
                     "required": ["waypoints", "workspace"]
@@ -794,8 +822,9 @@ class NetworkServer:
         end_lat = float(args.get("end_lat", 0))
         end_lng = float(args.get("end_lng", 0))
         workspace = _resolve_workspace(args.get("workspace", ""))
-        title = args.get("title", "").strip() or "Shortest Route"
-        ws = args.get("_ws")
+        color = args.get("color", "").strip() or "#8a3324"
+        start_label = args.get("start_label", "").strip() or "Start"
+        end_label = args.get("end_label", "").strip() or "Destination"
 
         if geojson_path:
             try:
@@ -879,6 +908,33 @@ class NetworkServer:
             with open(target_path, "w") as f:
                 json.dump(route_geojson, f, indent=2)
 
+            # Generate and save start/end markers as a stops layer in the workspace
+            stops_filename = "shortest_route_stops.geojson"
+            stops_target_path = Path(workspace) / stops_filename
+            stops_geojson = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [float(start_lng), float(start_lat)]},
+                        "properties": {
+                            "stop_index": 1,
+                            "label": start_label
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [float(end_lng), float(end_lat)]},
+                        "properties": {
+                            "stop_index": 2,
+                            "label": end_label
+                        }
+                    }
+                ]
+            }
+            with open(stops_target_path, "w") as f:
+                json.dump(stops_geojson, f, indent=2)
+
             # Dispatch action
             if ws:
                 await ws.send_text(json.dumps({
@@ -886,7 +942,17 @@ class NetworkServer:
                     "action": "add_geojson_file",
                     "payload": {
                         "path": str(target_path),
-                        "name": title
+                        "name": title,
+                        "color": color
+                    }
+                }))
+                await ws.send_text(json.dumps({
+                    "type": "action",
+                    "action": "add_geojson_file",
+                    "payload": {
+                        "path": str(stops_target_path),
+                        "name": f"{title} – Stops",
+                        "color": "#e6194b"  # Distinct red for stops
                     }
                 }))
 
@@ -921,6 +987,9 @@ class NetworkServer:
         truck_height = args.get("truck_height_meters")
         avoid_res = bool(args.get("avoid_residential", True))
         ws = args.get("_ws")
+        color = args.get("color", "").strip() or "#8a3324"
+        start_label = args.get("start_label", "").strip() or "Start"
+        end_label = args.get("end_label", "").strip() or "Destination"
 
         if truck_weight is not None:
             truck_weight = float(truck_weight)
@@ -1004,13 +1073,50 @@ class NetworkServer:
             with open(target_path, "w") as f:
                 json.dump(route_geojson, f, indent=2)
 
+            # Generate and save start/end markers as a stops layer in the workspace
+            stops_filename = "freight_route_stops.geojson"
+            stops_target_path = Path(workspace) / stops_filename
+            stops_geojson = {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [float(start_lng), float(start_lat)]},
+                        "properties": {
+                            "stop_index": 1,
+                            "label": start_label
+                        }
+                    },
+                    {
+                        "type": "Feature",
+                        "geometry": {"type": "Point", "coordinates": [float(end_lng), float(end_lat)]},
+                        "properties": {
+                            "stop_index": 2,
+                            "label": end_label
+                        }
+                    }
+                ]
+            }
+            with open(stops_target_path, "w") as f:
+                json.dump(stops_geojson, f, indent=2)
+
             if ws:
                 await ws.send_text(json.dumps({
                     "type": "action",
                     "action": "add_geojson_file",
                     "payload": {
                         "path": str(target_path),
-                        "name": title
+                        "name": title,
+                        "color": color
+                    }
+                }))
+                await ws.send_text(json.dumps({
+                    "type": "action",
+                    "action": "add_geojson_file",
+                    "payload": {
+                        "path": str(stops_target_path),
+                        "name": f"{title} – Stops",
+                        "color": "#e6194b"  # Distinct red for stops
                     }
                 }))
 
@@ -1038,6 +1144,7 @@ class NetworkServer:
         workspace = _resolve_workspace(args.get("workspace", ""))
         title = args.get("title", "Multi-Stop Route").strip()
         ws = args.get("_ws")
+        color = args.get("color", "").strip() or "#8a3324"
 
         if geojson_path:
             try:
@@ -1149,11 +1256,19 @@ class NetworkServer:
             if ws:
                 await ws.send_text(json.dumps({
                     "type": "action", "action": "add_geojson_file",
-                    "payload": {"path": str(route_path), "name": title}
+                    "payload": {
+                        "path": str(route_path),
+                        "name": title,
+                        "color": color
+                    }
                 }))
                 await ws.send_text(json.dumps({
                     "type": "action", "action": "add_geojson_file",
-                    "payload": {"path": str(stops_path), "name": f"{title} – Stops"}
+                    "payload": {
+                        "path": str(stops_path),
+                        "name": f"{title} – Stops",
+                        "color": "#e6194b"  # Distinct red for stops
+                    }
                 }))
 
             return {

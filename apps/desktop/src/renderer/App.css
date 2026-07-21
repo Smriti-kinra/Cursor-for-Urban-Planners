@@ -479,3 +479,66 @@ select option {
   background: var(--bg-surface);
   color: var(--text-primary);
 }
+
+/* Workspace transition overlay */
+.workspace-transition-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 9999;
+  backdrop-filter: blur(14px) brightness(0.35);
+  background: rgba(0, 0, 0, 0.3);
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  animation: ws-fade-in 0.2s ease;
+}
+
+@keyframes ws-fade-in {
+  from { opacity: 0 } to { opacity: 1 }
+}
+
+.workspace-transition-card {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  gap: 14px;
+}
+
+.workspace-transition-name {
+  font-size: 16px;
+  font-weight: 600;
+  color: rgba(255, 255, 255, 0.85);
+  animation: ws-name-out 0.5s ease 0.15s forwards;
+  opacity: 1;
+}
+
+@keyframes ws-name-out {
+  to { opacity: 0; transform: translateY(-6px) }
+}
+
+.workspace-transition-spinner {
+  width: 30px; height: 30px;
+  border: 3px solid rgba(255, 255, 255, 0.15);
+  border-top-color: rgba(255, 255, 255, 0.75);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+}
+
+.workspace-transition-status {
+  font-size: 13px;
+  color: rgba(255, 255, 255, 0.5);
+}
+
+.titlebar-spinner {
+  display: inline-block;
+  width: 11px; height: 11px;
+  border: 2px solid rgba(255, 255, 255, 0.2);
+  border-top-color: rgba(255, 255, 255, 0.7);
+  border-radius: 50%;
+  animation: spin 0.75s linear infinite;
+  vertical-align: middle;
+  margin-right: 4px;
+}
+
+@keyframes spin { to { transform: rotate(360deg) } }
+

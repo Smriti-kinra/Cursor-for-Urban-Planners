@@ -326,3 +326,14 @@ async def delete_artifact_http(artifact_id: int, workspace: str | None = Query(N
         raise HTTPException(status_code=404, detail="Artifact not found")
     delete_artifact(artifact_id, workspace)
     return {"deleted": True}
+
+
+@router.post("/clear_temp")
+async def clear_temp_artifacts(workspace: str | None = Query(None)):
+    conn = get_connection(workspace)
+    try:
+        conn.execute("DELETE FROM artifacts")
+        conn.commit()
+        return {"status": "success"}
+    finally:
+        conn.close()

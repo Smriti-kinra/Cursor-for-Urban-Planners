@@ -276,7 +276,8 @@ SYSTEM_PROMPT = (
     "18. BOUNDARY ADMIN LEVEL DISCLOSURE: When you fetch or display any administrative boundary "
     "(using osm_boundary or osm_boundary_union), always mention explicitly in your chat response "
     "which administrative level (e.g., admin_level=5 for district/county, admin_level=8 for city/municipality) "
-    "was used or chosen."
+    "was used or chosen.\n"
+    "19. JUNCTIONS AND POI PINNING: When pinning a specific point of interest, landmark, chowk, junction, or address (like 'Fountain Chowk' or 'Airport Chowk'), ALWAYS first call the `geocode` tool with the full descriptive name and containing context (e.g. 'Fountain Chowk, Sector 43, Chandigarh') to resolve its exact point coordinate. DO NOT call `osm_boundary` or `osm_search` for a specific junction/chowk unless you want to search for adjacent amenities or the city boundary. To display the pinned point on the map, call `add_marker` at the resolved coordinate. When the user asks to route/cross through waypoints, ensure each waypoint is geocoded and explicitly passed in the routing tool's `waypoints` argument, and pass the corresponding color or label if customized."
 )
 
 
@@ -1611,6 +1612,10 @@ async def chat_websocket(websocket: WebSocket):
                         pass
                     active_task = None
                 await websocket.send_text(json.dumps({"type": "stopped"}))
+                continue
+
+            if payload.get("type") == "reset_history":
+                messages = []
                 continue
 
             if payload.get("type") == "question_response":

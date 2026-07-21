@@ -75,6 +75,7 @@ interface StreetViewWorkspaceProps {
   onLayoutChange?: (layout: 'split' | 'full') => void
   onYawChange?: (bearing: number) => void
   onLocationChange?: (loc: { lat: number; lng: number }) => void
+  workspacePath: string | null
 }
 
 const API = 'http://localhost:8765/api/streetview'
@@ -110,6 +111,7 @@ export default function StreetViewWorkspace({
   onLayoutChange,
   onYawChange,
   onLocationChange,
+  workspacePath,
 }: StreetViewWorkspaceProps) {
   const [meta, setMeta] = useState<StreetViewMeta | null>(null)
   const [loading, setLoading] = useState(false)
@@ -260,6 +262,7 @@ export default function StreetViewWorkspace({
           lat: target.lat,
           lng: target.lng,
           title: meta?.address || target.label || `Street View ${coordinateLabel(target.lat, target.lng)}`,
+          workspace: workspacePath,
         }),
       })
       const data: StreetViewArtifactResult = await resp.json()
@@ -277,17 +280,17 @@ export default function StreetViewWorkspace({
     } finally {
       setSaving(false)
     }
-  }, [target, headers, meta, onArtifactsChanged])
+  }, [target, headers, meta, onArtifactsChanged, workspacePath])
 
   const downloadCurrentImage = useCallback(async () => {
     const result = await saveCurrentImage()
     const id = result?.artifact_id || result?.artifact?.id
     if (!id) return
     const a = document.createElement('a')
-    a.href = `${ARTIFACT_API}/${id}/download`
+    a.href = `${ARTIFACT_API}/${id}/download${workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''}`
     a.download = `street-view-${id}.jpg`
     a.click()
-  }, [saveCurrentImage])
+  }, [saveCurrentImage, workspacePath])
 
   const addImagesToReport = useCallback(async (images: Array<Record<string, unknown>>, title: string) => {
     if (!images.length) return
@@ -296,7 +299,7 @@ export default function StreetViewWorkspace({
       const resp = await fetch(`${API}/report`, {
         method: 'POST',
         headers,
-        body: JSON.stringify({ title, images }),
+        body: JSON.stringify({ title, images, workspace: workspacePath }),
       })
       if (!resp.ok) throw new Error(`HTTP ${resp.status}`)
       setReportStatus('Added to an editable report artifact.')
@@ -304,7 +307,7 @@ export default function StreetViewWorkspace({
     } catch (e) {
       setReportStatus(`Report insert failed: ${String(e)}`)
     }
-  }, [headers, onArtifactsChanged])
+  }, [headers, onArtifactsChanged, workspacePath])
 
   const addCurrentToReport = useCallback(async () => {
     let artifactId = lastArtifactId
@@ -356,6 +359,7 @@ export default function StreetViewWorkspace({
               lat: point.lat,
               lng: point.lng,
               title: `${roadTarget.name || 'Road inspection'} - ${Math.round(point.distance_m)} m`,
+              workspace: workspacePath,
             }),
           })
           const data: StreetViewArtifactResult = await resp.json()
@@ -374,7 +378,7 @@ export default function StreetViewWorkspace({
                   status: 'done',
                   selected: true,
                   artifactId,
-                  imageUrl: artifactId ? `${ARTIFACT_API}/${artifactId}/download` : undefined,
+                  imageUrl: artifactId ? `${ARTIFACT_API}/${artifactId}/download${workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''}` : undefined,
                   address: data.metadata?.address || String(parsedMeta.address || '') || null,
                   captureDate: data.metadata?.date || String(parsedMeta.capture_date || '') || null,
                 }
@@ -392,7 +396,7 @@ export default function StreetViewWorkspace({
     } finally {
       setGalleryBusy(false)
     }
-  }, [headers, intervalM, onArtifactsChanged, roadTarget])
+  }, [headers, intervalM, onArtifactsChanged, roadTarget, workspacePath])
 
   const updateGalleryNotes = useCallback(async (artifactId: number | undefined, notes: string) => {
     setGallery((prev) => prev.map((item) =>
@@ -402,9 +406,10 @@ export default function StreetViewWorkspace({
     const item = gallery.find((g) => g.artifactId === artifactId)
     const existing = item?.artifactId ? item : null
     try {
-      const current = await fetch(`${ARTIFACT_API}/${artifactId}`).then((r) => r.ok ? r.json() : null)
+      const url = `${ARTIFACT_API}/${artifactId}${workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''}`
+      const current = await fetch(url).then((r) => r.ok ? r.json() : null)
       const currentMeta = parseArtifactMeta(current?.meta || null)
-      await fetch(`${ARTIFACT_API}/${artifactId}`, {
+      await fetch(url, {
         method: 'PUT',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({ meta: { ...currentMeta, planner_notes: notes } }),
@@ -413,7 +418,7 @@ export default function StreetViewWorkspace({
     } catch {
       /* Keep notes in the gallery even if the artifact update fails. */
     }
-  }, [gallery, onArtifactsChanged])
+  }, [gallery, onArtifactsChanged, workspacePath])
 
   const runRoadItem = useCallback(async (item: GalleryItem) => {
     setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'loading' } : g))
@@ -436,6 +441,7 @@ export default function StreetViewWorkspace({
           zoom: 3,
           title: `Road Inspection Point ${Math.round(item.point.distance_m)}m`,
           notes: captionFromMeta(mData),
+          workspace: workspacePath,
         }),
       })
       const aData: StreetViewArtifactResult = await resArt.json()
@@ -444,7 +450,7 @@ export default function StreetViewWorkspace({
           ...g,
           status: 'done',
           artifactId: aData.artifact_id,
-          imageUrl: `http://localhost:8765${aData.download_url}`,
+          imageUrl: `http://localhost:8765${aData.download_url}${workspacePath ? `?workspace=${encodeURIComponent(workspacePath)}` : ''}`,
           address: mData.address,
           captureDate: mData.date,
         } : g))
@@ -455,7 +461,7 @@ export default function StreetViewWorkspace({
     } catch (e) {
       setGallery((prev) => prev.map((g) => g.point.id === item.point.id ? { ...g, status: 'error', error: String(e) } : g))
     }
-  }, [headers, onArtifactsChanged])
+  }, [headers, onArtifactsChanged, workspacePath])
 
   // Sequentially process gallery items to avoid rate limits
   useEffect(() => {

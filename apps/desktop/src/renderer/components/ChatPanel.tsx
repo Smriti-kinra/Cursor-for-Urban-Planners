@@ -1,4 +1,4 @@
-import { useState, useRef, useEffect, useCallback } from 'react'
+import { useState, useRef, useEffect, useCallback, forwardRef, useImperativeHandle } from 'react'
 import ReactMarkdown from 'react-markdown'
 import remarkGfm from 'remark-gfm'
 import rehypeHighlight from 'rehype-highlight'
@@ -270,7 +270,12 @@ interface ClarifyingQuestion {
   is_multi_select: boolean
 }
 
-export default function ChatPanel({
+export interface ChatPanelHandle {
+  stopStreaming: () => void
+  resetHistory: () => void
+}
+
+const ChatPanel = forwardRef<ChatPanelHandle, ChatPanelProps>(({
   conversations,
   activeConversation,
   onCreateConversation,
@@ -283,7 +288,7 @@ export default function ChatPanel({
   documentImage,
   injectedMessage,
   onComposeMapFigure,
-}: ChatPanelProps) {
+}, ref) => {
   const [input, setInput] = useState('')
   const [isStreaming, setIsStreaming] = useState(false)
   const [toolStatus, setToolStatus] = useState<string | null>(null)
@@ -690,6 +695,17 @@ export default function ChatPanel({
     inFlightRef.current = null
     setActiveQuestion(null)
   }, [onMessagesChange])
+
+  useImperativeHandle(ref, () => ({
+    stopStreaming: () => {
+      handleStopStreaming()
+    },
+    resetHistory: () => {
+      if (wsRef.current && wsRef.current.readyState === WebSocket.OPEN) {
+        wsRef.current.send(JSON.stringify({ type: 'reset_history' }))
+      }
+    }
+  }), [handleStopStreaming])
 
   const downloadResearchMd = useCallback((md: string) => {
     if (!md) return
@@ -2074,4 +2090,6 @@ export default function ChatPanel({
       </div>
     </div>
   )
-}
+})
+
+export default ChatPanel

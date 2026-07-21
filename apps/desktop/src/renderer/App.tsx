@@ -3,7 +3,7 @@ import * as turf from '@turf/turf'
 import type { Feature, FeatureCollection, Geometry, Polygon, MultiPolygon } from 'geojson'
 import MapView, { type MapViewHandle } from './components/MapView'
 import FileTree from './components/FileTree'
-import ChatPanel from './components/ChatPanel'
+import ChatPanel, { type ChatPanelHandle } from './components/ChatPanel'
 import StreetViewWorkspace, {
   type RoadInspectionTarget,
   type StreetViewTarget,
@@ -19,7 +19,7 @@ import ZoningPanel from './components/ZoningPanel'
 import ScenarioPanel, { type Scenario } from './components/ScenarioPanel'
 import ScenarioBuilderPanel from './components/ScenarioBuilderPanel'
 
-import DocumentView, { type DocumentImage } from './components/DocumentView'
+import DocumentView, { type DocumentImage, type OpenDocument } from './components/DocumentView'
 import ErrorBoundary from './components/ErrorBoundary'
 import {
   GeoJSONLayer,
@@ -186,7 +186,11 @@ async function fetchOsrmRoute(waypoints: number[][]) {
 function App() {
   const [appMode, setAppMode] = useState<AppMode>('map')
   const [isFullscreen, setIsFullscreen] = useState(false)
+  const [isTransitioning, setIsTransitioning] = useState(false)
+  const [transitionStatus, setTransitionStatus] = useState('Saving workspace...')
   const [documentImage, setDocumentImage] = useState<DocumentImage | null>(null)
+  const [openDocs, setOpenDocs] = useState<OpenDocument[]>([])
+  const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [workspacePath, setWorkspacePath] = useState<string | null>(null)
   const [activeLeftTab, setActiveLeftTab] = useState<LeftTab>('files')
   const [stylingLayerId, setStylingLayerId] = useState<string | null>(null)
@@ -355,7 +359,15 @@ function App() {
     return () => document.removeEventListener('mousedown', handleOutsideClick)
   }, [stylingLayerId, attrLayerId])
   const isSavingRef = useRef(false)
+  // Mutex that blocks all debounced auto-saves during workspace transitions
+  // (close or switch). Without this, resetWorkspaceState() clears state while
+  // workspacePath is still non-null, causing the auto-save to write empty data
+  // back to project.json / documents.json and corrupt the workspace.
+  const isClosingRef = useRef(false)
+  const chatPanelRef = useRef<ChatPanelHandle>(null)
+  const savedDocIdsRef = useRef<Set<string>>(new Set()) // Tracks document images already persisted to disk
   const saveTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const saveDocsTimeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const dirtyLayerIdsRef = useRef<Set<string>>(new Set())
   const AI_MARKERS_LAYER = 'AI Markers'
 
@@ -434,7 +446,6 @@ function App() {
 
   const resetWorkspaceState = useCallback(() => {
     setActiveLeftTab('files')
-    setActiveRightTab('chat')
     setStylingLayerId(null)
     setAttrLayerId(null)
     setConvertingFile(null)
@@ -460,10 +471,13 @@ function App() {
     setArtifactsRevision(0)
     setScenarios([])
     setActiveScenarioId(null)
+    setOpenDocs([])
+    setActiveDocId(null)
     setDocumentImage(null)
     setPastHistory([])
     setFutureHistory([])
     lastStateRef.current = { layers: [], bookmarks: [] }
+    savedDocIdsRef.current.clear() // Clear cache on close
   }, [])
 
   // ── Split screen row dragging handle ──
@@ -504,49 +518,204 @@ function App() {
     }
   }, [])
 
+  const saveDocumentsToWorkspace = useCallback(async (
+    wsPath: string,
+    docs: OpenDocument[],
+    activeId: string | null
+  ) => {
+    try {
+      const documentsDir = `${wsPath}/.cursor-urban/documents`
+      const metadata = docs.map((d) => ({
+        id: d.id,
+        filePath: d.filePath,
+        fileName: d.fileName,
+        isPdf: d.isPdf,
+        pdfPage: d.pdfPage,
+        pdfTotalPages: d.pdfTotalPages,
+      }))
+      const metaDataStr = JSON.stringify({ openDocs: metadata, activeDocId: activeId }, null, 2)
+      
+      const writePromises: Promise<boolean>[] = [
+        window.electronAPI.writeFile(`${documentsDir}/documents.json`, metaDataStr)
+      ]
+
+      for (const d of docs) {
+        if (d.documentImage && d.documentImage.base64) {
+          if (savedDocIdsRef.current.has(d.id)) {
+            continue // Giant base64 content already written, skip I/O!
+          }
+          const docFile = `${documentsDir}/${d.id}.json`
+          const imgData = JSON.stringify(d.documentImage, null, 2)
+          writePromises.push(window.electronAPI.writeFile(docFile, imgData).then((ok) => {
+            if (ok) savedDocIdsRef.current.add(d.id)
+            return ok
+          }))
+        }
+      }
+
+      await Promise.all(writePromises)
+    } catch (e) {
+      console.error('Failed to save documents:', e)
+    }
+  }, [])
+
+  const loadDocumentsFromWorkspace = useCallback(async (wsPath: string) => {
+    try {
+      const metaContent = await window.electronAPI.readFile(`${wsPath}/.cursor-urban/documents/documents.json`)
+      if (!metaContent) {
+        setOpenDocs([])
+        setActiveDocId(null)
+        setDocumentImage(null)
+        return
+      }
+      const { openDocs: loadedMeta, activeDocId: loadedActiveId } = JSON.parse(metaContent)
+      
+      const docs: OpenDocument[] = loadedMeta.map((d: any) => ({
+        ...d,
+        displayUrl: `localfile://${d.filePath.split('/').map(encodeURIComponent).join('/')}`,
+        documentImage: null
+      }))
+
+      // Populate cache with loaded documents
+      savedDocIdsRef.current.clear()
+      loadedMeta.forEach((d: any) => savedDocIdsRef.current.add(d.id))
+
+      if (loadedActiveId) {
+        const activeImgContent = await window.electronAPI.readFile(`${wsPath}/.cursor-urban/documents/${loadedActiveId}.json`)
+        if (activeImgContent) {
+          try {
+            const imgObj = JSON.parse(activeImgContent)
+            const activeIndex = docs.findIndex(d => d.id === loadedActiveId)
+            if (activeIndex !== -1) {
+              docs[activeIndex].documentImage = imgObj
+              setDocumentImage(imgObj)
+            }
+          } catch (e) {
+            console.error('Failed to parse active document image:', e)
+          }
+        }
+      }
+
+      setOpenDocs(docs)
+      setActiveDocId(loadedActiveId)
+    } catch (e) {
+      console.error('Failed to load documents:', e)
+      setOpenDocs([])
+      setActiveDocId(null)
+      setDocumentImage(null)
+    }
+  }, [])
+
+  const [isSavingDocs, setIsSavingDocs] = useState(false)
+
+  const saveDocuments = useCallback(async () => {
+    if (!workspacePath) return
+    setIsSavingDocs(true)
+    await saveDocumentsToWorkspace(workspacePath, openDocs, activeDocId)
+    setIsSavingDocs(false)
+  }, [workspacePath, openDocs, activeDocId, saveDocumentsToWorkspace])
+
+  useEffect(() => {
+    if (!workspacePath || isLoadingRef.current || isSavingDocs || isClosingRef.current) return
+    if (saveDocsTimeoutRef.current) clearTimeout(saveDocsTimeoutRef.current)
+    saveDocsTimeoutRef.current = setTimeout(saveDocuments, 800)
+    return () => {
+      if (saveDocsTimeoutRef.current) clearTimeout(saveDocsTimeoutRef.current)
+    }
+  }, [workspacePath, openDocs, activeDocId, saveDocuments])
+
   const handleSelectWorkspace = async (): Promise<void> => {
     const selected = await window.electronAPI.selectWorkspace()
-    if (selected) {
-      // Force-save the current workspace BEFORE switching so that any
-      // recent chat messages are persisted. The effect-cleanup clears the
-      // 800ms debounce timer when workspacePath changes, so without this
-      // explicit save the last conversation delta would be lost.
-      if (workspacePath) {
-        if (saveTimeoutRef.current) {
-          clearTimeout(saveTimeoutRef.current)
-          saveTimeoutRef.current = null
-        }
-        try { await saveProjectRef.current(true) } catch { /* non-fatal */ }
-      }
-      resetWorkspaceState()
-      setWorkspacePath(selected)
-      window.electronAPI.setLastWorkspace(selected).catch(() => {})
+    if (!selected) return
+
+    const oldWorkspaceName = workspacePath?.split('/').pop() ?? 'workspace'
+    setTransitionStatus(`Saving ${oldWorkspaceName}...`)
+    setIsTransitioning(true)
+
+    // Cancel any pending debounced saves
+    if (saveTimeoutRef.current) { clearTimeout(saveTimeoutRef.current); saveTimeoutRef.current = null }
+    if (saveDocsTimeoutRef.current) { clearTimeout(saveDocsTimeoutRef.current); saveDocsTimeoutRef.current = null }
+
+    // Block auto-save effects BEFORE we reset state. Without this guard,
+    // resetWorkspaceState() clears layers/conversations while workspacePath is
+    // still the old path, and the debounced auto-save fires and corrupts
+    // the old workspace's project.json with empty data.
+    isClosingRef.current = true
+
+    // Stop any in-flight task + clear temp artifacts on backend using the old path
+    chatPanelRef.current?.stopStreaming()
+    if (workspacePath) {
+      fetch(`http://localhost:8765/api/artifacts/clear_temp?workspace=${encodeURIComponent(workspacePath)}`, { method: 'POST' }).catch(() => {})
     }
+
+    // Save current workspace first (save-first-then-clear)
+    if (workspacePath) {
+      try { await saveProjectRef.current(true) } catch { /* non-fatal */ }
+      try { await saveDocumentsToWorkspace(workspacePath, openDocs, activeDocId) } catch { /* non-fatal */ }
+    }
+
+    // Now safely clear all state and point to the new workspace
+    resetWorkspaceState()
+    setWorkspacePath(selected)
+
+    // Backend: clear chat session history
+    chatPanelRef.current?.resetHistory()
+
+    window.electronAPI.setLastWorkspace(selected).catch(() => {})
+
+    // Release the guard after a tick so the loadProject useEffect sees the
+    // new workspacePath and runs cleanly (isClosingRef=false).
+    setTimeout(() => {
+      isClosingRef.current = false
+      setIsTransitioning(false)
+    }, 100)
   }
 
   const handleCloseWorkspace = useCallback(async (): Promise<void> => {
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current)
-      saveTimeoutRef.current = null
-    }
+    const oldWorkspaceName = workspacePath?.split('/').pop() ?? 'workspace'
+    setTransitionStatus(`Saving ${oldWorkspaceName}...`)
+    setIsTransitioning(true)
 
+    // Cancel any pending debounced saves
+    if (saveTimeoutRef.current) { clearTimeout(saveTimeoutRef.current); saveTimeoutRef.current = null }
+    if (saveDocsTimeoutRef.current) { clearTimeout(saveDocsTimeoutRef.current); saveDocsTimeoutRef.current = null }
+
+    // Block auto-save effects BEFORE we reset state (same race-condition guard
+    // as handleSelectWorkspace — see isClosingRef comment above).
+    isClosingRef.current = true
+
+    // Stop any in-flight task + clear temp artifacts on backend using the old path
+    chatPanelRef.current?.stopStreaming()
     if (workspacePath) {
-      try {
-        await saveProjectRef.current(true)
-      } catch {
-        // Ignore save errors and still clear the current workspace.
-      }
+      fetch(`http://localhost:8765/api/artifacts/clear_temp?workspace=${encodeURIComponent(workspacePath)}`, { method: 'POST' }).catch(() => {})
     }
 
+    // Save current workspace first (save-first-then-clear, per user requirement)
+    if (workspacePath) {
+      try { await saveProjectRef.current(true) } catch { /* non-fatal */ }
+      try { await saveDocumentsToWorkspace(workspacePath, openDocs, activeDocId) } catch { /* non-fatal */ }
+    }
+
+    // Now safely clear all state
     setWorkspacePath(null)
     resetWorkspaceState()
+
+    // Backend: clear chat session history
+    chatPanelRef.current?.resetHistory()
+
     window.electronAPI.setLastWorkspace(null).catch(() => {})
-  }, [workspacePath, resetWorkspaceState])
+
+    // Release the guard after a tick so subsequent interactions work normally
+    setTimeout(() => {
+      isClosingRef.current = false
+      setIsTransitioning(false)
+    }, 100)
+  }, [workspacePath, resetWorkspaceState, openDocs, activeDocId, saveDocumentsToWorkspace])
 
   // ── Layer management ──
 
   const addLayer = useCallback(
-    async (name: string, filePath: string) => {
+    async (name: string, filePath: string, customColor?: string, customStyleSpec?: any) => {
       if (layers.find((l) => l.filePath === filePath)) {
         setActiveLeftTab('layers')
         return
@@ -567,7 +736,6 @@ function App() {
         const data =
           raw.type === 'FeatureCollection'
             ? raw
-
             : raw.type === 'Feature'
               ? { type: 'FeatureCollection', features: [raw] }
               : {
@@ -575,8 +743,22 @@ function App() {
                   features: [{ type: 'Feature', geometry: raw, properties: {} }],
                 }
 
-        const color = LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
-        colorIndexRef.current++
+        const color = customColor || LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
+        if (!customColor) colorIndexRef.current++
+
+        const isAiMarkers = name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()
+        const isStops = name.toLowerCase().includes('stops') || name.toLowerCase().includes('waypoints') || name.toLowerCase().includes('markers')
+        const finalStyleSpec = customStyleSpec || ((isAiMarkers || isStops) ? {
+          mode: 'simple' as const,
+          label: {
+            enabled: true,
+            property: 'label',
+            size: 12,
+            color: '#1e1e2e',
+            haloColor: '#ffffff',
+            minZoom: 0,
+          }
+        } : undefined)
 
         const layer: GeoJSONLayer = {
           id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -585,6 +767,7 @@ function App() {
           visible: true,
           data,
           color,
+          styleSpec: finalStyleSpec,
         }
         setLayers((prev) => [...prev, layer])
         setActiveLeftTab('layers')
@@ -1221,6 +1404,9 @@ function App() {
       form.append('format', 'image')
       form.append('content', '')
       form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.png`)
+      if (workspacePath) {
+        form.append('workspace', workspacePath)
+      }
       try {
         await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
         setArtifactsRevision((n) => n + 1)
@@ -1228,7 +1414,7 @@ function App() {
         /* backend unavailable */
       }
     })
-  }, [composeMapFigure])
+  }, [composeMapFigure, workspacePath])
 
   const handleSavePdfToArtifact = useCallback(async (title: string) => {
     const figure = composeMapFigure(title)
@@ -1242,13 +1428,16 @@ function App() {
     form.append('format', 'image')
     form.append('content', '')
     form.append('file', blob, `${title.replace(/[^a-z0-9-_]/gi, '_')}.pdf`)
+    if (workspacePath) {
+      form.append('workspace', workspacePath)
+    }
     try {
       await fetch('http://localhost:8765/api/artifacts/upload', { method: 'POST', body: form })
       setArtifactsRevision((n) => n + 1)
     } catch {
       /* backend unavailable */
     }
-  }, [composeMapFigure, composedToPdf])
+  }, [composeMapFigure, composedToPdf, workspacePath])
 
   const suggestExportTitle = useCallback((): string => {
     const topLayer = layers.length > 0 ? layers[layers.length - 1].name : null
@@ -1310,9 +1499,24 @@ function App() {
     [layers, workspacePath, addLayer],
   )
 
-  const upsertLayer = useCallback((layerName: string, data: FeatureCollection, color?: string) => {
+  const upsertLayer = useCallback((layerName: string, data: FeatureCollection, color?: string, styleSpec?: any) => {
     const layerColor = color || LAYER_COLORS[colorIndexRef.current % LAYER_COLORS.length]
-    colorIndexRef.current++
+    if (!color) colorIndexRef.current++
+
+    const isAiMarkers = layerName.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()
+    const isStops = layerName.toLowerCase().includes('stops') || layerName.toLowerCase().includes('waypoints') || layerName.toLowerCase().includes('markers')
+    const finalStyleSpec = styleSpec || ((isAiMarkers || isStops) ? {
+      mode: 'simple' as const,
+      label: {
+        enabled: true,
+        property: 'label',
+        size: 12,
+        color: '#1e1e2e',
+        haloColor: '#ffffff',
+        minZoom: 0,
+      }
+    } : undefined)
+
     setLayers((prev) => {
       const newLayer = {
         id: `layer-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`,
@@ -1321,6 +1525,7 @@ function App() {
         visible: true,
         data,
         color: layerColor,
+        styleSpec: finalStyleSpec,
       }
       const existingIdx = prev.findIndex(
         (l) => l.name.toLowerCase() === layerName.toLowerCase(),
@@ -1841,8 +2046,8 @@ function App() {
       return
     }
     if (action.type === 'add_geojson_file') {
-      const { path, name } = action.payload
-      void addLayer(name, path)
+      const { path, name, color, styleSpec } = action.payload
+      void addLayer(name, path, color, styleSpec)
       return
     }
     if (action.type === 'add_geojson') {
@@ -2196,7 +2401,6 @@ function App() {
 
   const handleRightClickAskChat = useCallback(
     (lng: number, lat: number) => {
-      setActiveRightTab('chat')
       const text =
         `Tell me everything you can about this location (${lat.toFixed(5)}, ${lng.toFixed(5)}): ` +
         `the address/neighborhood, nearby amenities, demographics, weather, and any notable features. Use your tools.`
@@ -2392,17 +2596,18 @@ function App() {
       if (!force && isLoadingRef.current) return
       isSavingRef.current = true
       try {
-        let layersSnapshot = layers
-        const withPaths: GeoJSONLayer[] = []
-        let materializedAny = false
-        for (const l of layers) {
+        const wsPrefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`
+        const toRelative = (fp: string): string =>
+          fp.startsWith(wsPrefix) ? fp.slice(wsPrefix.length) : fp
+
+        // Save all dirty or new layers concurrently
+        const writePromises = layers.map(async (l) => {
           const isAiMarkers = l.name.toLowerCase() === AI_MARKERS_LAYER.toLowerCase()
           const isDirty = dirtyLayerIdsRef.current.has(l.id)
           const needsWrite = !l.filePath?.trim() || isAiMarkers || isDirty
 
           if (!needsWrite) {
-            withPaths.push(l)
-            continue
+            return l
           }
 
           let fp = l.filePath
@@ -2415,28 +2620,22 @@ function App() {
           const ok = await window.electronAPI.writeFile(fp, JSON.stringify(l.data, null, 2))
           if (!ok) {
             console.error('Failed to persist layer:', l.name)
-            withPaths.push(l)
-            continue
+            return l
           }
-          withPaths.push({ ...l, filePath: fp })
-          materializedAny = true
           dirtyLayerIdsRef.current.delete(l.id)
-        }
-        if (materializedAny) {
-          layersSnapshot = withPaths
-          setLayers(withPaths)
-        }
+          return { ...l, filePath: fp }
+        })
 
-        // Store paths relative to the workspace so the project survives a
-        // workspace-folder move. loadProject re-resolves against the
-        // current workspacePath.
-        const wsPrefix = workspacePath.endsWith('/') ? workspacePath : `${workspacePath}/`
-        const toRelative = (fp: string): string =>
-          fp.startsWith(wsPrefix) ? fp.slice(wsPrefix.length) : fp
+        const resolvedLayers = await Promise.all(writePromises)
+        const materializedAny = resolvedLayers.some((l, idx) => l.filePath !== layers[idx].filePath)
+
+        if (materializedAny) {
+          setLayers(resolvedLayers)
+        }
 
         const projectData: ProjectData = {
           mapState: mapViewState,
-          layers: layersSnapshot.map((l) => ({
+          layers: resolvedLayers.map((l) => ({
             name: l.name,
             filePath: toRelative(l.filePath),
             visible: l.visible,
@@ -2478,6 +2677,7 @@ function App() {
     isLoadingRef.current = true
     setBookmarks([])
     try {
+      const content = await window.electronAPI.readFile(`${workspacePath}/project.json`)
       if (!content) {
         setLayers([])
         setSelectedLayerIds(new Set())
@@ -2485,6 +2685,9 @@ function App() {
         setConversations([])
         setActiveConversationId(null)
         setBookmarks([])
+        setOpenDocs([])
+        setActiveDocId(null)
+        setDocumentImage(null)
         // Use the same 500ms guard as the normal path so that the auto-save
         // effect can't fire before React has flushed the empty-state updates.
         setTimeout(() => { isLoadingRef.current = false }, 500)
@@ -2520,6 +2723,8 @@ function App() {
         setConversations([])
         setActiveConversationId(null)
       }
+
+      await loadDocumentsFromWorkspace(workspacePath)
 
       if (data.layers) {
         const loadedLayers: GeoJSONLayer[] = []
@@ -2558,9 +2763,10 @@ function App() {
           // Resolve relative paths against the current workspace so the
           // project survives a workspace-folder move. Absolute paths from
           // older project.json files keep working.
-          const resolved = info.filePath.startsWith('/')
-            ? info.filePath
-            : `${wsPrefix}${info.filePath}`
+          const fp = info.filePath || ''
+          const resolved = fp.startsWith('/')
+            ? fp
+            : `${wsPrefix}${fp}`
           const fileContent = await window.electronAPI.readFile(resolved)
           if (!fileContent) {
             console.warn('Layer file missing:', info.name, resolved)
@@ -2647,7 +2853,7 @@ function App() {
   }, [workspacePath, loadProject])
 
   useEffect(() => {
-    if (!workspacePath || isLoadingRef.current || isSavingRef.current) return
+    if (!workspacePath || isLoadingRef.current || isSavingRef.current || isClosingRef.current) return
     if (saveTimeoutRef.current) clearTimeout(saveTimeoutRef.current)
     saveTimeoutRef.current = setTimeout(() => void saveProject(), 800)
     return () => {
@@ -2661,9 +2867,16 @@ function App() {
         clearTimeout(saveTimeoutRef.current)
         saveTimeoutRef.current = null
       }
-      await saveProjectRef.current(true)
+      if (saveDocsTimeoutRef.current) {
+        clearTimeout(saveDocsTimeoutRef.current)
+        saveDocsTimeoutRef.current = null
+      }
+      await Promise.all([
+        saveProjectRef.current(true),
+        saveDocuments()
+      ])
     })
-  }, [])
+  }, [saveDocuments])
 
   // Track macOS fullscreen state so the traffic-light drag spacer can
   // collapse when there are no buttons to clear.
@@ -2686,10 +2899,20 @@ function App() {
             Cursor for Urban Planners
           </span>
           <div className="workspace-container">
-            <button className="workspace-btn" onClick={handleSelectWorkspace}>
-              {workspaceLabel}
+            <button
+              className="workspace-btn"
+              onClick={handleSelectWorkspace}
+              disabled={isTransitioning}
+            >
+              {isTransitioning ? (
+                <>
+                  <span className="titlebar-spinner" /> Saving...
+                </>
+              ) : (
+                workspaceLabel
+              )}
             </button>
-            {workspacePath && (
+            {workspacePath && !isTransitioning && (
               <button
                 className="workspace-close-mini-btn"
                 onClick={handleCloseWorkspace}
@@ -2925,6 +3148,7 @@ function App() {
                 <ScenarioBuilderPanel
                   mapBounds={mapBounds}
                   onOpenArtifacts={() => setAppMode('artifacts')}
+                  workspacePath={workspacePath}
                 />
               </div>
               {/* Manual scenario manager — bottom section */}
@@ -3027,6 +3251,7 @@ function App() {
                     onLayoutChange={setStreetViewLayout}
                     onYawChange={setStreetViewBearing}
                     onLocationChange={setStreetViewLocation}
+                    workspacePath={workspacePath}
                   />
                 </ErrorBoundary>
               </div>
@@ -3090,6 +3315,10 @@ function App() {
           <div style={{ display: appMode === 'document' ? 'flex' : 'none', flex: 1, flexDirection: 'column', height: '100%', minHeight: 0 }}>
             <ErrorBoundary label="Document">
               <DocumentView
+                openDocs={openDocs}
+                setOpenDocs={setOpenDocs}
+                activeDocId={activeDocId}
+                setActiveDocId={setActiveDocId}
                 onImageChange={setDocumentImage}
                 showSidebar={showDocumentSidebar}
                 sidebarWidth={leftWidth}
@@ -3127,6 +3356,7 @@ function App() {
         <aside className="panel right-panel" style={{ width: rightWidth }}>
           <ErrorBoundary label="Chat">
             <ChatPanel
+              ref={chatPanelRef}
               conversations={conversations}
               activeConversation={activeConversation}
               onCreateConversation={handleCreateConversation}
@@ -3144,6 +3374,15 @@ function App() {
         </aside>
         )}
       </div>
+      {isTransitioning && (
+        <div className="workspace-transition-overlay">
+          <div className="workspace-transition-card">
+            <p className="workspace-transition-name">{workspacePath?.split('/').pop()}</p>
+            <div className="workspace-transition-spinner" />
+            <p className="workspace-transition-status">{transitionStatus}</p>
+          </div>
+        </div>
+      )}
     </div>
   )
 }

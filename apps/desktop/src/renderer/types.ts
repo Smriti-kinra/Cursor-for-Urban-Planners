@@ -228,7 +228,7 @@ export type MapAction =
   | { type: 'switch_basemap'; payload: { basemap: string } }
   | { type: 'add_wms_layer'; payload: { url: string; layer_name: string; title: string } }
   | { type: 'add_gee_layer'; payload: { url: string; dataset: string; vis_params: any; title: string } }
-  | { type: 'add_geojson_file'; payload: { path: string; name: string } }
+  | { type: 'add_geojson_file'; payload: { path: string; name: string; color?: string; styleSpec?: any } }
   | {
       type: 'add_scenarios'
       payload: {

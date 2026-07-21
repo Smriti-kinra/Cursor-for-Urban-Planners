@@ -13,15 +13,7 @@ export interface DocumentImage {
   totalPages?: number
 }
 
-interface DocumentViewProps {
-  onImageChange: (img: DocumentImage | null) => void
-  showSidebar?: boolean
-  sidebarWidth?: number
-  onLeftResizeStart?: (e: React.MouseEvent) => void
-  workspacePath: string | null
-}
-
-interface OpenDocument {
+export interface OpenDocument {
   id: string
   filePath: string
   fileName: string
@@ -32,20 +24,34 @@ interface OpenDocument {
   documentImage: DocumentImage | null
 }
 
+interface DocumentViewProps {
+  openDocs: OpenDocument[]
+  setOpenDocs: React.Dispatch<React.SetStateAction<OpenDocument[]>>
+  activeDocId: string | null
+  setActiveDocId: (id: string | null) => void
+  onImageChange: (img: DocumentImage | null) => void
+  showSidebar?: boolean
+  sidebarWidth?: number
+  onLeftResizeStart?: (e: React.MouseEvent) => void
+  workspacePath: string | null
+}
+
 function toLocalFileUrl(absPath: string): string {
   const encoded = absPath.split('/').map((seg) => encodeURIComponent(seg)).join('/')
   return `localfile://${encoded}`
 }
 
 export default function DocumentView({
+  openDocs,
+  setOpenDocs,
+  activeDocId,
+  setActiveDocId,
   onImageChange,
   showSidebar = true,
   sidebarWidth = 260,
   onLeftResizeStart,
   workspacePath,
 }: DocumentViewProps) {
-  const [openDocs, setOpenDocs] = useState<OpenDocument[]>([])
-  const [activeDocId, setActiveDocId] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
   const [pdfRasterError, setPdfRasterError] = useState<string | null>(null)
 
@@ -54,6 +60,34 @@ export default function DocumentView({
   const [indexedDocs, setIndexedDocs] = useState<Record<string, boolean>>({})
   const [indexingDocId, setIndexingDocId] = useState<string | null>(null)
   const [ragError, setRagError] = useState<string | null>(null)
+
+  const loadDocImage = async (doc: OpenDocument): Promise<DocumentImage | null> => {
+    const ext = doc.filePath.split('.').pop()?.toLowerCase() || ''
+    const pdf = ext === 'pdf'
+    try {
+      if (IMAGE_EXTS.includes(ext)) {
+        const base64 = await window.electronAPI.readFileBase64(doc.filePath)
+        if (base64) {
+          return { base64, mimeType: MIME_MAP[ext] || 'image/png', fileName: doc.fileName, filePath: doc.filePath }
+        }
+      } else if (pdf) {
+        const out = await rasterizePdfPage(doc.filePath, doc.pdfPage || 1)
+        if (out) {
+          return {
+            base64: out.base64,
+            mimeType: 'image/png',
+            fileName: doc.fileName,
+            filePath: doc.filePath,
+            page: doc.pdfPage || 1,
+            totalPages: out.totalPages,
+          }
+        }
+      }
+    } catch (e) {
+      console.error('Failed to load doc image:', e)
+    }
+    return null
+  }
 
   const checkRagStatus = async (doc: OpenDocument) => {
     if (!workspacePath) return
@@ -107,12 +141,31 @@ export default function DocumentView({
   }, [activeDocId, workspacePath])
 
   useEffect(() => {
-    if (!workspacePath) {
-      setOpenDocs([])
-      setActiveDocId(null)
+    if (activeDocId && openDocs.length > 0) {
+      const doc = openDocs.find((d) => d.id === activeDocId)
+      if (doc) {
+        if (!doc.documentImage && !loading) {
+          setLoading(true)
+          setPdfRasterError(null)
+          loadDocImage(doc).then((img) => {
+            if (img) {
+              setOpenDocs((prev) =>
+                prev.map((d) => (d.id === activeDocId ? { ...d, documentImage: img } : d))
+              )
+              onImageChange(img)
+            } else {
+              setPdfRasterError('Failed to load document content.')
+            }
+            setLoading(false)
+          })
+        } else if (doc.documentImage) {
+          onImageChange(doc.documentImage)
+        }
+      }
+    } else {
       onImageChange(null)
     }
-  }, [workspacePath, onImageChange])
+  }, [activeDocId, openDocs])
 
   const draggedDocIdRef = useRef<string | null>(null)
   const [dragOverDocId, setDragOverDocId] = useState<string | null>(null)
@@ -265,8 +318,6 @@ export default function DocumentView({
 
   const handleSelectDoc = (id: string) => {
     setActiveDocId(id)
-    const doc = openDocs.find((d) => d.id === id)
-    onImageChange(doc ? doc.documentImage : null)
     setPdfRasterError(null)
   }
 
@@ -276,8 +327,6 @@ export default function DocumentView({
     if (activeDocId === id) {
       const nextActiveId = nextDocs.length > 0 ? nextDocs[0].id : null
       setActiveDocId(nextActiveId)
-      const doc = nextDocs.find((d) => d.id === nextActiveId)
-      onImageChange(doc ? doc.documentImage : null)
     }
     setPdfRasterError(null)
   }

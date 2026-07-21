@@ -31,6 +31,7 @@ class StreetViewService:
         zoom: int = 3,
         title: str | None = None,
         notes: str | None = None,
+        workspace: str | None = None,
     ) -> dict[str, Any]:
         """Download a panorama and save it as an image artifact."""
         meta, data, cache_hit = panorama_jpeg(lat, lng, radius, zoom)
@@ -45,6 +46,7 @@ class StreetViewService:
             file_bytes=data,
             file_ext="jpg",
             meta={**artifact_metadata(meta, notes), "cache_hit": cache_hit},
+            workspace=workspace,
         )
         return {
             "found": True,
@@ -59,6 +61,6 @@ class StreetViewService:
         """Sample points for a road inspection session."""
         return sample_road_points(geometry, interval_m)
 
-    def report(self, title: str, images: list[dict[str, Any]]) -> dict[str, Any]:
+    def report(self, title: str, images: list[dict[str, Any]], workspace: str | None = None) -> dict[str, Any]:
         """Create an editable Markdown report artifact for Street View images."""
-        return create_report_artifact(title, images)
+        return create_report_artifact(title, images, workspace=workspace)

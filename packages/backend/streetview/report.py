@@ -18,7 +18,7 @@ def default_caption(item: dict[str, Any], index: int) -> str:
     return f"Figure {index}. {address}{coords}{suffix}."
 
 
-def create_report_artifact(title: str, images: list[dict[str, Any]]) -> dict[str, Any]:
+def create_report_artifact(title: str, images: list[dict[str, Any]], workspace: str | None = None) -> dict[str, Any]:
     """Create an editable Markdown report containing Street View figures."""
     lines = [f"# {title}", "", f"Generated {datetime.now().strftime('%Y-%m-%d %H:%M')}.", ""]
     for i, item in enumerate(images, start=1):
@@ -45,4 +45,5 @@ def create_report_artifact(title: str, images: list[dict[str, Any]]) -> dict[str
         format="markdown",
         content="\n".join(lines),
         meta={"source": "streetview", "image_count": len(images)},
+        workspace=workspace,
     )

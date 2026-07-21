@@ -22,6 +22,7 @@ class StreetViewImageRequest(BaseModel):
     zoom: int = Field(3, ge=0, le=5)
     title: str | None = None
     notes: str | None = None
+    workspace: str | None = None
 
 
 class RoadInspectionRequest(BaseModel):
@@ -32,6 +33,7 @@ class RoadInspectionRequest(BaseModel):
 class StreetViewReportRequest(BaseModel):
     title: str = "Street View Report"
     images: list[dict[str, Any]]
+    workspace: str | None = None
 
 
 @router.get("/meta")
@@ -92,6 +94,7 @@ async def streetview_image(req: StreetViewImageRequest):
             zoom=req.zoom,
             title=req.title,
             notes=req.notes,
+            workspace=req.workspace,
         )
     except Exception as e:
         return JSONResponse(
@@ -116,7 +119,7 @@ async def road_inspection(req: RoadInspectionRequest):
 async def streetview_report(req: StreetViewReportRequest):
     """Create an editable report artifact from Street View images."""
     try:
-        return await run_in_threadpool(service.report, req.title, req.images)
+        return await run_in_threadpool(service.report, req.title, req.images, workspace=req.workspace)
     except Exception as e:
         return JSONResponse(
             status_code=422,

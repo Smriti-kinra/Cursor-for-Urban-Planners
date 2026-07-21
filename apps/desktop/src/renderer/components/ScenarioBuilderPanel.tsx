@@ -62,9 +62,10 @@ interface ScenarioBuilderPanelProps {
   mapBounds?: { south: number; west: number; north: number; east: number } | null
   /** Called when a report is saved to Artifacts so the panel can navigate there */
   onOpenArtifacts?: () => void
+  workspacePath?: string | null
 }
 
-export default function ScenarioBuilderPanel({ mapBounds, onOpenArtifacts }: ScenarioBuilderPanelProps) {
+export default function ScenarioBuilderPanel({ mapBounds, onOpenArtifacts, workspacePath }: ScenarioBuilderPanelProps) {
   // ── Mode toggle: Generate or Compare ──
   const [mode, setMode] = useState<'generate' | 'compare'>('generate')
 
@@ -184,6 +185,9 @@ export default function ScenarioBuilderPanel({ mapBounds, onOpenArtifacts }: Sce
       form.append('artifact_type', 'report')
       form.append('format', 'markdown')
       form.append('content', markdown)
+      if (workspacePath) {
+        form.append('workspace', workspacePath)
+      }
       const res = await fetch(`${ARTIFACTS_API}/upload`, { method: 'POST', body: form })
       if (res.ok) setSavedToArtifacts(true)
     } catch {
