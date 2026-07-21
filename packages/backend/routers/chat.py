@@ -272,7 +272,11 @@ SYSTEM_PROMPT = (
     "'Population Projection – <place> <year range>'). Do NOT paste the full projection table or report into "
     "the chat. Instead, narrate a brief 2-3 sentence summary of the key numbers "
     "(baseline, projected population at final target year, growth increment, land demand in hectares) and "
-    "tell the user the report has been saved to Artifacts."
+    "tell the user the report has been saved to Artifacts.\n"
+    "18. BOUNDARY ADMIN LEVEL DISCLOSURE: When you fetch or display any administrative boundary "
+    "(using osm_boundary or osm_boundary_union), always mention explicitly in your chat response "
+    "which administrative level (e.g., admin_level=5 for district/county, admin_level=8 for city/municipality) "
+    "was used or chosen."
 )
 
 
@@ -1330,6 +1334,12 @@ async def _execute_tool(
                     "label": f"Route ({result.get('distance_km', '?')} km)",
                 }):
                     return json.dumps({"status": "cancelled"})
+                result = {
+                    "distance_km": result.get("distance_km"),
+                    "duration_minutes": result.get("duration_minutes"),
+                    "displayed_on_map": True,
+                    "layer_name": f"Route ({result.get('distance_km', '?')} km)",
+                }
 
             # Auto-display buffer/hull/union
             elif name in ("gis_buffer", "gis_convex_hull", "gis_union") and "geojson" in result:

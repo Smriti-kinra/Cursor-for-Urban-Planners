@@ -770,6 +770,7 @@ class NetworkServer:
 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "summary": {
                     "total_nodes": total_nodes,
                     "total_edges": total_edges,
@@ -891,6 +892,7 @@ class NetworkServer:
 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "route_stats": {
                     "total_distance_meters": round(path_length, 1),
                     "estimated_travel_time_mins": round((path_length / 11.1) / 60.0, 1),
@@ -1014,6 +1016,7 @@ class NetworkServer:
 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "route_stats": {
                     "total_distance_meters": round(path_length, 1),
                     "estimated_travel_time_mins": round((path_length / 8.3) / 60.0, 1),
@@ -1155,6 +1158,7 @@ class NetworkServer:
 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "total_stops": len(waypoints),
                 "total_distance_m": round(total_dist, 1),
                 "total_est_time_mins": round((total_dist / 11.1) / 60.0, 1),
@@ -1485,6 +1489,7 @@ out skel qt;
                 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "features_count": len(features),
                 "output_layer": str(target_path),
                 "title": title
@@ -1670,6 +1675,7 @@ out skel qt;
 
             return {
                 "status": "success",
+                "displayed_on_map": True,
                 "trips_assigned": assigned_trips,
                 "flows_routed": routed_count,
                 "flows_failed": no_path_count,
@@ -1684,7 +1690,3 @@ out skel qt;
 
         except Exception as e:
             return {"error": f"Traffic assignment failed: {str(e)}"}
-
-
-
-

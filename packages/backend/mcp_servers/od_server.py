@@ -425,6 +425,7 @@ class ODServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "flows_displayed": len(features),
             "trip_range": {
                 "min": min_trips_actual,

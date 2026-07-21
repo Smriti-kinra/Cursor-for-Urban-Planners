@@ -266,6 +266,7 @@ class DatameetServer:
                 }))
             return {
                 "status": "already_cached",
+                "displayed_on_map": True,
                 "dataset_id": dataset_id,
                 "title": meta["title"],
                 "path": str(target_file.resolve()),
@@ -297,6 +298,7 @@ class DatameetServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "dataset_id": dataset_id,
             "title": meta["title"],
             "description": meta["description"],

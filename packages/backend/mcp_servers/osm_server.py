@@ -754,14 +754,15 @@ out skel qt;
         """Pick the feature whose shapeName best matches `name` (case-insensitive).
 
         Exact match wins. Otherwise prefer the candidate whose name length is
-        closest to the query — substrings on the right end ("Punjab" matches
-        "Punjab" before "Punjab and Sind"). Returns None if no candidate
-        contains or is contained by the query.
+        closest to the query — matching whole words. Returns None if no candidate
+        is a whole-word match.
         """
+        import re
         target = name.lower().strip()
         if not target:
             return None
-        best: tuple[int, dict] | None = None
+        
+        # 1. Look for exact match
         for feat in features:
             props = feat.get("properties") or {}
             candidate = (props.get("shapeName") or props.get("boundaryName") or "").strip()
@@ -770,7 +771,20 @@ out skel qt;
             cand = candidate.lower()
             if cand == target:
                 return feat
-            if target in cand or cand in target:
+
+        # 2. Look for whole-word substring match
+        best: tuple[int, dict] | None = None
+        for feat in features:
+            props = feat.get("properties") or {}
+            candidate = (props.get("shapeName") or props.get("boundaryName") or "").strip()
+            if not candidate:
+                continue
+            cand = candidate.lower()
+            
+            pattern_cand = r'\b' + re.escape(cand) + r'\b'
+            pattern_target = r'\b' + re.escape(target) + r'\b'
+            
+            if re.search(pattern_cand, target) or re.search(pattern_target, cand):
                 score = abs(len(cand) - len(target))
                 if best is None or score < best[0]:
                     best = (score, feat)

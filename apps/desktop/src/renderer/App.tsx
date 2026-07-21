@@ -90,6 +90,34 @@ function isPointOnlyCollection(data: FeatureCollection): boolean {
   })
 }
 
+function extractLineEndpoints(features: Feature[]): { start_point?: [number, number]; end_point?: [number, number] } {
+  for (const f of features) {
+    const g = f.geometry
+    if (g && (g.type === 'LineString' || g.type === 'MultiLineString') && 'coordinates' in g) {
+      const coords = g.coordinates
+      if (g.type === 'LineString' && Array.isArray(coords) && coords.length >= 2) {
+        const start = coords[0] as [number, number]
+        const end = coords[coords.length - 1] as [number, number]
+        if (Array.isArray(start) && start.length >= 2 && Array.isArray(end) && end.length >= 2) {
+          return { start_point: start, end_point: end }
+        }
+      } else if (g.type === 'MultiLineString' && Array.isArray(coords) && coords.length > 0) {
+        const firstLine = coords[0]
+        const lastLine = coords[coords.length - 1]
+        if (Array.isArray(firstLine) && firstLine.length >= 2 && Array.isArray(lastLine) && lastLine.length >= 2) {
+          const start = firstLine[0] as [number, number]
+          const end = lastLine[lastLine.length - 1] as [number, number]
+          if (Array.isArray(start) && start.length >= 2 && Array.isArray(end) && end.length >= 2) {
+            return { start_point: start, end_point: end }
+          }
+        }
+      }
+    }
+  }
+  return {}
+}
+
+
 function compactLayerGroups(layers: GeoJSONLayer[]): GeoJSONLayer[] {
   const counts = new Map<string, number>()
   layers.forEach((layer) => {
@@ -2200,7 +2228,7 @@ function App() {
           return sum + 10
         }, 0)
 
-        if (featureCount <= 5 && totalCoords <= 200) {
+        if (featureCount <= 5 && totalCoords <= 1000) {
           geometry_data = features.map((f) => ({
             type: f.geometry?.type,
             coordinates: f.geometry && 'coordinates' in f.geometry ? f.geometry.coordinates : undefined,
@@ -2232,6 +2260,8 @@ function App() {
           ? features.map((f) => f.properties || {})
           : undefined
 
+        const endpoints = extractLineEndpoints(features)
+
         return {
           name: l.name,
           filePath: l.filePath,
@@ -2247,6 +2277,7 @@ function App() {
           ...(l.groupName !== undefined ? { groupName: l.groupName } : {}),
           ...(geometry_data ? { geometry_data } : {}),
           ...(features_data ? { features_data } : {}),
+          ...endpoints,
           style,
         }
 

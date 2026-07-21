@@ -922,6 +922,7 @@ class UtilityServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "layer_id": layer_id,
             "layer_name": overlay_name,
             "file_path": abs_saved_path,
@@ -1255,6 +1256,7 @@ class UtilityServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "layer_id": layer_id,
             "layer_name": overlay_name,
             "file_path": abs_saved_path,
@@ -1400,6 +1402,7 @@ class UtilityServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "layer_name": layer_name,
             "geojson": fc
         }

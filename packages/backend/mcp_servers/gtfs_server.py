@@ -276,6 +276,7 @@ class GTFSServer:
 
         return {
             "status": "success",
+            "displayed_on_map": True,
             "summary": {
                 "stops": len(stop_features),
                 "routes": len(route_map),

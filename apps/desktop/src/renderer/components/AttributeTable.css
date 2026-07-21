@@ -14,9 +14,10 @@
 
 .attr-header {
   display: flex;
+  flex-wrap: wrap;
   align-items: center;
   justify-content: space-between;
-  gap: 12px;
+  gap: 8px;
 }
 
 .attr-title-group {
@@ -54,7 +55,9 @@
   display: flex;
   align-items: center;
   gap: 6px;
-  max-width: 240px;
+  flex: 1 1 auto;
+  min-width: 150px;
+  justify-content: flex-end;
 }
 
 .attr-header-input {

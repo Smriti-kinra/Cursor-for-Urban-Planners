@@ -3,6 +3,7 @@ import type { Feature } from 'geojson'
 import { GeoJSONLayer, LayerStyleSpec, SelectedFeatureEntry } from '../types'
 import SymbologyPanel from './SymbologyPanel'
 import AttributeTable from './AttributeTable'
+import ErrorBoundary from './ErrorBoundary'
 import './LayerPanel.css'
 
 interface LayerPanelProps {
@@ -430,6 +431,8 @@ export default function LayerPanel({
         onDragOver={handleDragOver}
         onDrop={handleDrop}
         onDragEnd={handleDragEnd}
+        selectedFeatures={selectedFeatures}
+        onSelectFeature={onSelectFeature}
       />
     )
   }
@@ -843,6 +846,8 @@ interface LayerItemRowProps {
   onDragOver: (id: string, e: React.DragEvent) => void
   onDrop: (id: string, e: React.DragEvent) => void
   onDragEnd: () => void
+  selectedFeatures?: SelectedFeatureEntry[]
+  onSelectFeature?: (entry: SelectedFeatureEntry | null, shiftKey: boolean) => void
 }
 
 function LayerItemRow({
@@ -869,6 +874,8 @@ function LayerItemRow({
   onDragOver,
   onDrop,
   onDragEnd,
+  selectedFeatures,
+  onSelectFeature,
 }: LayerItemRowProps) {
   const isStyleActive = activeStyleId === layer.id
   const isAttrActive = activeAttrId === layer.id
@@ -1026,7 +1033,7 @@ function LayerItemRow({
       </button>
 
       {isStyleActive && onStyleChange && (
-        <div className={`layer-popup-container ${showAbove ? 'popup-above' : 'popup-below'}`}>
+        <div className={`layer-popup-container layer-symbology-popup ${showAbove ? 'popup-above' : 'popup-below'}`}>
           <SymbologyPanel
             layer={layer}
             onChange={onStyleChange}
@@ -1037,14 +1044,16 @@ function LayerItemRow({
       )}
 
       {isAttrActive && onAttributesChange && (
-        <div className={`layer-popup-container ${showAbove ? 'popup-above' : 'popup-below'}`}>
-          <AttributeTable
-            layer={layer}
-            onChange={onAttributesChange}
-            onClose={() => onAttributes?.(layer.id)}
-            selectedFeatures={selectedFeatures || []}
-            onSelectFeature={onSelectFeature || (() => {})}
-          />
+        <div className={`layer-popup-container layer-attributes-popup ${showAbove ? 'popup-above' : 'popup-below'}`}>
+          <ErrorBoundary label="Attribute Table">
+            <AttributeTable
+              layer={layer}
+              onChange={onAttributesChange}
+              onClose={() => onAttributes?.(layer.id)}
+              selectedFeatures={selectedFeatures || []}
+              onSelectFeature={onSelectFeature || (() => {})}
+            />
+          </ErrorBoundary>
         </div>
       )}
     </div>

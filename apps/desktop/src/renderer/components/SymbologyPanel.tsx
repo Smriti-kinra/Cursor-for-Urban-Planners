@@ -278,12 +278,13 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
   // ── Helpers for base color tint updates ──
   const applyBaseColorToCategorized = (baseColor: string, currentSpec: LayerStyleSpec) => {
     if (!currentSpec.categories || currentSpec.categories.length === 0) return currentSpec
-    const { h, s, l } = hexToHsl(baseColor)
-    const n = currentSpec.categories.length
     const nextCategories = currentSpec.categories.map((c, i) => {
-      // Step hue evenly starting from base color's hue
+      if (currentSpec.categories!.length === 1) {
+        return { ...c, color: baseColor }
+      }
+      const { h, s, l } = hexToHsl(baseColor)
+      const n = currentSpec.categories!.length
       const stepH = (h + (i * (360 / n))) % 360
-      // Clamp lightness for readability on mapping background (between 40% and 70%)
       const stepL = Math.max(40, Math.min(70, l))
       const color = hslToHex(stepH, s, stepL)
       return { ...c, color }
@@ -341,9 +342,12 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
     const values = features.map((f) => String(f.properties?.[property] ?? ''))
     const baseCats = buildCategories(values, property, rampName)
     const seedColor = layer.color || '#3b82f6'
-    const { h, s, l } = hexToHsl(seedColor)
     const n = baseCats.length
     const categories = baseCats.map((c, i) => {
+      if (baseCats.length === 1) {
+        return { ...c, color: seedColor }
+      }
+      const { h, s, l } = hexToHsl(seedColor)
       const stepH = (h + (i * (360 / n))) % 360
       const stepL = Math.max(40, Math.min(70, l))
       return { ...c, color: hslToHex(stepH, s, stepL) }
@@ -366,6 +370,9 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
       ...spec,
       categories: spec.categories.map((c) => (c.value === value ? { ...c, color } : c)),
     })
+    if (spec.categories.length === 1) {
+      onUpdateLayer?.(layer.id, { color, fillColor: color, lineColor: color })
+    }
   }
 
   // ── Graduated ──
@@ -650,7 +657,7 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
           step="0.05"
           value={spec.opacity ?? layer.opacity ?? 0.8}
           onChange={(e) => emit({ ...spec, opacity: parseFloat(e.target.value) })}
-          style={{ flex: 1 }}
+          style={{ flex: 1, cursor: 'pointer' }}
         />
         <span style={{ minWidth: '32px', textAlign: 'right', fontSize: '11px' }}>
           {Math.round((spec.opacity ?? layer.opacity ?? 0.8) * 100)}%
@@ -667,36 +674,12 @@ export default function SymbologyPanel({ layer, onChange, onClose, onUpdateLayer
           step="0.5"
           value={spec.lineWidth ?? layer.lineWidth ?? 2}
           onChange={(e) => emit({ ...spec, lineWidth: parseFloat(e.target.value) })}
-          style={{ flex: 1 }}
+          style={{ flex: 1, cursor: 'pointer' }}
         />
         <span style={{ minWidth: '32px', textAlign: 'right', fontSize: '11px' }}>
           {spec.lineWidth ?? layer.lineWidth ?? 2}px
         </span>
       </div>
-
-      {/* Distinct Fill and Stroke Colors for Simple Mode */}
-      {spec.mode === 'simple' && (
-        <div className="sym-row" style={{ justifyContent: 'flex-start', gap: '16px' }}>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Fill Color</label>
-            <input
-              type="color"
-              value={spec.fillColor ?? layer.fillColor ?? layer.color ?? '#3b82f6'}
-              onChange={(e) => emit({ ...spec, fillColor: e.target.value })}
-              style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
-            />
-          </div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-            <label className="sym-label" style={{ fontSize: '11px', margin: 0 }}>Stroke Color</label>
-            <input
-              type="color"
-              value={spec.strokeColor ?? layer.lineColor ?? layer.color ?? '#3b82f6'}
-              onChange={(e) => emit({ ...spec, strokeColor: e.target.value })}
-              style={{ width: '22px', height: '18px', border: 'none', background: 'none', cursor: 'pointer', padding: 0 }}
-            />
-          </div>
-        </div>
-      )}
       {/* Base Color & Preset Tint Swatches - ALWAYS VISIBLE in 1 single row */}
       <div className="sym-base-color-row" style={{ marginTop: '8px', paddingTop: '8px', borderTop: '1px solid var(--border)', display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '8px' }}>
         <div className="sym-preset-row" style={{ display: 'flex', alignItems: 'center', gap: '5px', flexWrap: 'nowrap' }}>

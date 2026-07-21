@@ -149,7 +149,7 @@ class WMSServer:
                         "the map tiles will likely display as blank/empty. Please verify that the "
                         "WMS URL and layer name are correct and that the server is online."
                     )
-                return {"status": "success", "message": msg}
+                return {"status": "success", "displayed_on_map": True, "message": msg}
 
 
             except Exception as e:
